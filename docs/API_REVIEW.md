@@ -199,3 +199,16 @@ The old `templates/index.html` and `index` view are kept until the React app rep
 1. **What gets announced is set per account.** New `MonitoredAccount` fields: `announce_posts` (default on), `announce_reposts` (default on), `announce_replies` (default off). They are set in the Add and Edit account panel. Turning a type on later only affects new items. Existing accounts get the defaults through the migration.
 2. **Activity retention:** 30 days, capped at 10,000 events.
 3. **Failed sends** retry automatically: up to 3 more tries on later checks within 24 hours, each one logged.
+
+---
+
+## 8. Implementation status
+
+- **Step 1 (done):** initial migrations committed; `setup.bat`/`start.bat` apply them with `--fake-initial`.
+- **Step 2 (done):** see `bluesky_monitor/locks.py`, `bluesky.py`, `poller.py`, `scheduler.py`, migration `0002`.
+  - Checker lease and per-account lock are conditional database UPDATEs with expiry, so they hold across processes and recover from crashes.
+  - `runserver` starts the checker only in its serving process; `manage.py run_scheduler` runs it standalone; a second checker stays on standby.
+  - Posts are claimed before sending (unique per account) and move through `pending → sending → sent`, or `retry` (after 1, 5 and 30 min) and then `failed` after 4 attempts or 24 hours. A send interrupted by a crash is retried after 2 minutes.
+  - **Known limit:** if a process dies after Discord stored a message but before it is marked sent, that one post is sent a second time after the 2-minute stale timeout. Discord webhooks have no idempotency key, so this narrow window can't be closed completely; `?wait=true` keeps it as small as possible.
+  - One shared Bluesky session per cycle, saved for every process; refreshes are saved; expired sessions log in again once; a rejected password backs off for 10 to 60 minutes.
+  - Existing `SeenPost` rows are backfilled as `sent`, so nothing old is announced again.

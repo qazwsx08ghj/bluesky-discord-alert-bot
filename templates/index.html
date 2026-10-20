@@ -460,7 +460,8 @@
     btn.disabled = false;
     btn.textContent = orig;
 
-    if (!ok) { toast('Check failed — is Bluesky login set in Settings?', 'err'); return; }
+    if (!ok) { toast(data.message || 'Check failed — is Bluesky login set in Settings?', 'err'); return; }
+    if (data.error) { toast(data.error + ' Check your login in Settings.', 'err'); loadAccounts(); return; }
 
     if (data.was_first_poll) {
       toast('Synced! Now watching for new posts from this account.', 'info');

@@ -8,6 +8,7 @@ from unittest import mock
 from django.test import TestCase, override_settings
 from rest_framework.test import APITestCase
 
+from discord_alerts.sender import DeliveryResult
 from .models import MonitoredAccount, SeenPost
 from .poller import poll_account, poll_all_active_accounts
 
@@ -15,28 +16,35 @@ DEFAULT_HOOK = "https://discord.com/api/webhooks/1/default"
 CUSTOM_HOOK = "https://discord.com/api/webhooks/2/custom"
 
 
-def feed_item(rkey, text="hello"):
-    uri = f"at://did:plc:abc/app.bsky.feed.post/{rkey}"
-    return SimpleNamespace(post=SimpleNamespace(uri=uri, cid=f"cid-{rkey}", record=SimpleNamespace(text=text)))
+def feed_item(rkey, text="hello", author="artist.bsky.social", did="did:plc:abc"):
+    uri = f"at://{did}/app.bsky.feed.post/{rkey}"
+    return SimpleNamespace(post=SimpleNamespace(
+        uri=uri, cid=f"cid-{rkey}", record=SimpleNamespace(text=text), author=SimpleNamespace(handle=author)))
 
 
-def fake_client(*items):
-    """A Bluesky client whose author feed returns items newest first, like the real API."""
-    client = mock.Mock()
-    client.get_author_feed.return_value = SimpleNamespace(feed=list(items))
-    return client
+class FakeSession:
+    """Stands in for SharedSession: returns items newest first, like the real API."""
+
+    def __init__(self, *items, error=None):
+        self.items, self.error, self.calls = list(items), error, 0
+
+    def author_feed(self, actor, cursor=None, limit=30):
+        self.calls += 1
+        if self.error:
+            raise self.error
+        return SimpleNamespace(feed=self.items, cursor=None)
 
 
 @override_settings(DISCORD_WEBHOOK_URL=DEFAULT_HOOK, BLUESKY_HANDLE="me.bsky.social", BLUESKY_PASSWORD="pw")
 class PollerTests(TestCase):
     def setUp(self):
         self.account = MonitoredAccount.objects.create(handle="artist.bsky.social", display_name="Artist")
-        send = mock.patch("bluesky_monitor.poller.send_discord_alert", return_value=True)
+        send = mock.patch("discord_alerts.sender.deliver_alert", return_value=DeliveryResult(True))
         self.send = send.start()
         self.addCleanup(send.stop)
 
     def poll_with(self, *items):
-        with mock.patch("bluesky_monitor.poller._get_client", return_value=fake_client(*items)):
+        with mock.patch("bluesky_monitor.poller._new_session", return_value=FakeSession(*items)):
             return poll_account(self.account)
 
     def test_first_poll_records_posts_without_announcing(self):
@@ -91,7 +99,7 @@ class PollerTests(TestCase):
         self.assertTrue(SeenPost.objects.filter(post_uri__endswith="/a").exists())
 
     def test_feed_error_returns_zero_and_changes_nothing(self):
-        with mock.patch("bluesky_monitor.poller._get_client", side_effect=RuntimeError("login failed")):
+        with mock.patch("bluesky_monitor.poller._new_session", return_value=FakeSession(error=RuntimeError("down"))):
             self.assertEqual(poll_account(self.account), 0)
         self.account.refresh_from_db()
         self.assertFalse(self.account.first_poll_done)
@@ -125,6 +133,10 @@ class AccountApiTests(APITestCase):
     def test_list_is_newest_first(self):
         for h in ("one.bsky.social", "two.bsky.social"):
             self.client.post(self.url, {"handle": h}, format="json")
+        # created in the same instant on fast machines; make the order unambiguous
+        from datetime import timedelta
+        two = MonitoredAccount.objects.get(handle="two.bsky.social")
+        MonitoredAccount.objects.filter(pk=two.pk).update(created_at=two.created_at + timedelta(seconds=1))
         listed = self.client.get(self.url).data["results"]
         self.assertEqual([a["handle"] for a in listed], ["two.bsky.social", "one.bsky.social"])
 

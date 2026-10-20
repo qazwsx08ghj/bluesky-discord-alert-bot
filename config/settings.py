@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -56,7 +57,8 @@ WSGI_APPLICATION = "config.wsgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "NAME": os.getenv("DATABASE_PATH") or BASE_DIR / "db.sqlite3",
+        "OPTIONS": {"timeout": 20},
     }
 }
 
@@ -87,3 +89,22 @@ BLUESKY_HANDLE = os.getenv("BLUESKY_HANDLE", "")
 BLUESKY_PASSWORD = os.getenv("BLUESKY_PASSWORD", "")
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 POLL_INTERVAL_MINUTES = int(os.getenv("POLL_INTERVAL_MINUTES", "5"))
+
+# Checker coordination (see bluesky_monitor/locks.py and poller.py)
+SCHEDULER_LEASE_SECONDS = int(os.getenv("SCHEDULER_LEASE_SECONDS", "90"))
+SCHEDULER_HEARTBEAT_SECONDS = int(os.getenv("SCHEDULER_HEARTBEAT_SECONDS", "30"))
+ACCOUNT_LOCK_SECONDS = int(os.getenv("ACCOUNT_LOCK_SECONDS", "300"))
+SEND_STALE_SECONDS = int(os.getenv("SEND_STALE_SECONDS", "120"))
+SEND_MAX_ATTEMPTS = int(os.getenv("SEND_MAX_ATTEMPTS", "4"))  # first try + 3 retries
+SEND_RETRY_WINDOW_HOURS = int(os.getenv("SEND_RETRY_WINDOW_HOURS", "24"))
+
+_LOG_LEVEL = os.getenv("BOT_LOG_LEVEL", "WARNING" if "test" in sys.argv else "INFO")
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "loggers": {
+        "bluesky_monitor": {"handlers": ["console"], "level": _LOG_LEVEL},
+        "discord_alerts": {"handlers": ["console"], "level": _LOG_LEVEL},
+    },
+}
