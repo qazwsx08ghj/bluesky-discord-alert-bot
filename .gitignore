@@ -1,0 +1,37 @@
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+
+# Databases and backups (hold your accounts, posts and settings)
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+backups/
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Frontend build output (added in a later step)
+node_modules/
+frontend/dist/
+
+# Design tool runtime files and screenshots
+.impeccable/questions/
+.impeccable/review/
+.impeccable/mocks/
+.impeccable/build/
+
+# Editors and OS
+.vscode/
+.idea/
+*.log
+Thumbs.db
+.DS_Store
