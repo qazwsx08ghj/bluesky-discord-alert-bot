@@ -14,6 +14,12 @@ pip install -r requirements.txt
 
 echo.
 echo [3/4] Setting up database...
+python manage.py backup_db --if-pending
+if errorlevel 1 (
+  echo The database backup failed, so the database was not changed.
+  pause
+  exit /b 1
+)
 python manage.py migrate --fake-initial
 
 echo.

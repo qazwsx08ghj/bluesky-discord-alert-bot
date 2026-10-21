@@ -13,6 +13,7 @@ import os
 import signal
 import socket
 import uuid
+from datetime import timedelta
 
 from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -33,10 +34,37 @@ POLL_JOB_ID = "poll_bluesky"
 _scheduler = None
 
 
+def _interval_minutes() -> int:
+    from botconfig import store
+
+    return store.poll_interval_minutes()
+
+
+def apply_interval(scheduler=None) -> bool:
+    """Reschedule the check job if the saved interval changed. Returns True if it did."""
+    scheduler = scheduler or _scheduler
+    if scheduler is None:
+        return False
+    job = scheduler.get_job(POLL_JOB_ID)
+    minutes = _interval_minutes()
+    if job is None or job.trigger.interval == timedelta(minutes=minutes):
+        return False
+    scheduler.reschedule_job(POLL_JOB_ID, trigger=IntervalTrigger(minutes=minutes))
+    logger.info("Check interval changed to %d minute(s)", minutes)
+    return True
+
+
 def heartbeat(instance_id: str = INSTANCE_ID) -> bool:
-    """Take or renew the lease. Returns True while this instance is the active checker."""
+    """Take or renew the lease, and pick up a changed check interval.
+
+    Returns True while this instance is the active checker.
+    """
     close_old_connections()
     held = locks.acquire_scheduler_lease(instance_id)
+    try:
+        apply_interval()
+    except Exception:  # never let a settings problem stop the heartbeat
+        logger.exception("Couldn't apply the check interval")
     if held and _scheduler is not None:
         job = _scheduler.get_job(POLL_JOB_ID)
         if job is not None and job.next_run_time:
@@ -75,7 +103,7 @@ def _build(scheduler_cls, instance_id: str):
     )
     scheduler.add_job(
         run_cycle, kwargs={"instance_id": instance_id},
-        trigger=IntervalTrigger(minutes=settings.POLL_INTERVAL_MINUTES),
+        trigger=IntervalTrigger(minutes=_interval_minutes()),
         id=POLL_JOB_ID, name="Poll all active Bluesky accounts",
         max_instances=1, coalesce=True, misfire_grace_time=60,
     )
@@ -83,12 +111,18 @@ def _build(scheduler_cls, instance_id: str):
 
 
 def _mark_started(instance_id: str):
+    from botconfig import store
+
+    try:
+        store.startup_check()
+    except Exception:  # the checker still starts; the problem is in the log
+        logger.exception("Settings check at start failed")
     held = locks.acquire_scheduler_lease(instance_id)
     if held:
         SchedulerState.objects.filter(pk=1).update(started_at=timezone.now())
     logger.info(
         "Bluesky poller started (%s) - interval: %d minute(s)%s",
-        instance_id, settings.POLL_INTERVAL_MINUTES, "" if held else " - standby, another checker is active",
+        instance_id, _interval_minutes(), "" if held else " - standby, another checker is active",
     )
 
 

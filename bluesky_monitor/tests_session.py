@@ -8,6 +8,7 @@ from atproto_client.client.session import SessionEvent
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
+from botconfig import store
 from . import bluesky, poller
 from .bluesky import BlueskyLoginError, BlueskyUnavailable, SharedSession
 from .models import BlueskySessionState, MonitoredAccount
@@ -148,14 +149,14 @@ class SharedSessionTests(TestCase):
         FakeClient.login_errors = [BAD_PASSWORD]
         with self.assertRaises(BlueskyLoginError):
             SharedSession().author_feed("a")
-        with override_settings(BLUESKY_PASSWORD="new-app-pw"):
-            SharedSession().author_feed("a")
+        store.save({"bluesky_password": "new-app-pw"})  # saved in the panel; no restart
+        SharedSession().author_feed("a")
         self.assertEqual(self.password_logins(), 2)
 
     def test_saved_session_is_not_used_for_different_credentials(self):
         SharedSession().author_feed("a")
-        with override_settings(BLUESKY_HANDLE="other.bsky.social"):
-            SharedSession().author_feed("a")
+        store.save({"bluesky_handle": "other.bsky.social"})
+        SharedSession().author_feed("a")
         self.assertEqual(self.password_logins(), 2)
 
     def test_network_failure_is_temporary_and_keeps_the_session(self):

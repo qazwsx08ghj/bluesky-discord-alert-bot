@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT))
 os.chdir(ROOT)
 os.environ["DJANGO_SETTINGS_MODULE"] = "config.settings"
 os.environ["SCHEDULER_IN_WEB"] = "0"
+os.environ["SETTINGS_ENV_MIRROR_PATH"] = ""  # never touch the real .env
 
 db_file, action, *args = sys.argv[1:]
 

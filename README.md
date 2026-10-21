@@ -215,10 +215,10 @@ That account's posts will now go to its own channel, while all others go to the 
 ## Troubleshooting
 
 **The bot window shows an error about `BLUESKY_HANDLE`**
-→ You haven't filled in the `.env` file yet. Go back to Step 5.
+→ The bot's Bluesky login isn't set up yet. Open the control panel's **Settings** tab and enter your handle and App Password. (On the very first start the bot copies them from `.env`, Step 5.)
 
 **The bot window shows "Invalid identifier or password"**
-→ Your Bluesky handle or App Password is wrong. Double-check both in `.env`. Make sure you used the App Password from Step 3, not your real Bluesky password.
+→ Your Bluesky handle or App Password is wrong. Enter both again in the control panel's **Settings** tab. Make sure you used the App Password from Step 3, not your real Bluesky password.
 
 **Nothing appears in Discord after adding an account**
 → This is normal for the very first check — old posts are ignored. Wait for the next poll (up to 5 minutes) after a new post is made on that Bluesky account.
@@ -230,10 +230,13 @@ That account's posts will now go to its own channel, while all others go to the 
 → Python wasn't added to PATH during installation. Uninstall Python and reinstall it, making sure to tick **"Add Python to PATH"** on the first screen.
 
 **I want to reset everything**
-→ Delete the file `db.sqlite3` in the project folder, then run `setup.bat` again.
+→ Delete the file `db.sqlite3` in the project folder, then run `setup.bat` again. The settings are then copied from `.env` again, which always holds the last saved settings.
 
 **I want to change how often the bot checks for new posts**
-→ Open `.env` in Notepad, change the number in `POLL_INTERVAL_MINUTES=5`, save, and restart the bot.
+→ Change it in the control panel's **Settings** tab. It takes effect within a minute; no restart is needed.
+
+**I changed `.env` but nothing happened**
+→ After the first start, settings are saved in the bot's database and changed in the control panel. Edits to `.env` are ignored (the bot window says so). To load the `.env` values anyway, run `python manage.py import_env_settings --force` in the project's Command Prompt.
 
 ---
 

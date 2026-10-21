@@ -20,6 +20,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "django_apscheduler",
+    "botconfig",
     "bluesky_monitor",
     "discord_alerts",
 ]
@@ -85,10 +86,25 @@ REST_FRAMEWORK = {
 APSCHEDULER_DATETIME_FORMAT = "N j, Y, f:s a"
 APSCHEDULER_RUN_NOW_TIMEOUT = 25
 
-BLUESKY_HANDLE = os.getenv("BLUESKY_HANDLE", "")
-BLUESKY_PASSWORD = os.getenv("BLUESKY_PASSWORD", "")
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
-POLL_INTERVAL_MINUTES = int(os.getenv("POLL_INTERVAL_MINUTES", "5"))
+_RUNNING_TESTS = len(sys.argv) > 1 and sys.argv[1] == "test"
+
+# Bot settings live in the database since step 3 (botconfig/store.py). These .env values
+# are read only once, to fill the database the first time. Edits here are ignored after that.
+# Tests never see the real values; they set their own.
+def _legacy(key, default=""):
+    return default if _RUNNING_TESTS else os.getenv(key, default)
+
+
+BLUESKY_HANDLE = _legacy("BLUESKY_HANDLE")
+BLUESKY_PASSWORD = _legacy("BLUESKY_PASSWORD")
+DISCORD_WEBHOOK_URL = _legacy("DISCORD_WEBHOOK_URL")
+POLL_INTERVAL_MINUTES = _legacy("POLL_INTERVAL_MINUTES", "5")
+
+# Saved settings are also copied into this .env file so older versions keep working after a
+# rollback. Temporary; removed in step 10 (see docs/SETTINGS_MIGRATION.md). Empty = off.
+# Off while running tests, so tests can never touch the real .env.
+SETTINGS_ENV_MIRROR_PATH = os.environ.get(
+    "SETTINGS_ENV_MIRROR_PATH", "" if _RUNNING_TESTS else str(BASE_DIR / ".env"))
 
 # Checker coordination (see bluesky_monitor/locks.py and poller.py)
 SCHEDULER_LEASE_SECONDS = int(os.getenv("SCHEDULER_LEASE_SECONDS", "90"))
@@ -98,7 +114,7 @@ SEND_STALE_SECONDS = int(os.getenv("SEND_STALE_SECONDS", "120"))
 SEND_MAX_ATTEMPTS = int(os.getenv("SEND_MAX_ATTEMPTS", "4"))  # first try + 3 retries
 SEND_RETRY_WINDOW_HOURS = int(os.getenv("SEND_RETRY_WINDOW_HOURS", "24"))
 
-_LOG_LEVEL = os.getenv("BOT_LOG_LEVEL", "WARNING" if "test" in sys.argv else "INFO")
+_LOG_LEVEL = os.getenv("BOT_LOG_LEVEL", "WARNING" if _RUNNING_TESTS else "INFO")
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -106,5 +122,6 @@ LOGGING = {
     "loggers": {
         "bluesky_monitor": {"handlers": ["console"], "level": _LOG_LEVEL},
         "discord_alerts": {"handlers": ["console"], "level": _LOG_LEVEL},
+        "botconfig": {"handlers": ["console"], "level": _LOG_LEVEL},
     },
 }

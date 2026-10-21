@@ -16,7 +16,6 @@ from datetime import timedelta
 from atproto import Client
 from atproto_client import exceptions as at_exc
 from atproto_client.client.session import SessionEvent
-from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
@@ -62,7 +61,9 @@ def _state() -> BlueskySessionState:
 
 
 def _credentials():
-    handle, password = settings.BLUESKY_HANDLE, settings.BLUESKY_PASSWORD
+    from botconfig import store
+
+    handle, password = store.credentials()
     if not handle or not password:
         raise BlueskyLoginError("The bot's Bluesky login isn't set up yet.")
     return handle, password

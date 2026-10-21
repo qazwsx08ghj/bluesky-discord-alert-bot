@@ -51,7 +51,9 @@ def _post_url(handle: str, uri: str) -> str:
 
 
 def _webhook_for(account: MonitoredAccount) -> str:
-    return account.discord_webhook_url or settings.DISCORD_WEBHOOK_URL
+    from botconfig import store
+
+    return account.discord_webhook_url or store.default_webhook_url()
 
 
 # -- reading the feed -----------------------------------------------------------
