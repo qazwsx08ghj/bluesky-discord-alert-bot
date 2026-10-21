@@ -3,6 +3,13 @@ echo Starting Bluesky Discord Alert Bot...
 echo.
 call venv\Scripts\activate
 echo Updating the database (safe to run every time)...
+python manage.py backup_db --if-pending
+if errorlevel 1 (
+  echo.
+  echo The database backup failed, so the database was not changed and the bot was not started.
+  pause
+  exit /b 1
+)
 python manage.py migrate --fake-initial
 if errorlevel 1 (
   echo.

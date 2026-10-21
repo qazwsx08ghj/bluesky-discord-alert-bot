@@ -307,8 +307,7 @@
     </div>
 
     <div class="warn-box">
-      ⚠️ <strong>After saving settings</strong>, close the bot window and double-click
-      <strong>start.bat</strong> again for the changes to take effect.
+      ✓ <strong>Settings take effect on their own</strong> within a minute. No restart is needed.
     </div>
 
   </div><!-- /settings tab -->
@@ -520,10 +519,10 @@
     if (!handle) { toast('Enter your Bluesky handle first', 'err'); return; }
     const body = { bluesky_handle: handle };
     if (password) body.bluesky_password = password;
-    const { ok } = await api('POST', '/api/settings/', body);
-    if (!ok) { toast('Could not save', 'err'); return; }
+    const { ok, data } = await api('POST', '/api/settings/', body);
+    if (!ok) { toast((data && data.message) || 'Could not save', 'err'); return; }
     document.getElementById('s-password').value = '';
-    toast('Bluesky login saved — restart the bot to apply', 'ok');
+    toast('Bluesky login saved. It is used from the next check.', 'ok');
     loadSettings();
   }
 
@@ -532,7 +531,7 @@
     if (!url) { toast('Enter a webhook URL first', 'err'); return; }
     const { ok } = await api('POST', '/api/settings/', { discord_webhook_url: url });
     if (!ok) { toast('Could not save', 'err'); return; }
-    toast('Discord webhook saved — restart the bot to apply', 'ok');
+    toast('Discord webhook saved. It is used from the next announcement.', 'ok');
   }
 
   async function testWebhook() {
@@ -551,7 +550,7 @@
     if (!val || val < 1) { toast('Enter a valid number of minutes', 'err'); return; }
     const { ok } = await api('POST', '/api/settings/', { poll_interval_minutes: val });
     if (!ok) { toast('Could not save', 'err'); return; }
-    toast(`Check frequency saved (every ${val} min) — restart the bot to apply`, 'ok');
+    toast(`Check frequency saved (every ${val} min). It takes effect within a minute.`, 'ok');
   }
 
   // ── Init ───────────────────────────────────────────────

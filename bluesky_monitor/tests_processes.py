@@ -23,6 +23,7 @@ ENV = {
     "SEND_STALE_SECONDS": "1",
     "ACCOUNT_LOCK_SECONDS": "2",
     "BOT_LOG_LEVEL": "CRITICAL",
+    "SETTINGS_ENV_MIRROR_PATH": "",  # never touch the real .env
 }
 
 

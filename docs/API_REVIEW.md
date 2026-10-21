@@ -212,3 +212,10 @@ The old `templates/index.html` and `index` view are kept until the React app rep
   - **Known limit:** if a process dies after Discord stored a message but before it is marked sent, that one post is sent a second time after the 2-minute stale timeout. Discord webhooks have no idempotency key, so this narrow window can't be closed completely; `?wait=true` keeps it as small as possible.
   - One shared Bluesky session per cycle, saved for every process; refreshes are saved; expired sessions log in again once; a rejected password backs off for 10 to 60 minutes.
   - Existing `SeenPost` rows are backfilled as `sent`, so nothing old is announced again.
+- **Step 3 (done):** see `botconfig/` and `docs/SETTINGS_MIGRATION.md`.
+  - `BotSettings` (one row) is the source of truth; every reader asks `botconfig.store`, so changes apply without a restart (interval within 30 s via the heartbeat).
+  - Imported once from `.env`; never overwritten afterwards (`import_env_settings --force` is the explicit override).
+  - Saves: validate, then one conditional database UPDATE, then an atomic `.env` copy stamped with the settings version. A failed copy is recorded, reported, and repaired on the next save or start.
+  - `GET /api/settings/` keeps its fields, masks the webhook URL, and adds `has_discord_webhook_url`, `settings_version`, `updated_at`, `env_file_in_sync`. `PATCH` is accepted. Errors use `{code, message, fields}`.
+  - `start.bat` / `setup.bat` back up the database before pending migrations (`backup_db --if-pending`).
+  - The `.env` copy is temporary: off in Docker (step 8), removed in step 10.
