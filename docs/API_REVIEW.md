@@ -151,7 +151,7 @@ The old `templates/index.html` and `index` view are kept until the React app rep
 
 ## 4. Security changes (small, local-only scope)
 
-- **Fixes B9**: unsafe API methods accept JSON only (`JSONParser`) and need the header `X-Requested-With: AlertBot`. A cross-site page can't send that header without a CORS preflight, and that preflight fails.
+- **Fixes B9**: unsafe API methods accept JSON only and need Django's CSRF token, plus Origin and fetch-metadata checks. (Step 7 replaced the planned `X-Requested-With: AlertBot` header with these, so no single header is relied on; see `docs/API.md` section 2.)
 - `ALLOWED_HOSTS = localhost,127.0.0.1` stays strict. That blocks DNS-rebinding attacks.
 - Compose publishes `127.0.0.1:8000:8000` only, so nothing is reachable from the network.
 - Docker uses `DEBUG=False` and a per-install generated `SECRET_KEY`.
@@ -187,7 +187,7 @@ The old `templates/index.html` and `index` view are kept until the React app rep
 4. **Channels**: the FK, data migration, safe delete, masked URLs (R4, B8).
 5. **Activity log and status**: `ActivityEvent`, retention, `/api/activity/`, `/api/status/` (R1–R3).
 6. **New endpoints**: profile lookup, test login, check all; account serializer changes (B10).
-7. **Security hardening**: JSON-only, the required header, `/admin/` removed (B9).
+7. **Security hardening**: JSON-only, CSRF token with Origin and fetch-metadata checks, `/admin/` removed (B9). Check All moved to a background job.
 8. **Docker**: Dockerfile, compose, entrypoint with backup-before-migrate, `.bat` scripts. Then test on Docker Desktop: restart, rebuild, update with existing data.
 9. **React control panel**, built against the endpoints above, matching the prototype plus the "checker stopped" state.
 10. **End-to-end test on Windows and README rewrite.**
@@ -241,3 +241,10 @@ The old `templates/index.html` and `index` view are kept until the React app rep
   - One account's unexpected error no longer stops a scheduled check.
   - Account API: `state`, `first_check`, `last_success_at`, `last_error` and the announce options. Handles are normalized, with `already_watched`. Reposts and replies are classified and announced per account.
   - Not done here: the planned `GET /api/accounts/{id}/posts/` and dropping the nested `seen_posts` (left for the React step); storing `did`/`avatar_url` on accounts; `SeenPost` retention.
+- **Step 7 (done):** see `docs/API.md` (the full API reference, including security and error codes) and `config/security.py`.
+  - **Check All is a background job,** as planned originally: `202` with a job, `GET /api/check-jobs/{id}/` (progress and per-account rows), `/latest/` (shown again after a refresh). The checker runs jobs in a thread, claimed under the scheduler lease, with the same account locks and post claims. Stopped checkers leave jobs `interrupted`; unclaimed jobs `expire` after 2 minutes. No Celery or Redis. Migration `bluesky_monitor` 0006 (a new table only).
+  - **Cross-site protection without a custom header:** a CSRF token on every change, also for DRF views; Origin and `Sec-Fetch-Site` checks; JSON-only bodies, checked before anything reads them; no CORS. Host names are limited to localhost (DNS rebinding), and `start.bat` binds `127.0.0.1:8000`.
+  - Uniform JSON errors (`code`, `message`, `detail` kept), JSON 404/500 under `/api/`, security headers, and error pages that hide webhook settings.
+  - `/admin/`, DRF's browsable HTML pages and the `createsuperuser` setup step are removed. The admin's database tables are left in place for rollback.
+  - The old page sends the CSRF token. `DEBUG` defaults to off.
+  - **Test fix:** the rollback tests' processes could load the real `.env` and sign in to Bluesky with it. They now blank those keys, and a test checks it.

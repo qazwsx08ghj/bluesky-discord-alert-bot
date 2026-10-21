@@ -1,6 +1,9 @@
-"""POST /api/accounts/check_all/: check every account now, and say what happened to each.
+""""Check all": check every account now, and say what happened to each.
 
-It runs poller.check_accounts(), exactly like the scheduled check: the same per-account
+Since step 7 this runs in the background: POST /api/accounts/check_all/ queues a CheckJob
+and the checker runs it (see jobs.py), which calls run() below.
+
+run() uses poller.check_accounts(), exactly like the scheduled check: the same per-account
 lock, claim-before-send and retry rules. So if the scheduled check (or a second click) is
 already checking an account, that account is reported as `already_checking` and nothing is
 sent twice. One account failing never stops the others.
@@ -60,6 +63,17 @@ def account_message(report: AccountCheck) -> str:
     return " ".join(parts)
 
 
+# Rows of accounts that aren't done yet (shown while a Check All job runs).
+WAITING, CHECKING = "waiting", "checking"
+PENDING_MESSAGES = {WAITING: "Waiting to be checked.", CHECKING: "Being checked now."}
+
+
+def _pending_row(account, result):
+    return {"id": account.pk, "handle": account.handle, "result": result, "reason": None,
+            "message": PENDING_MESSAGES[result], "problem": None, "first_check": None,
+            "new_posts": 0, "posts_sent": 0, "not_announced": 0, "state": None, "state_label": None}
+
+
 def _account_row(report: AccountCheck, account, now):
     status = account_status.describe(account, now) if account is not None else {}
     return {
@@ -78,14 +92,21 @@ def _account_row(report: AccountCheck, account, now):
     }
 
 
-def run(time_limit_seconds=None) -> dict:
-    """Check every active account now. Returns the response body."""
+def run(time_limit_seconds=None, *, should_continue=None, progress=None) -> dict:
+    """Check every active account now. Returns the result (the job's final body).
+
+    should_continue: passed to check_accounts (the job passes "does the checker still hold the lease?").
+    progress: optional callable(rows, done, total, current_account) called whenever a row
+    changes, with every account's row in order (see _pending_row for rows not done yet).
+    """
     started = timezone.now()
     limit = settings.CHECK_ALL_TIME_LIMIT_SECONDS if time_limit_seconds is None else time_limit_seconds
     accounts = list(MonitoredAccount.objects.select_related("channel").order_by("id"))
     active = [a for a in accounts if a.is_active]
 
-    _summary, reports = (check_accounts(active, deadline=time.monotonic() + limit) if active else (None, []))
+    on_progress = _Progress(accounts, active, progress) if progress is not None else None
+    _summary, reports = (check_accounts(active, deadline=time.monotonic() + limit, should_continue=should_continue,
+                                        on_progress=on_progress) if active else (None, []))
     reports += [AccountCheck(a.pk, a.handle, result=SKIPPED, reason="paused") for a in accounts if not a.is_active]
     order = {a.pk: i for i, a in enumerate(accounts)}
     reports.sort(key=lambda r: order.get(r.account_id, 0))
@@ -111,6 +132,30 @@ def run(time_limit_seconds=None) -> dict:
         "counts": counts,
         "accounts": rows,
     }
+
+
+class _Progress:
+    """Keeps every account's row up to date while the check runs, and hands them to `progress`."""
+
+    def __init__(self, accounts, active, progress):
+        self.progress, self.total, self.done = progress, len(active), 0
+        self.rows = {a.pk: (_pending_row(a, WAITING) if a.is_active else
+                            _account_row(AccountCheck(a.pk, a.handle, result=SKIPPED, reason="paused"), a, None))
+                     for a in accounts}
+        self._send(None)
+
+    def __call__(self, account, report):
+        if report is None:  # starting this account
+            self.rows[account.pk] = _pending_row(account, CHECKING)
+            self._send(account)
+            return
+        fresh = MonitoredAccount.objects.filter(pk=report.account_id).first()
+        self.rows[report.account_id] = _account_row(report, fresh, timezone.now())
+        self.done += 1
+        self._send(None)
+
+    def _send(self, current):
+        self.progress(list(self.rows.values()), self.done, self.total, current)
 
 
 def _overall(accounts, active, reports, counts):

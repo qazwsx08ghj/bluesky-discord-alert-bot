@@ -10,12 +10,16 @@ Jobs live in memory (no job store in the database), so nothing stale is reloaded
 Health for /api/status/ (activity/status.py) comes from SchedulerState: the heartbeat,
 when the latest check started and finished, what it did (last_cycle_summary), and when
 the next one is due.
+
+"Check all" requests from the panel are queued as CheckJob rows. A small thread
+(JobWorker) in the checker runs them in the background; see jobs.py.
 """
 import atexit
 import logging
 import os
 import signal
 import socket
+import threading
 import traceback
 import uuid
 from datetime import timedelta
@@ -25,7 +29,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from django.conf import settings
-from django.db import close_old_connections
+from django.db import close_old_connections, connection
 from django.utils import timezone
 
 from activity import log as activity, retention
@@ -40,7 +44,50 @@ INSTANCE_ID = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
 POLL_JOB_ID = "poll_bluesky"
 
 _scheduler = None
+_worker = None
 _active = set()  # instance ids in this process that currently hold the lease
+
+
+class JobWorker(threading.Thread):
+    """Runs queued "Check all" jobs (jobs.run_pending) every CHECK_JOB_POLL_SECONDS.
+
+    A thread of its own, so a long Check All never delays the scheduled check or the
+    heartbeat. Only the checker holding the lease actually runs jobs.
+    """
+
+    def __init__(self, instance_id: str):
+        super().__init__(name="check-all-jobs", daemon=True)
+        self.instance_id = instance_id
+        self.stopping = threading.Event()
+
+    def run(self):
+        from . import jobs
+
+        try:
+            while not self.stopping.wait(settings.CHECK_JOB_POLL_SECONDS):
+                try:
+                    jobs.run_pending(self.instance_id)
+                except Exception:  # keep looking for jobs; the problem is in the log
+                    logger.exception("Running Check all jobs failed")
+        finally:
+            connection.close()
+
+    def stop(self):
+        self.stopping.set()
+
+
+def _start_worker(instance_id: str):
+    global _worker
+    if _worker is None:
+        _worker = JobWorker(instance_id)
+        _worker.start()
+
+
+def _stop_worker():
+    global _worker
+    if _worker is not None:
+        _worker.stop()
+        _worker = None
 
 
 def _note_lease(instance_id: str, held: bool):
@@ -165,6 +212,7 @@ def start():
     _scheduler = _build(BackgroundScheduler, INSTANCE_ID)
     _scheduler.start()
     _mark_started(INSTANCE_ID)
+    _start_worker(INSTANCE_ID)
     atexit.register(stop)
 
 
@@ -184,6 +232,7 @@ def stop():
     global _scheduler
     if _scheduler is None:
         return
+    _stop_worker()
     try:
         _scheduler.shutdown(wait=False)
     finally:
@@ -203,8 +252,10 @@ def run_forever():
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, _shutdown)
     _mark_started(INSTANCE_ID)
+    _start_worker(INSTANCE_ID)
     try:
         _scheduler.start()
     finally:
+        _stop_worker()
         _scheduler = None
         _release(INSTANCE_ID)

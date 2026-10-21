@@ -18,5 +18,6 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-python manage.py runserver
+rem Local only: the control panel listens on this computer (127.0.0.1) and nowhere else.
+python manage.py runserver 127.0.0.1:8000
 pause

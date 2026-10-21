@@ -1,4 +1,7 @@
+import uuid
+
 from django.db import models
+from django.utils import timezone
 
 POST, REPOST, REPLY = "post", "repost", "reply"
 KIND_CHOICES = [(POST, "Post"), (REPOST, "Repost"), (REPLY, "Reply")]
@@ -136,3 +139,42 @@ class BlueskySessionState(models.Model):
     login_retry_after = models.DateTimeField(null=True, blank=True)
     login_failures = models.PositiveSmallIntegerField(default=0)
     last_error = models.CharField(max_length=500, blank=True)
+
+
+class CheckJob(models.Model):
+    """One "Check all" request, run in the background by the checker (see jobs.py).
+
+    The web request only creates the row (status queued) and answers 202. The checker
+    that holds the scheduler lease picks it up, checks the accounts one by one (with the
+    same per-account locks and post claims as the scheduled check) and writes progress
+    and per-account results here, so they survive a browser refresh.
+    """
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    FINISHED = "finished"
+    INTERRUPTED = "interrupted"  # the checker stopped while running it
+    EXPIRED = "expired"  # no checker picked it up in time
+    STATUS_CHOICES = [(s, s) for s in (QUEUED, RUNNING, FINISHED, INTERRUPTED, EXPIRED)]
+    ACTIVE = (QUEUED, RUNNING)
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    kind = models.CharField(max_length=20, default="check_all")
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=QUEUED, db_index=True)
+    requested_at = models.DateTimeField(default=timezone.now, db_index=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(null=True, blank=True)
+    worker = models.CharField(max_length=128, blank=True)  # the checker instance running it
+    total = models.PositiveIntegerField(default=0)  # active accounts to check
+    done = models.PositiveIntegerField(default=0)
+    current_account_id = models.BigIntegerField(null=True, blank=True)
+    current_handle = models.CharField(max_length=255, blank=True)
+    result = models.CharField(max_length=20, blank=True)  # check_all._overall: ok, partial, failed, ...
+    message = models.TextField(blank=True)
+    problem_category = models.CharField(max_length=50, blank=True)
+    counts = models.JSONField(null=True, blank=True)
+    accounts = models.JSONField(default=list, blank=True)  # one row per account, see check_all._account_row
+
+    class Meta:
+        ordering = ["-requested_at"]

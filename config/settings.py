@@ -8,11 +8,14 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
-DEBUG = os.getenv("DEBUG", "True") == "True"
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+DEBUG = os.getenv("DEBUG", "False") == "True"
+# Local only (step 7): the panel has no login, so it answers only to this computer's own names.
+# This also blocks DNS-rebinding attacks. See config/security.py and docs/API.md.
+ALLOWED_HOSTS = [h.strip() for h in os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1,[::1]").split(",") if h.strip()]
 
+# The Django admin (/admin/) was removed in step 7: it was unused, and its tables stay in
+# the database untouched, so older versions still work after a rollback.
 INSTALLED_APPS = [
-    "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
@@ -30,11 +33,23 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
-    "django.middleware.csrf.CsrfViewMiddleware",
+    "config.security.RequestGuardMiddleware",  # replaces CsrfViewMiddleware; also covers the API
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "config.security.ApiHeadersMiddleware",
 ]
+
+# CSRF token cookie (read by the control panel's JavaScript, so not HttpOnly).
+CSRF_COOKIE_SAMESITE = "Strict"
+CSRF_COOKIE_HTTPONLY = False
+# Extra origins allowed to make changes, e.g. the React dev server: http://localhost:5173
+CSRF_TRUSTED_ORIGINS = [o.strip() for o in os.getenv("CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()]
+X_FRAME_OPTIONS = "DENY"
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "same-origin"
+# Error pages and reports hide webhook URLs and tokens too.
+DEFAULT_EXCEPTION_REPORTER_FILTER = "config.security.SafeReporterFilter"
 
 ROOT_URLCONF = "config.urls"
 
@@ -82,6 +97,13 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
+    # Step 7: JSON in, JSON out. No browsable HTML pages, no form posts, no login backends
+    # (the panel is local-only; cross-site requests are stopped by config.security).
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+    "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
+    "DEFAULT_AUTHENTICATION_CLASSES": [],
+    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.AllowAny"],
+    "EXCEPTION_HANDLER": "config.security.api_exception_handler",
 }
 
 APSCHEDULER_DATETIME_FORMAT = "N j, Y, f:s a"
@@ -128,7 +150,12 @@ BLUESKY_REQUEST_TIMEOUT_SECONDS = int(os.getenv("BLUESKY_REQUEST_TIMEOUT_SECONDS
 PROFILE_LOOKUP_CACHE_SECONDS = int(os.getenv("PROFILE_LOOKUP_CACHE_SECONDS", "60"))
 LOGIN_TEST_LIMIT = int(os.getenv("LOGIN_TEST_LIMIT", "5"))  # tests per window
 LOGIN_TEST_WINDOW_SECONDS = int(os.getenv("LOGIN_TEST_WINDOW_SECONDS", "300"))
-CHECK_ALL_TIME_LIMIT_SECONDS = int(os.getenv("CHECK_ALL_TIME_LIMIT_SECONDS", "50"))
+# Step 7: "Check all" runs in the background (bluesky_monitor/jobs.py). New accounts stop being
+# started after this long; the rest are left for the next scheduled check.
+CHECK_ALL_TIME_LIMIT_SECONDS = int(os.getenv("CHECK_ALL_TIME_LIMIT_SECONDS", "600"))
+CHECK_JOB_POLL_SECONDS = float(os.getenv("CHECK_JOB_POLL_SECONDS", "2"))  # how often the checker looks for jobs
+CHECK_JOB_QUEUE_TIMEOUT_SECONDS = int(os.getenv("CHECK_JOB_QUEUE_TIMEOUT_SECONDS", "120"))  # then "expired"
+CHECK_JOBS_KEPT = int(os.getenv("CHECK_JOBS_KEPT", "50"))  # finished jobs kept for the panel
 
 _LOG_LEVEL = os.getenv("BOT_LOG_LEVEL", "WARNING" if _RUNNING_TESTS else "INFO")
 LOGGING = {
@@ -145,5 +172,6 @@ LOGGING = {
         "discord_alerts": {"handlers": ["console"], "level": _LOG_LEVEL},
         "botconfig": {"handlers": ["console"], "level": _LOG_LEVEL},
         "activity": {"handlers": ["console"], "level": _LOG_LEVEL},
+        "config": {"handlers": ["console"], "level": "CRITICAL" if _RUNNING_TESTS else "INFO"},
     },
 }

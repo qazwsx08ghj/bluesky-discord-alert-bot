@@ -122,6 +122,30 @@ class CheckAllAcrossProcessesTests(ProcessTestCase):
         self.assertIn("already_checking", " ".join(results), "overlapping checks were turned away, not repeated")
 
 
+class CheckAllJobAcrossProcessesTests(ProcessTestCase):
+    """Step 7: the background job, the scheduled check and two more Check All runs at once."""
+
+    def test_background_job_during_other_checks_sends_each_post_once(self):
+        self.env["SCHEDULER_LEASE_SECONDS"] = "30"  # the job's checker keeps its lease throughout
+        job_id, _ = self.run_proc("queue_job")
+        self.assertTrue(job_id)
+
+        def args(i, start_at):
+            if i == 0:
+                return ("run_jobs", "S", self.log, start_at)
+            if i == 1:
+                return ("cycle", "S", self.log, start_at)
+            return ("check_all", self.log, start_at)
+
+        outs = self.run_together(4, args)
+        sends = self.sends()
+        self.assertEqual(len(sends), 5, outs)
+        self.assertEqual(set(sends.values()), {1}, f"duplicates: {sends}")
+        self.assertTrue(outs[0].startswith("RAN 1 finished "), outs[0])
+        self.assertIn(outs[0].rsplit(" ", 1)[1], ("artist.bsky.social=checked", "artist.bsky.social=already_checking"))
+        self.assertIn("already_checking", " ".join(outs), "overlapping checks were turned away, not repeated")
+
+
 class InterruptedSendTests(ProcessTestCase):
     def test_send_interrupted_by_a_crash_is_delivered_once_after_recovery(self):
         self.env["ACCOUNT_LOCK_SECONDS"] = "8"  # long enough to observe it held after the crash

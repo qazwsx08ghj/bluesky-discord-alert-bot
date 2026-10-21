@@ -8,3 +8,4 @@ class BotconfigConfig(AppConfig):
 
     def ready(self):
         from . import checks  # noqa: F401  (registers the private-files check)
+        from config import security  # noqa: F401  (registers the local-only check)

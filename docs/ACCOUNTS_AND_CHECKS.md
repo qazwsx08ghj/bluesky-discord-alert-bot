@@ -64,7 +64,9 @@ Body, both optional: `bluesky_handle`, `bluesky_password`. A blank field means "
 
 ## `POST /api/accounts/check_all/`
 
-Checks every active account now and returns a result for each.
+Checks every active account and gives a result for each.
+
+**Since step 7 this runs in the background.** The request answers `202` with a job, and the results below appear on the job at `GET /api/check-jobs/{id}/` as each account is done. See `docs/API.md` section 4.6 for the job format, statuses and polling. The rules below are unchanged.
 
 **No duplicates:**
 - It runs `poller.check_accounts()`, the same code as the scheduled check, so the same per-account lock, claim-before-send and retry rules apply.
@@ -76,21 +78,21 @@ Checks every active account now and returns a result for each.
 - This now also applies to scheduled checks. Before, an unexpected error stopped the whole check.
 - Only a login that doesn't work stops the rest, because then nothing can be read.
 
-**The response:**
+**The finished job:**
 - `result`: `ok`, `partial`, `failed`, `not_configured`, `login_failed` or `nothing_to_check`
 - `message` and `problem`
 - `started_at` and `finished_at`
-- `counts`: `{checked, failed, skipped, already_checking, new_posts, posts_sent}`
+- `counts`: `{checked, failed, skipped, already_checking, waiting, new_posts, posts_sent}`
 - `accounts`: one row per account, paused ones included, in the order they were added
 
 Each row has:
-- `result`: `checked`, `failed`, `skipped` or `already_checking`
-- `reason`, for skipped rows: `paused`, `login_failed`, `not_configured` or `time_limit`
+- `result`: `checked`, `failed`, `skipped` or `already_checking` (and, while the job runs, `waiting` or `checking`)
+- `reason`, for skipped rows: `paused`, `login_failed`, `not_configured`, `time_limit` or `stopped`
 - `message` (plain language) and `problem`
 - `first_check`, `new_posts`, `posts_sent` and `not_announced`
 - the account's `state` after the check
 
-**Time limit:** new accounts stop being started after 50 s (`CHECK_ALL_TIME_LIMIT_SECONDS`). Accounts not reached are skipped with reason `time_limit`, and the next scheduled check includes them.
+**Time limit:** new accounts stop being started after 10 minutes (`CHECK_ALL_TIME_LIMIT_SECONDS`; it was 50 s while the check ran inside the web request). Accounts not reached are skipped with reason `time_limit`, and the next scheduled check includes them.
 
 **`poll_now`** keeps its fields (`new_posts_announced`, `was_first_poll`, `error`, and `409 already_checking`) and adds `state`, `state_label`, `state_message`, `first_check`, `problem` and `check`.
 

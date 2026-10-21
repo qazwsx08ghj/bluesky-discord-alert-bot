@@ -4,6 +4,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.shortcuts import render
 from django.utils import timezone
+from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.debug import sensitive_post_parameters, sensitive_variables
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -18,6 +19,7 @@ from discord_alerts import channels
 from discord_alerts.sender import send_discord_alert
 
 
+@ensure_csrf_cookie  # the page's requests send this cookie's token back (config/security.py)
 def index(request):
     return render(request, "index.html")
 

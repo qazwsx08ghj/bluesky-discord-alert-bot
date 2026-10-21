@@ -391,7 +391,7 @@ def _unexpected_failure(account: MonitoredAccount, exc: Exception) -> AccountChe
     return report
 
 
-def check_accounts(accounts, *, should_continue=None, deadline=None, session=None):
+def check_accounts(accounts, *, should_continue=None, deadline=None, session=None, on_progress=None):
     """Check the given accounts one after another with one shared Bluesky session.
 
     Each account gets its own lock, so a check that is already running elsewhere (the
@@ -401,9 +401,11 @@ def check_accounts(accounts, *, should_continue=None, deadline=None, session=Non
 
     should_continue: checked before each account (the scheduler passes "do I still hold the lease?").
     deadline: a time.monotonic() value; accounts not reached by then are skipped (time_limit).
+    on_progress: optional callable(account, report). Called with report=None just before an
+    account is checked, and with its AccountCheck once it is done (used by Check All jobs).
     Returns (CycleSummary, [AccountCheck, ...]) in the order of `accounts`.
     """
-    summary, reports = CycleSummary(), []
+    summary, reports = CycleSummary(), _Reports(on_progress)
     session = session or _new_session()
     stopped = None  # (reason, category) once the remaining accounts can't be checked
     for account in accounts:
@@ -418,6 +420,7 @@ def check_accounts(accounts, *, should_continue=None, deadline=None, session=Non
                                         reason=stopped[0], category=stopped[1]))
             continue
 
+        reports.starting(account)
         try:
             sent = poll_account(account, session=session)
         except AccountBusy:
@@ -455,7 +458,30 @@ def check_accounts(accounts, *, should_continue=None, deadline=None, session=Non
         reports.append(report)
     if summary.result == "ok" and summary.accounts_failed:
         summary.result = "failed" if summary.accounts_failed == summary.accounts_checked else "partial"
-    return summary, reports
+    return summary, list(reports)
+
+
+class _Reports(list):
+    """The list of AccountCheck results, telling on_progress about each one as it is added."""
+
+    def __init__(self, on_progress):
+        super().__init__()
+        self.on_progress = on_progress
+
+    def starting(self, account):
+        self._tell(account, None)
+
+    def append(self, report):
+        super().append(report)
+        self._tell(None, report)
+
+    def _tell(self, account, report):
+        if self.on_progress is None:
+            return
+        try:
+            self.on_progress(account, report)
+        except Exception:  # progress is only for display; never stop a check for it
+            logger.exception("Couldn't record check progress")
 
 
 def poll_all_active_accounts(should_continue=None) -> CycleSummary:
