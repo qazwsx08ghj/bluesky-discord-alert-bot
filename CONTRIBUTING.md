@@ -97,6 +97,7 @@ The contract is generated from the code, and the frontend's types from the contr
 | `python manage.py test` | Every backend test: API, checker, delivery, security, serving the panel, the contract, the Windows scripts (on Windows) | Python |
 | `python manage.py test --tag contract` | Every operation's real answers against `docs/openapi.yaml` (closed objects: no undocumented fields), and the file is current | Python |
 | `python manage.py api_contract` | `docs/openapi.yaml` matches the code | Python |
+| `python docker/third_party_notices.py` | `THIRD_PARTY_NOTICES.txt` matches the exact packages shipped | Python, `npm ci` |
 | `npm test` (in `frontend/`) | The panel against a fake API, in a simulated browser | Node.js |
 | `npm run typecheck`, `npm run api:check` | TypeScript, and that `schema.gen.ts` matches the contract | Node.js |
 | `npm run e2e` | Chromium against the real app with fake Bluesky and Discord | Node.js, Python |
@@ -118,7 +119,7 @@ Keep it that way: a test that could reach the real services or real data is a bu
 | Job | Runs on | Checks |
 |---|---|---|
 | Backend | Linux | `pip-audit`, `manage.py check`, missing migrations, Django tests (except the contract) |
-| API contract | Linux | `api_contract`, `test --tag contract`, `npm run api:check`, typecheck |
+| API contract and notices | Linux | `api_contract`, `test --tag contract`, `npm run api:check`, typecheck, `THIRD_PARTY_NOTICES.txt` up to date |
 | Frontend | Linux | `npm audit`, typecheck, `npm test`, build |
 | Browser tests | Linux | Playwright against the demo server |
 | Windows scripts | Windows | the real `.bat` files under cmd.exe, with a fake Docker |
@@ -135,3 +136,14 @@ Keep it that way: a test that could reach the real services or real data is a bu
   - Only masked forms are shown.
   - Never commit `.env`, databases or backups.
 - **Exact versions.** Python versions are in `requirements-lock.txt` (and `requirements-dev.txt`); Node.js versions are in `package-lock.json`. Run the audits after an update.
+
+## 8. License
+
+The project is MIT-licensed ([LICENSE](LICENSE)). By contributing, you agree that your contribution is released under the same license.
+
+When you add a dependency:
+- **Check its license first.** MIT, BSD, ISC and Apache-2.0 are fine.
+- **Ask before adding anything copyleft** (GPL, AGPL, LGPL) or with unusual terms, if it would ship to users in the Docker image or the built panel. Development-only tools matter less, because they aren't distributed.
+- **Fonts, icons and images** need a license that allows redistribution, such as the SIL Open Font License or CC0.
+- **Regenerate the notices.** `THIRD_PARTY_NOTICES.txt` holds the license and copyright notices of everything the Docker image and the panel ship, read from the installed packages. After changing `requirements-lock.txt`, `requirements-docker.txt` or the panel's dependencies, install the exact versions and run `python docker/third_party_notices.py --write`. CI, the Django tests and the Docker build fail while the file is out of date.
+- **A package that ships no license file** needs its license in `docker/notices/<name>-<version>.txt`, copied from its official source for that version (see `docker/notices/README.md`).

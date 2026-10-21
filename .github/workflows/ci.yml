@@ -38,7 +38,7 @@ jobs:
         run: python manage.py test --exclude-tag contract
 
   contract:
-    name: API contract (OpenAPI, generated types, response conformance)
+    name: API contract and license notices (OpenAPI, generated types, conformance, notices)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -63,6 +63,8 @@ jobs:
           npm ci --no-audit --no-fund --ignore-scripts
           npm run api:check
           npm run typecheck
+      - name: THIRD_PARTY_NOTICES.txt matches the exact packages the image and the panel ship
+        run: python docker/third_party_notices.py --check
 
   frontend:
     name: Frontend (types, tests, build, npm audit)

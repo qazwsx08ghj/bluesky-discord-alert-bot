@@ -18,7 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 FILES = ["setup.bat", "start.bat", "update.bat", "stop.bat", "backup.bat", "restore.bat", "docker-compose.yml",
-         "docker/scripts/common.bat"]
+         "docker/scripts/common.bat", "LICENSE", "THIRD_PARTY_NOTICES.txt"]
 README = """Bluesky to Discord Alert Bot
 
 Needs: Docker Desktop (https://www.docker.com/products/docker-desktop/).
@@ -31,6 +31,9 @@ Needs: Docker Desktop (https://www.docker.com/products/docker-desktop/).
 
 Your accounts, settings and history are kept inside Docker Desktop and are never deleted
 by these files. Backups made by update.bat and backup.bat also go into the backups folder here.
+
+Free and open source under the MIT License (see LICENSE). The bot (the Docker image this
+downloads) also contains other open-source software: see THIRD_PARTY_NOTICES.txt.
 """
 
 

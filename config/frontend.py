@@ -5,6 +5,7 @@ FRONTEND_DIST, normally frontend/dist:
     index.html          one page for every panel address (/, /setup/, /accounts/, …)
     assets/<file>       the scripts, styles and fonts, with a content hash in each name
     favicon.svg
+    THIRD_PARTY_NOTICES.txt  the licenses of the software the bot ships, at /third-party-notices.txt
 
 Django only reads that folder. Only names that look like built files are served, and only
 from FRONTEND_DIST/assets, so nothing else on disk (the database, .env, backups) can ever
@@ -120,3 +121,15 @@ def asset(request, name):
 @require_safe
 def favicon(request):
     return _file(_dist() / "favicon.svg", "public, max-age=86400")
+
+
+@require_safe
+def third_party_notices(request):
+    """The license and copyright notices of the third-party software in the bot and the panel."""
+    path = _dist() / "THIRD_PARTY_NOTICES.txt"
+    if not path.is_file():
+        raise Http404("Not found")
+    response = FileResponse(path.open("rb"), content_type="text/plain; charset=utf-8")
+    response["Cache-Control"] = "no-cache"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response

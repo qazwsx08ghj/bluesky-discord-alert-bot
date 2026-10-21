@@ -169,6 +169,14 @@ function About() {
         <dd>
           Double-click <b>update.bat</b>. It backs up first, then installs the new version.
         </dd>
+        <dt>License</dt>
+        <dd>
+          Free and open source under the MIT License. The bot includes other open-source software, under its own licenses:{" "}
+          <a href="/third-party-notices.txt" target="_blank" rel="noopener noreferrer">
+            third-party notices
+          </a>
+          .
+        </dd>
       </dl>
     </div>
   );

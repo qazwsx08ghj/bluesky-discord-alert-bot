@@ -202,4 +202,16 @@ test.describe("keyboard, layout and addresses", () => {
     const missing = await page.goto("/no-such-page");
     expect(missing?.status()).toBe(404);
   });
+
+  test("Settings links to the third-party license notices the panel ships", async ({ page, request }) => {
+    await page.goto("/settings");
+    const link = page.getByRole("link", { name: "third-party notices" });
+    await expect(link).toHaveAttribute("href", "/third-party-notices.txt");
+    const notices = await request.get("/third-party-notices.txt");
+    expect(notices.status()).toBe(200);
+    expect(notices.headers()["content-type"]).toBe("text/plain; charset=utf-8");
+    const text = await notices.text();
+    expect(text).toContain("THIRD-PARTY SOFTWARE NOTICES");
+    expect(text).toContain("SIL OPEN FONT LICENSE Version 1.1");
+  });
 });
