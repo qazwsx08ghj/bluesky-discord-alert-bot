@@ -8,13 +8,13 @@ web
 
 ## Stack
 
-Confirmed target (migration not yet done; today the UI is a single Django template, `templates/index.html`, with inline CSS/JS):
+In place since step 9 (the previous single-template page, `templates/index.html`, stays at `/classic/` as a fallback for now):
 
 - **Frontend:** React, kept logically separate from the backend.
 - **Backend:** Django + Django REST Framework. Django exposes REST APIs only, shaped so a future React Native client can reuse them.
 - **Packaging:** Docker, with a multi-stage build that compiles the React frontend and installs Python dependencies. Node.js and Python live only inside containers.
 - **Deployment target:** Windows with Docker Desktop and Docker Compose. Users install Docker Desktop and nothing else.
-- **Start command:** `docker compose up -d --build`, wrapped in a Windows `.bat` script for one-click setup and startup.
+- **Start command:** `setup.bat` / `start.bat` (Docker Compose underneath); users never type Docker commands.
 - **Persistence:** Docker volumes keep the database and configuration (credentials, webhook, poll interval) across container restarts.
 - Setup must work on Windows without anyone configuring a development environment by hand.
 

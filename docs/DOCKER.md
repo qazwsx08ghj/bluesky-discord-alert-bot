@@ -99,6 +99,7 @@ Your data and the backups are untouched; nothing in the update deletes anything.
   - There's no proxy in between, so nothing rewrites either. The Docker tests check Host, Origin, CSRF and JSON-only requests against the real containers.
 - **`DEBUG` is off**, set in `docker-compose.yml`.
 - **The image holds no secrets:** no `.env`, database or backups (`.dockerignore`, plus a check in the `Dockerfile`). It runs as user `bot`, not root, and the code isn't writable by the bot.
+- **The control panel is built inside the image** (step 9). A `panel` stage installs the exact Node.js packages from `frontend/package-lock.json` (`npm ci --ignore-scripts`) and builds the React app. Only the built files are copied into the image that runs; it has no Node.js. The page is served with a strict Content Security Policy (see [FRONTEND.md](FRONTEND.md)).
 - **Docker uses only `docker\compose.env`**, which holds no secrets. The scripts always pass it with `--env-file`, so Docker never reads the folder's old `.env`. The settings `.env` copy is off in Docker (`SETTINGS_ENV_MIRROR_PATH=""`).
 - **Container logs** go through the same filter that hides webhook tokens. Docker keeps at most 3 files of 10 MB.
 
@@ -109,7 +110,8 @@ Your data and the backups are untouched; nothing in the update deletes anything.
   docker compose --env-file docker\compose.env -f docker-compose.yml -f docker-compose.build.yml up -d --build
   docker compose -p alertbot logs -f
   ```
-- **Without Docker:** `dev\setup-without-docker.bat` and `dev\start-without-docker.bat` (the earlier venv scripts). Don't run them together with the Docker version.
+- **Without Docker:** `dev\setup-without-docker.bat` and `dev\start-without-docker.bat` (the earlier venv scripts). Don't run them together with the Docker version. Without Node.js these show the previous control panel; run `npm ci` and `npm run build` in `frontend\` for the new one.
+- **The control panel:** see [FRONTEND.md](FRONTEND.md) for `npm run dev`, the demo server and the frontend tests.
 - **Dependencies:** the image installs the exact versions in `requirements-lock.txt` plus gunicorn (`requirements-docker.txt`). After upgrading a package in the venv, run `venv\Scripts\pip freeze > requirements-lock.txt` and the tests.
 - **Tests:**
 

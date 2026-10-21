@@ -71,6 +71,22 @@ class DockerFilesTests(SimpleTestCase):
         self.assertIn("test ! -e /app/.env && test ! -e /app/db.sqlite3 && test ! -e /app/backups", dockerfile)
         self.assertIn("USER bot", dockerfile)
 
+    def test_the_control_panel_is_built_in_its_own_stage(self):
+        """Step 9: users need no Node.js; it's used only while building the image."""
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        stages = re.findall(r"^FROM\s+(.+)$", dockerfile, flags=re.M)
+        self.assertEqual(len(stages), 3)
+        self.assertIn("node:", stages[0])
+        self.assertIn("AS panel", stages[0])
+        self.assertIn("--platform=$BUILDPLATFORM", stages[0], "built once, natively, for every platform")
+        self.assertTrue(stages[-1].startswith("python:"), "the image that runs has no Node.js")
+        self.assertIn("npm ci --no-audit --no-fund --ignore-scripts", dockerfile, "exact versions from the lockfile")
+        self.assertIn("COPY --from=panel /panel/dist /app/frontend/dist", dockerfile)
+        self.assertIn("test -f /app/frontend/dist/index.html", dockerfile, "the build fails without the panel")
+        ignore = (ROOT / ".dockerignore").read_text(encoding="utf-8").split()
+        for pattern in ("**/node_modules/", "frontend/dist/"):
+            self.assertIn(pattern, ignore, "local builds and installs never go into the image")
+
     def test_image_uses_the_exact_tested_versions(self):
         lock = (ROOT / "requirements-lock.txt").read_text(encoding="utf-8")
         for line in lock.splitlines():

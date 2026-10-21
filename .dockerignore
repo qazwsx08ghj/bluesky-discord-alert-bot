@@ -17,8 +17,13 @@ venv/
 .idea/
 **/__pycache__/
 *.py[cod]
-node_modules/
+**/node_modules/
 *.log
+
+# The control panel is built inside the image (Dockerfile, stage "panel"), never copied in.
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
 
 # Not needed to run the bot
 prototype/

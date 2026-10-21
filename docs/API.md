@@ -239,3 +239,18 @@ GET  /api/check-jobs/?limit=10    → 200  {"results": [{…job…}, …]}  newe
 - **Error bodies:** DRF errors gain `code` and `message` (`detail` is kept). Unknown `/api/` addresses answer with JSON 404s.
 - **Removed:** `/admin/`, DRF's browsable HTML pages, and the `createsuperuser` step in `setup.bat`.
 - **Defaults:** `DEBUG` is now off unless `.env` says `DEBUG=True`. The default `ALLOWED_HOSTS` also includes `[::1]`.
+
+## 6. Step 9: the React control panel
+
+No API changes. The new panel (`frontend/`, see [FRONTEND.md](FRONTEND.md)) uses the routes above exactly as documented. Django now also answers these addresses, outside `/api/`:
+
+| Address | What |
+|---|---|
+| `/`, `/setup`, `/accounts`, `/activity`, `/settings` | The panel's page (`GET` and `HEAD` only). Sets the CSRF cookie. Strict `Content-Security-Policy`, `Cache-Control: no-cache`. |
+| `/assets/<file>` | The panel's built scripts, styles and fonts, from `frontend/dist/assets` only. Cached for good (their names change with each build). |
+| `/favicon.svg` | The icon. |
+| `/classic/` | The previous page (`templates/index.html`), kept as a fallback for now. Also shown at `/` if the panel hasn't been built. |
+
+Notes for clients:
+- The panel reads the newest Check All job with `GET /api/check-jobs/?limit=1`, which answers `{"results": []}` instead of a 404 before the first job.
+- Polling: `/api/status/` every 10 s (3 s while a check runs), accounts every 15 s (3 s while one is being checked), a running job every `poll_after_seconds`.
