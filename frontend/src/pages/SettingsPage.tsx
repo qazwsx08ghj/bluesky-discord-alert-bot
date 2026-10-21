@@ -169,10 +169,6 @@ function About() {
         <dd>
           Double-click <b>update.bat</b>. It backs up first, then installs the new version.
         </dd>
-        <dt>Old panel</dt>
-        <dd>
-          The previous control panel is still at <a href="/classic/">/classic/</a> for now, in case you need it.
-        </dd>
       </dl>
     </div>
   );

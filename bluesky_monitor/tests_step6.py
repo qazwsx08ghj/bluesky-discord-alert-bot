@@ -480,7 +480,7 @@ class AccountApiStep6Tests(APITestCase):
             self.assertIn(key, row)
         self.assertEqual(row["state"], "waiting_first_check")
         self.assertEqual((row["announce_posts"], row["announce_reposts"], row["announce_replies"]), (True, True, False))
-        self.assertIn("seen_posts", row, "kept for the current page")
+        self.assertNotIn("seen_posts", row, "removed in step 10; GET /api/accounts/{id}/posts/")
 
     def test_accounts_from_older_code_get_the_defaults(self):
         account = MonitoredAccount.objects.create(handle="old.bsky.social")

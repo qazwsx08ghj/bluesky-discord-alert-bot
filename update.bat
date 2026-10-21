@@ -30,6 +30,7 @@ call "%COMMON%" :up || goto :failed_after_backup
 echo.
 echo [4/4] Checking that everything works...
 call "%COMMON%" :wait_ready || goto :failed_after_backup
+call "%COMMON%" :tidy_images
 call "%COMMON%" :open_browser
 echo.
 echo  The update is complete. Your accounts, settings and history were kept.

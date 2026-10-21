@@ -10,7 +10,6 @@ from pathlib import Path
 from django.conf import settings
 from django.test import TestCase, override_settings
 
-from botconfig import store
 
 INDEX = ('<!doctype html><html><head><title>Alert Bot · Bluesky → Discord</title>'
          '<script type="module" src="/assets/index-abc123.js"></script></head><body><div id="root"></div></body></html>')
@@ -131,29 +130,24 @@ class PanelFilesTests(BuiltPanelMixin, TestCase):
         self.assertIn(self.client.post("/assets/index-abc123.js", {}, content_type="application/json").status_code, (403, 405))
 
 
-class FallbackTests(TestCase):
-    """Without a build (a source checkout without Node.js), the previous page is shown."""
+class NotBuiltTests(TestCase):
+    """Without a build (a source checkout without Node.js), a short page says how to build it."""
 
-    def test_missing_build_falls_back_to_the_previous_page(self):
+    def test_a_missing_build_says_how_to_build_it(self):
         with tempfile.TemporaryDirectory() as empty, override_settings(FRONTEND_DIST=Path(empty)):
             res = self.client.get("/")
-            self.assertEqual(res.status_code, 200)
-            self.assertEqual(res["X-Alertbot-Panel"], "classic")
-            self.assertContains(res, "X-CSRFToken")
-            self.assertIn("csrftoken", res.cookies)
+            self.assertEqual(res.status_code, 503)
+            self.assertEqual(res["X-Alertbot-Panel"], "not-built")
+            self.assertContains(res, "npm run build", status_code=503)
+            self.assertIn("default-src 'none'", res["Content-Security-Policy"])
             res = self.client.get("/assets/index-abc123.js")
             res.close()
             self.assertEqual(res.status_code, 404)
+            self.assertEqual(self.client.get("/api/status/").status_code, 200, "the API works without the panel")
 
-    def test_the_previous_page_stays_available_and_can_make_changes(self):
-        page = self.client.get("/classic/")
-        self.assertEqual(page.status_code, 200)
-        self.assertContains(page, "X-CSRFToken")
-        token = page.cookies["csrftoken"].value
-        res = self.client.post("/api/settings/", {"poll_interval_minutes": 7}, content_type="application/json",
-                               HTTP_X_CSRFTOKEN=token, HTTP_ORIGIN="http://testserver", HTTP_SEC_FETCH_SITE="same-origin")
-        self.assertEqual(res.status_code, 200, res.content)
-        self.assertEqual(store.get().poll_interval_minutes, 7)
+    def test_the_previous_page_is_gone(self):
+        self.assertEqual(self.client.get("/classic/").status_code, 404)
+        self.assertFalse((Path(settings.BASE_DIR) / "templates" / "index.html").exists())
 
 
 class SourceTreeTests(TestCase):

@@ -161,7 +161,7 @@ function useChange<Vars, Result>(fn: (vars: Vars) => Promise<Result>) {
   });
 }
 
-export const useSaveSettings = () => useChange((input: SettingsInput) => api.patch<{ status: string; settings: Settings; warning?: string }>("/api/settings/", input));
+export const useSaveSettings = () => useChange((input: SettingsInput) => api.patch<{ status: string; settings: Settings }>("/api/settings/", input));
 
 /** Never saves anything; blank values mean "the saved one". */
 export const useTestLogin = () =>

@@ -20,6 +20,8 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements-lock.txt
+      - name: No known vulnerabilities in the locked Python packages
+        run: pip install pip-audit && pip-audit -r requirements-lock.txt
       - name: Tests (fake credentials and temporary databases only)
         run: python manage.py test
       - uses: actions/setup-node@v4
@@ -33,6 +35,7 @@ jobs:
           PYTHON: python
         run: |
           npm ci --no-audit --no-fund --ignore-scripts
+          npm audit --audit-level=moderate
           npm run typecheck
           npm test
           npx playwright install --with-deps chromium

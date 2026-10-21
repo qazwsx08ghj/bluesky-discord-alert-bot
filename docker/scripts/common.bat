@@ -1,5 +1,5 @@
 @echo off
-rem Shared steps for setup.bat, start.bat, update.bat, stop.bat and backup.bat.
+rem Shared steps for setup.bat, start.bat, update.bat, stop.bat, backup.bat and restore.bat.
 rem Used as:   call "%~dp0docker\scripts\common.bat" :step [argument]
 rem Every step returns 0 when it worked, and 1 after it has explained a problem to the user.
 rem
@@ -11,7 +11,8 @@ rem   ALERTBOT_DOCKER, ALERTBOT_CURL      the docker and curl commands to use
 rem   ALERTBOT_PROJECT                    Docker project name (default alertbot)
 rem   ALERTBOT_PORT, ALERTBOT_IMAGE       override docker\compose.env
 rem   ALERTBOT_NO_BROWSER, ALERTBOT_NO_PAUSE, ALERTBOT_ASSUME_YES, ALERTBOT_NO_DESKTOP_START
-rem   ALERTBOT_DOCKER_WAIT_SECONDS (180), ALERTBOT_READY_WAIT_SECONDS (240)
+rem   ALERTBOT_DOCKER_WAIT_SECONDS (180), ALERTBOT_READY_WAIT_SECONDS (240), ALERTBOT_DESKTOP_GRACE_SECONDS (45)
+rem   ALERTBOT_DESKTOP_RUNNING (1/0), ALERTBOT_DESKTOP_RESTART (a command), ALERTBOT_RESTORE_CHOICE
 set "ALERTBOT_SCRIPTS=%~dp0"
 call %*
 exit /b %errorlevel%
@@ -42,6 +43,8 @@ set "DOCKER_WAIT=180"
 if defined ALERTBOT_DOCKER_WAIT_SECONDS set "DOCKER_WAIT=%ALERTBOT_DOCKER_WAIT_SECONDS%"
 set "READY_WAIT=240"
 if defined ALERTBOT_READY_WAIT_SECONDS set "READY_WAIT=%ALERTBOT_READY_WAIT_SECONDS%"
+set "DESKTOP_GRACE=45"
+if defined ALERTBOT_DESKTOP_GRACE_SECONDS set "DESKTOP_GRACE=%ALERTBOT_DESKTOP_GRACE_SECONDS%"
 exit /b 0
 
 
@@ -55,12 +58,17 @@ if errorlevel 1 goto :msg_no_docker
 if errorlevel 1 goto :msg_no_compose
 %ALERTBOT_DOCKER% info >nul 2>&1
 if not errorlevel 1 goto :engine_ok
-call :start_desktop
+rem Not answering. If Docker Desktop isn't open, start it and wait. If it is open, it may just
+rem be starting; after a short wait it is probably stuck, and a restart is offered.
+set "DD_RESTARTED="
+set "STUCK_WAIT=%DOCKER_WAIT%"
+call :desktop_running
+if errorlevel 1 (call :start_desktop) else (set "STUCK_WAIT=%DESKTOP_GRACE%")
 set /a WAITED=0
 :engine_wait
 %ALERTBOT_DOCKER% info >nul 2>&1
 if not errorlevel 1 goto :engine_ready
-if %WAITED% geq %DOCKER_WAIT% goto :msg_engine_down
+if %WAITED% geq %STUCK_WAIT% goto :engine_stuck
 ping -n 4 127.0.0.1 >nul
 set /a WAITED+=3
 <nul set /p "=."
@@ -72,6 +80,52 @@ set "OSTYPE="
 for /f "usebackq delims=" %%O in (`%ALERTBOT_DOCKER% info --format "{{.OSType}}" 2^>nul`) do set "OSTYPE=%%O"
 if /i not "%OSTYPE%"=="linux" goto :msg_windows_containers
 echo  Docker Desktop is running.
+exit /b 0
+
+:engine_stuck
+if defined DD_RESTARTED goto :msg_engine_down
+call :desktop_running
+if errorlevel 1 goto :msg_engine_down
+rem The automated tests use a fake docker; they never restart the real Docker Desktop.
+if defined CUSTOM_DOCKER if not defined ALERTBOT_DESKTOP_RESTART goto :msg_engine_down
+if defined ALERTBOT_NO_DESKTOP_START if not defined ALERTBOT_DESKTOP_RESTART goto :msg_engine_down
+echo.
+echo  Docker Desktop is open, but it isn't responding. Restarting it usually fixes this.
+echo  The bot's data isn't affected.
+if defined ALERTBOT_ASSUME_YES goto :do_restart
+choice /c YN /t 60 /d Y /m " Restart Docker Desktop now"
+if errorlevel 2 goto :msg_engine_down
+:do_restart
+call :restart_desktop
+set "DD_RESTARTED=1"
+set "STUCK_WAIT=%DOCKER_WAIT%"
+set /a WAITED=0
+goto :engine_wait
+
+:desktop_running
+if "%ALERTBOT_DESKTOP_RUNNING%"=="1" exit /b 0
+if "%ALERTBOT_DESKTOP_RUNNING%"=="0" exit /b 1
+tasklist /fi "imagename eq Docker Desktop.exe" /nh 2>nul | find /i "Docker Desktop.exe" >nul
+exit /b %errorlevel%
+
+:restart_desktop
+echo  Restarting Docker Desktop. This can take a minute or two...
+if defined ALERTBOT_DESKTOP_RESTART (
+  call %ALERTBOT_DESKTOP_RESTART%
+  exit /b 0
+)
+rem Newer Docker Desktop restarts itself on request; it then waits below for the engine.
+%ALERTBOT_DOCKER% desktop restart --detach --timeout 120 >nul 2>&1
+if not errorlevel 1 exit /b 0
+rem Older versions: end every Docker Desktop process (also its helpers, which can otherwise
+rem block the next start), stop its Linux VM, and start it again.
+taskkill /f /im "Docker Desktop.exe" >nul 2>&1
+taskkill /f /im "com.docker.*" >nul 2>&1
+wsl --terminate docker-desktop >nul 2>&1
+wsl --terminate docker-desktop-data >nul 2>&1
+ping -n 4 127.0.0.1 >nul
+set "DD_EXE=%ProgramFiles%\Docker\Docker\Docker Desktop.exe"
+if exist "%DD_EXE%" start "" "%DD_EXE%"
 exit /b 0
 
 :start_desktop
@@ -103,8 +157,8 @@ echo  Docker Desktop isn't running yet, or it isn't working right now.
 echo   1. Open Docker Desktop from the Start menu.
 echo   2. Wait until it says "Engine running" in the bottom left corner.
 echo   3. Then double-click this file again.
-echo  If Docker Desktop is open but this keeps happening, restart it: right-click the
-echo  whale icon next to the clock and choose "Restart".
+echo  If Docker Desktop is open but this keeps happening, restart the computer, or quit
+echo  Docker Desktop (right-click the whale icon next to the clock) and open it again.
 exit /b 1
 
 :msg_windows_containers
@@ -240,6 +294,14 @@ echo  If you ask for help, share that file.
 exit /b 0
 
 
+rem -- After a successful update: remove this bot's old, unused images ----------------------------
+rem Only untagged images with this bot's label, which nothing uses any more. Volumes (the data)
+rem and the running version are never touched. A failure here doesn't matter.
+:tidy_images
+%ALERTBOT_DOCKER% image prune -f --filter "label=org.opencontainers.image.title=Bluesky Discord Alert Bot" >nul 2>&1
+exit /b 0
+
+
 rem -- Finishing touches -------------------------------------------------------------------------
 :open_browser
 if defined ALERTBOT_NO_BROWSER exit /b 0
@@ -251,3 +313,35 @@ if defined ALERTBOT_NO_PAUSE exit /b 0
 echo.
 pause
 exit /b 0
+
+rem -- restore.bat: list the backups, stop the bot, put a backup back ----------------------------
+:export_backups
+if not exist "backups" mkdir "backups"
+%COMPOSE% run --rm --no-deps -v "%BOT_DIR%\backups:/export" web backups
+if errorlevel 1 goto :msg_backups_failed
+exit /b 0
+
+:msg_backups_failed
+echo.
+echo  The backups inside Docker couldn't be listed. Nothing was changed.
+exit /b 1
+
+:stop
+%COMPOSE% stop
+if errorlevel 1 goto :msg_stop_failed
+exit /b 0
+
+:msg_stop_failed
+echo.
+echo  The bot couldn't be stopped, so nothing was restored. Your data is unchanged.
+exit /b 1
+
+:restore_file
+%COMPOSE% run --rm --no-deps -v "%BOT_DIR%\backups:/restore:ro" web restore "/restore/%~1"
+if errorlevel 1 goto :msg_restore_failed
+exit /b 0
+
+:msg_restore_failed
+echo.
+echo  That backup couldn't be put back (the reason is above). The bot's data is unchanged.
+exit /b 1

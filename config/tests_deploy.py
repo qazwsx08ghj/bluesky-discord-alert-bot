@@ -23,7 +23,7 @@ from django.test import SimpleTestCase
 
 ROOT = Path(settings.BASE_DIR)
 TESTING = ROOT / "config" / "testing"
-SCRIPTS = ["setup.bat", "start.bat", "update.bat", "stop.bat", "backup.bat"]
+SCRIPTS = ["setup.bat", "start.bat", "update.bat", "stop.bat", "backup.bat", "restore.bat"]
 ALL_BATCH = SCRIPTS + ["docker/scripts/common.bat", "dev/setup-without-docker.bat", "dev/start-without-docker.bat"]
 
 
@@ -42,7 +42,7 @@ class DockerFilesTests(SimpleTestCase):
         self.assertIn("restart: unless-stopped", text)
         self.assertIn('DEBUG: "False"', text)
         self.assertIn('ALLOWED_HOSTS: "localhost,127.0.0.1,[::1]"', text)
-        self.assertIn('SETTINGS_ENV_MIRROR_PATH: ""', text)
+        self.assertNotIn("SETTINGS_ENV_MIRROR_PATH", text, "removed in step 10: nothing writes .env")
         for service in ("web:", "checker:"):
             self.assertIn(f"  {service}\n    <<: *bot", text)
         self.assertEqual(text.count("healthcheck:"), 2)
@@ -92,7 +92,8 @@ class DockerFilesTests(SimpleTestCase):
         for line in lock.splitlines():
             if line and not line.startswith("#"):
                 self.assertRegex(line, r"^[A-Za-z0-9_.\-]+==[\w.\-]+$")
-        self.assertIn("Django==4.2.30", lock)
+        self.assertIn("Django==5.2.18", lock)
+        self.assertNotIn("django-apscheduler", lock, "unused; removed in step 10")
         self.assertIn("-r requirements-lock.txt", (ROOT / "requirements-docker.txt").read_text(encoding="utf-8"))
 
     def test_entrypoint_backs_up_and_migrates_before_serving(self):
@@ -113,14 +114,37 @@ class BatchFileTests(SimpleTestCase):
             data.decode("ascii")
             self.assertEqual(data.count(b"\n"), data.count(b"\r\n"), f"{name} must use CRLF line endings")
 
+    # Anything that could delete the bot's data. (Until step 10 these patterns held stray control
+    # characters instead of \b, so most of them could never match; test_the_guard_catches_* checks them.)
+    FORBIDDEN = (r"compose\b.*\bdown\b", r"volume\s+rm\b", r"volume\s+prune\b", r"system\s+prune\b",
+                 r"\bprune\b", r"--volumes\b", r"\brmdir\b", r"\brd\s", r"\bdel\s", r"\berase\b")
+    # The one allowed prune: after a successful update, this bot's own unused images (never volumes).
+    ALLOWED = '%alertbot_docker% image prune -f --filter "label=org.opencontainers.image.title=bluesky discord alert bot" >nul 2>&1'
+
+    def dangerous(self, line):
+        line = line.lower().strip()
+        if line.startswith("rem") or line.startswith("echo") or line == self.ALLOWED:
+            return []
+        import re
+        return [p for p in self.FORBIDDEN if re.search(p, line)]
+
     def test_scripts_never_remove_data(self):
         for name in ALL_BATCH:
-            for line in (ROOT / name).read_text(encoding="ascii").lower().splitlines():
-                if line.startswith("rem") or line.lstrip().startswith("echo"):
-                    continue
-                for forbidden in (r"compose.*down", r"volume\s+rm", r"prune", r"--volumes",
-                                  r"rmdir", r"rd\s", r"del\s", r"erase"):
-                    self.assertNotRegex(line, forbidden, f"{name}: {line}")
+            for line in (ROOT / name).read_text(encoding="ascii").splitlines():
+                self.assertEqual(self.dangerous(line), [], f"{name}: {line}")
+
+    def test_the_guard_catches_every_kind_of_deletion(self):
+        for line in ("%COMPOSE% down", "%COMPOSE% down --volumes", "docker volume rm alertbot_bot-data",
+                     "docker volume prune -f", "docker system prune -a", "docker image prune -a",
+                     "rmdir /s /q backups", "rd /s /q backups", "del backups\\*.sqlite3", "erase db.sqlite3"):
+            self.assertNotEqual(self.dangerous(line), [], line)
+        for line in ("rem never runs down", "echo  Nothing is deleted.", "%COMPOSE% stop", "%COMPOSE% up -d",
+                     self.ALLOWED.upper()):
+            self.assertEqual(self.dangerous(line), [], line)
+
+    def test_the_patterns_are_clean(self):
+        for pattern in self.FORBIDDEN:
+            self.assertTrue(pattern.isprintable(), repr(pattern))
 
     def test_old_start_script_still_listens_locally(self):
         text = (ROOT / "dev" / "start-without-docker.bat").read_text(encoding="ascii")
@@ -152,7 +176,9 @@ class ScriptHarness(SimpleTestCase):
             ALERTBOT_CURL=f'call "{TESTING / "fake_curl.cmd"}"',
             ALERTBOT_NO_BROWSER="1", ALERTBOT_NO_PAUSE="1", ALERTBOT_ASSUME_YES="1", ALERTBOT_NO_DESKTOP_START="1",
             ALERTBOT_DOCKER_WAIT_SECONDS="0", ALERTBOT_READY_WAIT_SECONDS="0", ALERTBOT_PORT=str(self.port),
-            FAKE_DOCKER_LOG=str(self.log),
+            ALERTBOT_DESKTOP_GRACE_SECONDS="0",
+            ALERTBOT_DESKTOP_RUNNING="0",  # never look at (or restart) the real Docker Desktop
+            FAKE_DOCKER_LOG=str(self.log), FAKE_ENGINE_UP_FILE=str(Path(tmp.name) / "engine-up"),
         )
 
     def run_script(self, name, **fake):
@@ -179,6 +205,28 @@ class WindowsScriptTests(ScriptHarness):
             self.assertIn("Docker Desktop isn't running yet", out, name)
             self.assertIn("Engine running", out)
             self.assertEqual(self.compose_calls(calls), [], f"{name} did nothing else")
+
+    def test_a_stuck_docker_desktop_is_restarted_once_and_then_works(self):
+        code, out, calls = self.run_script("start.bat", FAKE_ENGINE="down", ALERTBOT_DESKTOP_RUNNING="1",
+                                           ALERTBOT_DESKTOP_RESTART=f'"{TESTING / "fake_restart.cmd"}"')
+        self.assertEqual(code, 0, out)
+        self.assertIn("Docker Desktop is open, but it isn't responding", out)
+        self.assertIn("The bot's data isn't affected", out)
+        self.assertEqual(calls.count("restart-desktop"), 1)
+        self.assertEqual(self.compose_calls(calls)[-1], "up -d")
+
+    def test_a_restart_that_doesnt_help_is_explained_and_not_repeated(self):
+        code, out, calls = self.run_script("start.bat", FAKE_ENGINE="down", ALERTBOT_DESKTOP_RUNNING="1",
+                                           ALERTBOT_DESKTOP_RESTART=f'"{TESTING / "fake_restart.cmd"}" broken')
+        self.assertEqual(code, 1)
+        self.assertEqual(calls.count("restart-desktop"), 1)
+        self.assertIn("isn't running yet, or it isn't working right now", out)
+        self.assertEqual(self.compose_calls(calls), [])
+
+    def test_the_real_docker_desktop_is_never_restarted_by_the_tests(self):
+        common = (ROOT / "docker" / "scripts" / "common.bat").read_text(encoding="ascii")
+        self.assertIn("if defined CUSTOM_DOCKER if not defined ALERTBOT_DESKTOP_RESTART goto :msg_engine_down", common)
+        self.assertEqual(self.env["ALERTBOT_DESKTOP_RUNNING"], "0")
 
     def test_old_docker_desktop_is_explained(self):
         code, out, _ = self.run_script("start.bat", FAKE_COMPOSE="missing")
@@ -274,6 +322,8 @@ class WindowsScriptTests(ScriptHarness):
         ])
         self.assertTrue((self.dir / "backups").is_dir())
         self.assertIn("The update is complete", out)
+        self.assertEqual(calls[-1], 'docker image prune -f --filter "label=org.opencontainers.image.title=Bluesky '
+                                    'Discord Alert Bot"', "old images of this bot are removed after a good update")
 
     def test_update_stops_if_the_backup_fails(self):
         code, out, calls = self.run_script("update.bat", FAKE_FAIL_ON="backup")
@@ -288,8 +338,9 @@ class WindowsScriptTests(ScriptHarness):
         self.assertEqual(self.compose_calls(calls)[-1], "up -d")
 
     def test_update_reports_a_new_version_that_doesnt_start(self):
-        code, out, _ = self.run_script("update.bat", FAKE_CURL_EXIT=7)
+        code, out, calls = self.run_script("update.bat", FAKE_CURL_EXIT=7)
         self.assertEqual(code, 1)
+        self.assertFalse(any("prune" in c for c in calls), "nothing is tidied after a failed update")
         self.assertIn("A backup from just before the update is in the backups folder", out)
 
     # -- stop and backup ------------------------------------------------------------------------
@@ -304,6 +355,57 @@ class WindowsScriptTests(ScriptHarness):
         self.assertEqual(code, 0, out)
         self.assertEqual(self.compose_calls(calls), [
             f'run --rm --no-deps -v "{self.dir}\\backups:/export" web backup --label manual --export /export'])
+
+    # -- restore ---------------------------------------------------------------------------------
+    def make_backups(self, *names):
+        folder = self.dir / "backups"
+        folder.mkdir(exist_ok=True)
+        for i, name in enumerate(names):
+            path = folder / name
+            path.write_bytes(b"backup")
+            os.utime(path, (1_700_000_000 + i * 60, 1_700_000_000 + i * 60))
+
+    def test_restore_backs_up_first_then_stops_restores_and_starts(self):
+        self.make_backups("db-manual-20261020-100000-000001.sqlite3", "db-before-update-20261021-090000-000001.sqlite3")
+        code, out, calls = self.run_script("restore.bat", ALERTBOT_RESTORE_CHOICE="1")
+        self.assertEqual(code, 0, out)
+        self.assertIn("1. db-before-update-20261021-090000-000001.sqlite3", out, "newest first")
+        self.assertIn("2. db-manual-20261020-100000-000001.sqlite3", out)
+        self.assertEqual(self.compose_calls(calls), [
+            f'run --rm --no-deps -v "{self.dir}\\backups:/export" web backups',
+            f'run --rm --no-deps -v "{self.dir}\\backups:/export" web backup --label before-restore --export /export',
+            "stop",
+            f'run --rm --no-deps -v "{self.dir}\\backups:/restore:ro" web restore "/restore/'
+            'db-before-update-20261021-090000-000001.sqlite3"',
+            "up -d",
+        ])
+        self.assertIn("Done. The bot is running with the data from db-before-update-", out)
+
+    def test_restore_with_an_unknown_number_changes_nothing(self):
+        self.make_backups("db-manual-20261020-100000-000001.sqlite3")
+        code, out, calls = self.run_script("restore.bat", ALERTBOT_RESTORE_CHOICE="7")
+        self.assertEqual(code, 1)
+        self.assertIn("There is no backup number 7. Nothing was changed.", out)
+        self.assertEqual([c for c in self.compose_calls(calls) if not c.endswith("web backups")], [])
+
+    def test_restore_without_backups_says_so(self):
+        code, out, calls = self.run_script("restore.bat", ALERTBOT_RESTORE_CHOICE="1")
+        self.assertEqual(code, 0, out)
+        self.assertIn("No backups were found", out)
+        self.assertNotIn("stop", self.compose_calls(calls))
+
+    def test_a_backup_that_cant_be_put_back_restarts_the_bot_unchanged(self):
+        self.make_backups("db-manual-20261020-100000-000001.sqlite3")
+        code, out, calls = self.run_script("restore.bat", ALERTBOT_RESTORE_CHOICE="1", FAKE_FAIL_ON="web restore")
+        self.assertEqual(code, 1)
+        self.assertIn("couldn't be put back", out)
+        self.assertEqual(self.compose_calls(calls)[-1], "up -d", "the bot is started again with its own data")
+
+    def test_restore_stops_if_the_safety_backup_fails(self):
+        self.make_backups("db-manual-20261020-100000-000001.sqlite3")
+        code, out, calls = self.run_script("restore.bat", ALERTBOT_RESTORE_CHOICE="1", FAKE_FAIL_ON="before-restore")
+        self.assertEqual(code, 1)
+        self.assertNotIn("stop", self.compose_calls(calls))
 
     def test_every_compose_call_uses_the_project_settings(self):
         _, _, calls = self.run_script("update.bat")
@@ -332,7 +434,7 @@ class ReleaseBundleTests(ScriptHarness):
             zf.extractall(self.dir)
 
     def test_bundle_has_only_what_users_need(self):
-        self.assertEqual(self.names, sorted(["setup.bat", "start.bat", "update.bat", "stop.bat", "backup.bat",
+        self.assertEqual(self.names, sorted(["setup.bat", "start.bat", "update.bat", "stop.bat", "backup.bat", "restore.bat",
                                              "docker-compose.yml", "docker/compose.env", "docker/scripts/common.bat",
                                              "README.txt"]))
         env = (self.dir / "docker" / "compose.env").read_text()

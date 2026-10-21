@@ -47,7 +47,7 @@ frontend/
   - `frame-ancestors 'none'; object-src 'none'; base-uri 'none'`.
 
   Also `X-Frame-Options: DENY`. The page is `Cache-Control: no-cache`, so a new version appears on the next load. The files are cached for good, because their names change with every build.
-- **Not built?** A source checkout run without Node.js shows the previous page (`templates/index.html`) instead, so the bot always has a control panel. That page also stays at `/classic/` for now.
+- **Not built?** Only possible in a source checkout run without Docker: `/` then shows a short page explaining `npm ci` and `npm run build`. The API works either way. (The previous page, kept at `/classic/` during step 9, was removed in step 10.)
 - **Where the build is:** `FRONTEND_DIST` (default `frontend/dist`). In Docker, the image's `panel` stage builds it (see the `Dockerfile`).
 
 The API is unchanged: the panel uses exactly the routes and fields in API.md, so a future React Native app can do everything the panel does.

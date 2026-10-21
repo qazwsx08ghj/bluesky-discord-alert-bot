@@ -121,14 +121,13 @@ class AccountApiTests(APITestCase):
         self.assertEqual(res.data["results"], [])
 
     def test_create_and_list(self):
-        res = self.client.post(self.url, {"handle": "artist.bsky.social", "display_name": "Artist",
-                                          "discord_webhook_url": ""}, format="json")
+        res = self.client.post(self.url, {"handle": "artist.bsky.social", "display_name": "Artist"}, format="json")
         self.assertEqual(res.status_code, 201)
         self.assertTrue(res.data["is_active"])
         self.assertFalse(res.data["first_poll_done"])
         listed = self.client.get(self.url).data["results"]
         self.assertEqual([a["handle"] for a in listed], ["artist.bsky.social"])
-        self.assertEqual(listed[0]["seen_posts"], [])
+        self.assertNotIn("seen_posts", listed[0], "the list stays small; posts are on /posts/")
 
     def test_list_is_newest_first(self):
         for h in ("one.bsky.social", "two.bsky.social"):
@@ -146,10 +145,22 @@ class AccountApiTests(APITestCase):
         self.assertEqual(res.status_code, 400)
         self.assertIn("handle", res.data)
 
-    def test_invalid_webhook_url_is_rejected(self):
-        res = self.client.post(self.url, {"handle": "a.bsky.social", "discord_webhook_url": "not a url"}, format="json")
-        self.assertEqual(res.status_code, 400)
-        self.assertIn("discord_webhook_url", res.data)
+    def test_posts_are_listed_newest_first_and_paged(self):
+        acc = MonitoredAccount.objects.create(handle="artist.bsky.social")
+        for n in range(25):
+            SeenPost.objects.create(account=acc, post_uri=f"at://x/app.bsky.feed.post/{n}", post_cid=str(n),
+                                    text=f"post {n}", status=SeenPost.SENT)
+        other = MonitoredAccount.objects.create(handle="other.bsky.social")
+        SeenPost.objects.create(account=other, post_uri="at://y/app.bsky.feed.post/1", post_cid="1")
+        first = self.client.get(f"{self.url}{acc.id}/posts/").data
+        self.assertEqual(first["count"], 25)
+        self.assertEqual(len(first["results"]), 20)
+        self.assertEqual(first["results"][0]["text"], "post 24")
+        self.assertEqual(set(first["results"][0]), {"id", "post_uri", "post_url", "text", "kind", "status",
+                                                     "attempts", "seen_at", "sent_at"})
+        second = self.client.get(f"{self.url}{acc.id}/posts/?page=2").data
+        self.assertEqual([p["text"] for p in second["results"]][-1], "post 0")
+        self.assertEqual(self.client.get(f"{self.url}999/posts/").status_code, 404)
 
     def test_pause_and_resume(self):
         acc = MonitoredAccount.objects.create(handle="artist.bsky.social")

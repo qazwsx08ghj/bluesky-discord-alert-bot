@@ -1,254 +1,190 @@
 # Bluesky → Discord Alert Bot
 
-This bot watches **any public Bluesky account** you choose — artists, news accounts, creators, anyone — and automatically posts their new updates as announcements in your Discord channel.
+This bot watches **any public Bluesky accounts you choose** (artists, news accounts, creators, anyone) and posts their new posts as announcements in your Discord channels.
 
-**No coding needed to use it** — just follow this guide from top to bottom.
+**No coding needed.** You install one program, Docker Desktop, then double-click a file. Everything else happens in a control panel in your web browser.
 
-> **New: Docker Desktop version with a new control panel.** Install Docker Desktop, then double-click `setup.bat`; the control panel opens in your browser and walks you through the setup. See [docs/DOCKER.md](docs/DOCKER.md) and, for developers, [docs/FRONTEND.md](docs/FRONTEND.md). The Python/venv steps below still work (the scripts moved to `dev\`); this guide is rewritten for Docker in a later step.
+![The control panel](docs/screenshots/02-accounts.png)
 
 ---
 
-## What does it do?
+## What it does
 
-You pick any public Bluesky accounts you want to follow (they don't have to be yours). Every few minutes the bot checks those accounts for new posts. When someone posts something new, a message like this appears in your Discord channel automatically:
+Every few minutes the bot looks at the Bluesky accounts you picked. When one of them posts something new, a message like this appears in your Discord channel:
 
 ```
 ┌──────────────────────────────────────────┐
 │  New post from Someone Cool              │
 │                                          │
-│  "Hello everyone! Here's my new post."  │
+│  "Hello everyone! Here's my new post."   │
 │                                          │
-│  @someone.bsky.social on Bluesky        │
+│  @someone.bsky.social on Bluesky         │
 └──────────────────────────────────────────┘
 ```
 
-Clicking the title takes you directly to the post on Bluesky.
+Clicking the title opens the post on Bluesky.
+
+- **Any public account works.** It doesn't have to be yours.
+- **Several Discord channels:** each watched account can post to its own channel, or to your default one.
+- **Nothing old is announced.** When you add an account, the bot notes its existing posts without sending them, so your channel isn't flooded.
+- **Runs on your own computer.** Your passwords and settings never leave it; only the announcements go to Discord.
 
 ---
 
-## Before you start — checklist
+## What you need
 
-Make sure you have these ready before doing anything else:
+- A Windows 10 or Windows 11 computer (64-bit) that stays on while you want announcements.
+- **Docker Desktop**: free for personal use and small organisations. The next section shows how to install it.
+- A **Bluesky account** of your own. The bot signs in with it to read posts.
+- A **Discord server** where you can manage channels.
 
-- [ ] A Windows computer
-- [ ] Python installed (see Step 1 if you don't have it)
-- [ ] A Bluesky account of your own — **not** the accounts you want to watch, just one the bot uses as a "login key" to access Bluesky's system
-- [ ] A Discord server where you have permission to add webhooks
-
----
-
-## Step 1 — Install Python
-
-> **Skip this step if Python is already installed.**
-> To check: open the Start Menu, search for **Command Prompt**, open it, type `python --version` and press Enter. If you see a version number like `Python 3.11.x`, you already have it.
-
-1. Go to **python.org/downloads**
-2. Click the big yellow **Download Python** button
-3. Run the installer
-4. **Important:** On the first screen of the installer, check the box that says **"Add Python to PATH"** before clicking Install
+You don't need Python, Node.js, Git or any other tools, and you never need to type commands.
 
 ---
 
-## Step 2 — Open the project folder in Command Prompt
+## Step 1: Install Docker Desktop
 
-1. Find the folder named `DRF_backend_API_with_discord_alert_bot` on your computer
-2. Hold **Shift** and **right-click** anywhere inside that folder
-3. Click **"Open in Terminal"** or **"Open PowerShell window here"**
+Docker Desktop is the program the bot runs inside. You install it once.
 
-A black or blue window will open. Keep it open — you'll type commands here.
+1. Go to **https://www.docker.com/products/docker-desktop/** and download **Docker Desktop for Windows**.
+2. Open the downloaded file and follow the installer. Keep the option **"Use WSL 2"** ticked.
+3. **Restart the computer** when the installer asks.
+4. Open **Docker Desktop** from the Start menu. Accept the terms when it asks. You can skip signing in; it isn't needed.
+5. Wait until the bottom-left corner says **"Engine running"**.
+6. Open Docker Desktop's **Settings** (the gear icon) and make sure **"Start Docker Desktop when you sign in to your computer"** is ticked. This brings the bot back by itself after you restart the computer.
 
----
-
-## Step 3 — Get your Bluesky App Password
-
-> **This is YOUR Bluesky login — not the accounts you want to watch.**
-> Bluesky requires the bot to be logged in before it can read anyone's posts, even public ones. Think of this like needing a library card to browse books — the card is yours, but you can read any book in the library.
-> You can watch any public account (artists, news, creators) regardless of whose login you use here.
-
-You should create a special **App Password** for the bot instead of using your real Bluesky password — it's safer and you can delete it any time.
-
-1. Log in to **bsky.app**
-2. Click your profile picture → **Settings**
-3. Scroll down to **Privacy and Security**
-4. Click **App Passwords** → **Add App Password**
-5. Give it any name (e.g. `discord-bot`)
-6. Click **Create App Password**
-7. Copy the password shown (looks like `xxxx-xxxx-xxxx-xxxx`) — **you won't see it again**
+> **If Docker Desktop says "WSL" needs to be installed or updated,** let it do so, or follow the link it shows, then restart the computer.
+> **If it says virtualization is turned off,** it has to be switched on in the computer's BIOS/UEFI settings. Search the web for your computer model plus "enable virtualization", or ask someone who knows your computer.
 
 ---
 
-## Step 4 — Get your Discord Webhook URL
+## Step 2: Install the bot
 
-A webhook URL is a special link Discord gives you so outside apps can post messages into a channel.
+1. Put the bot's folder somewhere permanent, for example in **Documents**. (If you downloaded a `.zip` file, right-click it and choose **Extract All** first.)
+2. Double-click **`setup.bat`**.
+   - The first time it takes a few minutes: it prepares the bot inside Docker Desktop.
+   - If you used an **earlier version** of this bot in the same folder, setup offers to bring over its accounts and settings. Answer **Y**. The old files are only read, never changed.
+   - When it's ready, the control panel opens in your browser at **http://127.0.0.1:8000**.
 
-1. Open **Discord** on your computer
-2. Go to the channel where you want bot announcements (e.g. `#announcements`)
-3. Click the **gear icon** next to the channel name (hover over the channel to see it)
-4. In the menu on the left, click **Integrations**
-5. Click **Webhooks** → **New Webhook**
-6. Give it a name like `Bluesky Bot` (this is what shows as the sender in Discord)
-7. Click **Copy Webhook URL**
-
-The URL looks like:
-```
-https://discord.com/api/webhooks/1234567890123456789/abcDEFghiJKLmno...
-```
-
-Keep this copied — you'll need it in the next step.
+You can close the black window afterwards. The bot keeps running inside Docker Desktop.
 
 ---
 
-## Step 5 — Start the bot and open the setup page
+## Step 3: Set it up in the control panel
 
-Double-click **`start.bat`** in the project folder to start the bot.
+The control panel walks you through four steps the first time.
 
-Then open your browser and go to:
-```
-http://127.0.0.1:8000/
-```
+![Setup](docs/screenshots/01-setup.png)
 
-You will see the bot's control panel — a simple web page where you configure everything. **No file editing needed.**
+### 1. Connect your Bluesky login (an App Password)
 
-Click the **⚙️ Settings** tab and fill in:
+> **This is your own Bluesky login, not the accounts you want to watch.** Bluesky only lets signed-in apps read posts, even public ones. Think of it like a library card: the card is yours, but you can read any book.
 
-| Field | What to enter |
-|-------|---------------|
-| **Your Bluesky Handle** | **Your own** username (the login key), e.g. `john.bsky.social` |
-| **App Password** | The App Password from Step 3 — not your real password |
-| **Webhook URL** | The webhook URL you copied in Step 4 |
+Use an **App Password**, not your real password. It's safer, and you can delete it any time to cut the bot off.
 
-Click **Save** for each section. Then click **📨 Send Test Message** — if a message appears in your Discord channel, everything is connected correctly.
+1. Sign in at **bsky.app**.
+2. Open **Settings → Privacy and Security → App Passwords**.
+3. Choose **Add App Password**, name it `discord-bot`, and copy the password it shows (it looks like `xxxx-xxxx-xxxx-xxxx`). You won't see it again.
+4. In the control panel, enter your Bluesky handle (for example `yourname.bsky.social`) and paste the App Password, then press **Test and continue**. The bot checks the login before saving it.
 
-> **Your login has nothing to do with which accounts you watch.**
-> The accounts you want to monitor are added in the **📋 Watched Accounts** tab — they can be any public Bluesky account.
+### 2. Choose a Discord channel (a Webhook URL)
 
-4. Save the file (Ctrl + S) and close Notepad
+A webhook URL is a special link from Discord that lets the bot post in one channel.
 
----
+1. In Discord, hover over the channel for announcements and click its **gear icon** (Edit Channel).
+2. Open **Integrations → Webhooks → New Webhook**.
+3. Name it `Bluesky Bot` (this is the sender name shown in Discord) and choose **Copy Webhook URL**.
+4. In the control panel, give the channel a name and paste the URL. Keep the URL private: anyone with it can post in that channel.
 
-## Step 6 — Run first-time setup (do this once only)
+### 3. Send a test message
 
-Double-click **`setup.bat`** in the project folder.
+Press **Send test message** and look in your Discord channel. If nothing arrives, the panel tells you what to check.
 
-This will:
-- Install everything the bot needs
-- Create the bot's database
+### 4. Add your first account
 
-When it says **"Setup complete!"** you're ready.
+Type the handle of any public Bluesky account. The panel looks it up and shows the profile before you add it. Its first check runs straight away and only notes the existing posts, so **nothing appears in Discord until that account posts something new.**
 
 ---
 
-## Step 7 — Start the bot and open the control panel
+## Every day
 
-Double-click **`start.bat`** in the project folder.
+Everything happens in the control panel at **http://127.0.0.1:8000** (bookmark it).
 
-A window will open and you'll see something like:
+| Page | What you do there |
+|---|---|
+| **Accounts** | See whether the bot is running, add accounts, **Check now**, **Pause / Resume**, edit or remove accounts, **Check all now** |
+| **Activity** | Everything the bot sent, and any problems, with what to do about them |
+| **Settings** | Your Bluesky login, your Discord channels (add, test, change the default), how often to check, light or dark look |
 
-```
-Starting Bluesky Discord Alert Bot...
-Starting development server at http://127.0.0.1:8000/
-Quit the server with CTRL-BREAK.
-```
+The status at the bottom of the sidebar says whether the bot is running. Click it for details. If something needs your attention, a coloured banner explains it and offers the fix.
 
-**The bot is now running.** Keep this window open — closing it stops the bot.
+### The files in the bot's folder
 
-Now open your browser and go to:
-```
-http://127.0.0.1:8000/
-```
+| Double-click | What it does |
+|---|---|
+| `start.bat` | Starts the bot (if it isn't running) and opens the control panel |
+| `stop.bat` | Stops the bot. Nothing is deleted. It stays stopped until `start.bat`. |
+| `update.bat` | Installs a new version. Backs up first; your accounts and settings are kept. |
+| `backup.bat` | Saves a backup copy into the `backups` folder |
+| `restore.bat` | Puts a backup back. It shows the backups, newest first, and backs up the current data before restoring. |
+| `setup.bat` | First-time installation (running it again is safe) |
 
-This is the bot's **control panel** — everything is managed here.
-
----
-
-## Step 8 — Configure the bot (Settings tab)
-
-In the control panel, click the **⚙️ Settings** tab and fill in your details. See Step 5 above for what to enter in each field.
-
-After saving, click **📨 Send Test Message** to confirm Discord is connected.
+**The bot runs while Docker Desktop runs.** Closing Docker Desktop or shutting down the computer pauses the announcements; they start again by themselves when Docker Desktop is back. Posts made in between are announced at the next check.
 
 ---
 
-## Step 9 — Add Bluesky accounts to watch
+## Backups and your data
 
-This is where you pick **whose posts you want announced in Discord**. These can be any public Bluesky accounts — artists, journalists, news outlets, game developers, anyone.
-
-1. In the control panel, click the **📋 Watched Accounts** tab
-2. Enter the Bluesky handle you want to watch (e.g. `someartist.bsky.social`)
-3. Optionally add a display name (shown in Discord)
-4. Click **+ Add Account**
-5. Click **🔄 Check Now** on the new account to sync it
-
-> **Note:** The first "Check Now" silently reads recent posts without announcing them. This prevents your Discord from being flooded with old posts. Only brand-new posts from that point on will be announced.
-
----
-
-## Daily use
-
-| What you want to do | How |
-|---------------------|-----|
-| Start the bot | Double-click `start.bat` |
-| Stop the bot | Press Ctrl + C in the bot window, then close it |
-| Open the control panel | Go to `http://127.0.0.1:8000/` in your browser (bot must be running) |
-| Add a new Bluesky account | Control panel → 📋 Watched Accounts → fill in the form → Add |
-| Pause an account | Control panel → click **⏸ Pause** on that account |
-| Resume an account | Control panel → click **▶ Resume** on that account |
-| Remove an account | Control panel → click **🗑 Remove** on that account |
-| Force an immediate check | Control panel → click **🔄 Check Now** on an account |
-| Check all accounts right now | Control panel → click **🔄 Check All Now** |
-| Change settings (login, webhook, interval) | Control panel → ⚙️ Settings tab |
-
----
-
-## Sending different accounts to different Discord channels
-
-By default, all accounts post to the channel you set in ⚙️ Settings.
-
-If you want **one account** to post to a **different channel** instead:
-
-1. Get a second webhook URL from that other Discord channel (repeat Step 4)
-2. When adding the account, click **▸ Custom Discord channel for this account** to expand the optional field
-3. Paste the second webhook URL there
-
-That account's posts will now go to its own channel, while all others go to the default.
+- Your accounts, settings and history are stored **inside Docker Desktop**, on this computer. Updating, restarting or re-running setup never deletes them.
+- **Automatic backups** are made before every update and before every database change.
+- **`backup.bat`** makes one whenever you like. Copies go into the **`backups`** folder next to the scripts.
+- **Backups contain your App Password and webhook URLs.** Keep that folder private, and don't share it.
+- **To go back to a backup,** double-click `restore.bat` and type the number of the backup.
 
 ---
 
 ## Troubleshooting
 
-**The bot window shows an error about `BLUESKY_HANDLE`**
-→ The bot's Bluesky login isn't set up yet. Open the control panel's **Settings** tab and enter your handle and App Password. (On the very first start the bot copies them from `.env`, Step 5.)
+Every script explains problems in plain words and never deletes your data.
 
-**The bot window shows "Invalid identifier or password"**
-→ Your Bluesky handle or App Password is wrong. Enter both again in the control panel's **Settings** tab. Make sure you used the App Password from Step 3, not your real Bluesky password.
+**"Docker Desktop isn't installed" or "isn't running yet"**
+→ Install or open Docker Desktop (Step 1) and wait for "Engine running". The scripts try to start it for you.
+
+**"Docker Desktop is open, but it isn't responding"**
+→ Answer **Y** and the script restarts Docker Desktop for you. If it keeps happening, restart the computer, and install Docker Desktop's updates.
+
+**"Another program is already using port 8000"**
+→ If an older version of this bot is running in a black window, close it (two copies would announce everything twice). Otherwise open `docker\compose.env` in Notepad, change `ALERTBOT_PORT=8000` to another number such as `8080`, and use `http://127.0.0.1:8080`.
+
+**"Can't reach the bot" in the control panel**
+→ Open Docker Desktop, then double-click `start.bat`. The page reconnects by itself.
 
 **Nothing appears in Discord after adding an account**
-→ This is normal for the very first check — old posts are ignored. Wait for the next poll (up to 5 minutes) after a new post is made on that Bluesky account.
+→ That's expected: the first check only notes existing posts. The next new post from that account will be announced.
 
-**The Discord test message didn't appear**
-→ Your webhook URL is wrong or expired. Go back to Step 4 and create a new webhook in Discord.
+**"Bluesky didn't accept the login"**
+→ The App Password was deleted or mistyped. Make a new one (Step 3.1) and paste it under **Settings → Bluesky login**.
 
-**`setup.bat` says "python is not recognized"**
-→ Python wasn't added to PATH during installation. Uninstall Python and reinstall it, making sure to tick **"Add Python to PATH"** on the first screen.
+**The test message didn't arrive in Discord**
+→ The webhook may have been deleted in Discord. Make a new webhook (Step 3.2) and paste its URL under **Settings → Discord channels → Edit**.
 
-**I want to reset everything**
-→ Delete the file `db.sqlite3` in the project folder, then run `setup.bat` again. The settings are then copied from `.env` again, which always holds the last saved settings.
-
-**I want to change how often the bot checks for new posts**
-→ Change it in the control panel's **Settings** tab. It takes effect within a minute; no restart is needed.
-
-**I changed `.env` but nothing happened**
-→ After the first start, settings are saved in the bot's database and changed in the control panel. Edits to `.env` are ignored (the bot window says so). To load the `.env` values anyway, run `python manage.py import_env_settings --force` in the project's Command Prompt.
+**Something else**
+→ The scripts save a report in `logs\problem-report.txt` (passwords and webhook links are hidden). Share that file when asking for help.
 
 ---
 
-## Secret key info (for the person who set this up)
+## Coming from an earlier version (the black-window version)
 
-The `SECRET_KEY` in `.env` is already filled in. It's a security key for the bot — don't share it or post it online. If you ever need to generate a new one, run this in the project's Command Prompt:
+1. Close the old bot's black window.
+2. Install Docker Desktop (Step 1).
+3. Double-click `setup.bat` in the same folder and answer **Y** when it offers to bring over your accounts and settings.
 
-```
-venv\Scripts\activate
-python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
-```
+Your old `db.sqlite3` and `.env` files are only read. After moving, you can keep them as a spare copy, but don't start the old version again, or every post would be announced twice. The old scripts are in the `dev` folder for developers.
 
-Copy the output and replace the `SECRET_KEY` line in `.env`.
+---
+
+## More information
+
+- [docs/DOCKER.md](docs/DOCKER.md): how the Docker version works, updates, backups, restoring, and releases.
+- [docs/FRONTEND.md](docs/FRONTEND.md): the control panel, for developers.
+- [docs/API.md](docs/API.md): the bot's API, for developers.

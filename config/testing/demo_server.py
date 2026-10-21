@@ -10,8 +10,8 @@ temporary database. Only the outside world is replaced:
 - The network: connections to anything but this computer are refused, so nothing can
   reach Bluesky or Discord even by mistake.
 
-The real .env is never read or written: every setting it could provide is set here first
-(python-dotenv doesn't override variables that already exist), and the settings mirror is off.
+The real .env is never used: every setting it could provide is set here first
+(python-dotenv doesn't override variables that already exist), and nothing writes .env.
 
 Scenarios: `empty` (first visit), `working` (set up, with accounts and history) and
 `problem` (the saved App Password is rejected).
@@ -54,7 +54,6 @@ def _isolate(data_dir: Path):
         # Blank values win over the real .env (load_dotenv never overrides).
         "BLUESKY_HANDLE": "", "BLUESKY_PASSWORD": "", "DISCORD_WEBHOOK_URL": "", "POLL_INTERVAL_MINUTES": "5",
         "LEGACY_ENV_FILE": str(data_dir / "no-legacy-env"),  # doesn't exist: nothing is imported
-        "SETTINGS_ENV_MIRROR_PATH": "",
         "DATABASE_PATH": str(data_dir / "db.sqlite3"),
         "BACKUP_DIR": str(data_dir / "backups"),
         "SCHEDULER_IN_WEB": "0",  # started below, after the fakes are in place
@@ -351,7 +350,7 @@ def main():
     django.setup()
     from django.conf import settings
 
-    assert settings.SETTINGS_ENV_MIRROR_PATH == "", "the demo must never write the real .env"
+    assert not settings.BLUESKY_PASSWORD and not settings.DISCORD_WEBHOOK_URL, "the demo never sees real credentials"
     assert Path(settings.DATABASES["default"]["NAME"]).parent == data_dir
     install_fakes()
 

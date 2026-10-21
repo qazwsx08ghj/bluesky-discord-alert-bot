@@ -5,6 +5,8 @@
 #   checker     wait until the database is ready, then the Bluesky checker
 #   import-old  setup.bat: bring over the data of an earlier install mounted at /import (read-only)
 #   backup      update.bat / backup.bat: copy the database (backup_db options follow)
+#   backups     restore.bat: copy every backup in the volume to /export (existing files are kept)
+#   restore     restore.bat: put a backup back (the bot must be stopped); the file follows
 #   anything else is run as a command, e.g. "python manage.py check"
 set -eu
 cd /app
@@ -32,6 +34,17 @@ case "${1:-web}" in
   backup)
     shift
     exec python manage.py backup_db "$@"
+    ;;
+  backups)
+    mkdir -p /data/backups
+    for f in /data/backups/*.sqlite3; do
+      [ -e "$f" ] || continue
+      [ -e "/export/$(basename "$f")" ] || cp "$f" /export/
+    done
+    ;;
+  restore)
+    shift
+    exec python manage.py restore_db "$@"
     ;;
   *)
     exec "$@"

@@ -6,7 +6,7 @@ Topic pages with more background:
 - [CHANNELS.md](CHANNELS.md): channels
 - [ACTIVITY_AND_STATUS.md](ACTIVITY_AND_STATUS.md): activity and status
 - [ACCOUNTS_AND_CHECKS.md](ACCOUNTS_AND_CHECKS.md): lookup, login test, checks
-- [SETTINGS_MIGRATION.md](SETTINGS_MIGRATION.md): settings
+- [SETTINGS.md](SETTINGS.md): settings
 
 ## 1. Basics
 
@@ -120,10 +120,9 @@ Every error body has a stable `code` (for program logic) and a plain-language `m
 
 | Request | Body | Response |
 |---|---|---|
-| `GET /api/settings/` | | `{bluesky_handle, has_bluesky_password, discord_webhook_url (masked), has_discord_webhook_url, default_channel {id, name} \| null, poll_interval_minutes (string), settings_version, updated_at, env_file_in_sync, bluesky_login}` |
-| `PATCH /api/settings/` (`POST` also accepted) | Any of `bluesky_handle`, `bluesky_password` (blank = keep), `discord_webhook_url` (masked = keep), `poll_interval_minutes` (1–60) | `200 {status: "saved", settings: {…as GET}, warning?}`, `400 invalid_settings`, `503 settings_not_saved`. Applies at once; no restart. |
+| `GET /api/settings/` | | `{bluesky_handle, has_bluesky_password, default_channel {id, name} \| null, poll_interval_minutes (number), settings_version, updated_at, bluesky_login}` |
+| `PATCH /api/settings/` (`POST` also accepted) | Any of `bluesky_handle`, `bluesky_password` (blank = keep), `poll_interval_minutes` (1–60) | `200 {status: "saved", settings: {…as GET}}`, `400 invalid_settings`, `503 settings_not_saved`. Applies at once; no restart. Channels, including the default, are under `/api/webhooks/`. |
 | `POST /api/settings/test-login/` | Optional `bluesky_handle`, `bluesky_password` (blank = the saved one) | `{ok, result: ok\|rejected\|app_password_needed\|rate_limited\|unavailable\|error, code, message, problem, handle, account {did, handle}, matches_saved, saved: false, password_looks_like_app_password, warning, retry_after_seconds}`. Never saves anything. At most 5 tests per 5 minutes. |
-| `POST /api/settings/test-discord/` | Optional `url` (blank or masked = the saved default) | `200 {status: "sent"}`, `400 {status: "error", message}`, `502 {status: "failed", message}` |
 
 ### 4.3 Bluesky profile lookup
 
@@ -145,16 +144,16 @@ Every error body has a stable `code` (for program logic) and a plain-language `m
 | `GET /api/accounts/{id}/` | | The account |
 | `PATCH /api/accounts/{id}/` (or `PUT`) | Any of the fields above | The account |
 | `DELETE /api/accounts/{id}/` | | `204` |
+| `GET /api/accounts/{id}/posts/` | | The posts noticed for this account, newest first, paged (`?page=2`): `{id, post_uri, post_url, text, kind, status, attempts, seen_at, sent_at}`. `status`: `seeded` (noted on the first check, never sent), `pending`, `sending`, `retry`, `sent`, `failed`, `skipped`. |
 | `POST /api/accounts/{id}/poll_now/` | | Checks this one account now, inside the request (a few seconds). `{new_posts_announced, was_first_poll, state, state_label, state_message, first_check, problem, check {result, message, new_posts, posts_sent, not_announced}, error?}`; `409 already_checking` |
 | `POST /api/accounts/check_all/` | | `202`, a check job (section 4.6) |
 
 **Account fields:**
 - `id`, `handle`, `display_name`, `is_active`
-- `channel_id`, `channel {id, name, is_default}`, `uses_default_channel`, `discord_webhook_url` (masked, kept from before step 4)
+- `channel_id`, `channel {id, name, is_default}`, `uses_default_channel`
 - `announce_posts`, `announce_reposts`, `announce_replies`
 - `first_poll_done`, `created_at`
 - Status: `state` (`checking`, `paused`, `error`, `waiting_first_check`, `active`), `state_label`, `state_message`, `checking_now`, `problem`, `first_check {done, at, seeded_posts}`, `last_checked_at`, `last_check_ok`, `last_success_at`, `last_error {at, ongoing, category, title, explanation, fix}`
-- `seen_posts`: still included, but will be replaced by a paged endpoint.
 
 ### 4.5 Discord channels
 
@@ -249,8 +248,24 @@ No API changes. The new panel (`frontend/`, see [FRONTEND.md](FRONTEND.md)) uses
 | `/`, `/setup`, `/accounts`, `/activity`, `/settings` | The panel's page (`GET` and `HEAD` only). Sets the CSRF cookie. Strict `Content-Security-Policy`, `Cache-Control: no-cache`. |
 | `/assets/<file>` | The panel's built scripts, styles and fonts, from `frontend/dist/assets` only. Cached for good (their names change with each build). |
 | `/favicon.svg` | The icon. |
-| `/classic/` | The previous page (`templates/index.html`), kept as a fallback for now. Also shown at `/` if the panel hasn't been built. |
 
 Notes for clients:
 - The panel reads the newest Check All job with `GET /api/check-jobs/?limit=1`, which answers `{"results": []}` instead of a 404 before the first job.
 - Polling: `/api/status/` every 10 s (3 s while a check runs), accounts every 15 s (3 s while one is being checked), a running job every `poll_after_seconds`.
+
+## 7. Changes in step 10 (legacy removed)
+
+The compatibility layers kept for older versions and the old page are gone. Every capability is still there, in the form the panel already used:
+
+| Removed | Use instead |
+|---|---|
+| `POST /api/settings/test-discord/` | `POST /api/webhooks/{id}/test/` |
+| Settings fields `discord_webhook_url`, `has_discord_webhook_url` | `default_channel`; change it with `POST /api/webhooks/{id}/make_default/` |
+| Settings field `env_file_in_sync` and the save `warning` | Nothing: settings live only in the database; `.env` is never written |
+| Account field `discord_webhook_url` (read and write) | `channel_id` / `channel` |
+| Account field `seen_posts` (every post ever noticed, in every list response) | `GET /api/accounts/{id}/posts/`, paged |
+| `/classic/` | The panel at `/` |
+
+- Sending a removed field (`discord_webhook_url`) to the settings or account API is refused with `400` and a message naming the replacement, rather than being silently ignored.
+- `poll_interval_minutes` in `GET /api/settings/` is now a number (it was a string for older clients). Requests accept either.
+- Post history is capped at the newest 1,000 finished posts per account (`SEEN_POSTS_KEPT_PER_ACCOUNT`); posts still waiting to be sent are never removed.

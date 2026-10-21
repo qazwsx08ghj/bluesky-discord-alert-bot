@@ -20,9 +20,6 @@ def private_paths():
         value = os.getenv(name)
         if value:
             paths.add(Path(value).resolve())
-    mirror = getattr(settings, "SETTINGS_ENV_MIRROR_PATH", "")
-    if mirror:
-        paths.add(Path(mirror).resolve())
     return paths
 
 

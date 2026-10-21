@@ -1,4 +1,4 @@
-# Running the bot with Docker Desktop (step 8)
+# Running the bot with Docker Desktop
 
 The only thing a Windows user installs is **Docker Desktop**. Everything else is double-clicking a `.bat` file.
 
@@ -23,6 +23,7 @@ The only thing a Windows user installs is **Docker Desktop**. Everything else is
 | `stop.bat` | Stops the bot. Nothing is deleted; it stays stopped, also after a restart, until `start.bat`. |
 | `update.bat` | Backs up, gets the new version, restarts with it, and checks it works. See section 3. |
 | `backup.bat` | Saves a backup copy into the `backups` folder next to the scripts. |
+| `restore.bat` | Puts a backup back. See section 3. |
 
 **You can close the black window.** The bot keeps running inside Docker Desktop, and comes back by itself after a crash, a Docker Desktop restart or a computer restart.
 
@@ -33,6 +34,7 @@ Every script explains problems in plain words and never deletes anything.
 |---|---|
 | Docker Desktop isn't installed | Install it (link above), then run the script again. |
 | Docker Desktop isn't running yet | The script starts Docker Desktop itself and waits up to 3 minutes. If that isn't enough, open Docker Desktop, wait for "Engine running", and try again. |
+| Docker Desktop is open, but it isn't responding | Docker Desktop's engine sometimes stops answering, for example after sleep or an update. The script offers to restart Docker Desktop (Y, or automatically after 60 seconds). It uses `docker desktop restart` where available; on older versions it ends Docker Desktop and all its helper processes and starts it again. It restarts once at most. |
 | Your Docker Desktop is too old | Update Docker Desktop. |
 | Set to "Windows containers" | Right-click the whale icon, choose "Switch to Linux containers…". |
 | Another program is using port 8000 | Close the old bot window, or set another port in `docker\compose.env` (`ALERTBOT_PORT=8080`). |
@@ -52,11 +54,11 @@ Every script explains problems in plain words and never deletes anything.
 | Path | What |
 |---|---|
 | `/data/db.sqlite3` | Accounts, Bluesky login, channels, settings, activity history, Check All results |
-| `/data/backups/` | Automatic backups: before every migration (`db-auto-*`), before every update (`db-before-update-*`), and manual ones (`db-manual-*`); the newest 5 of each kind |
+| `/data/backups/` | Automatic backups: before every migration (`db-auto-*`), before every update (`db-before-update-*`) and before every restore (`db-before-restore-*`), plus manual ones (`db-manual-*`); the newest 5 of each kind |
 | `/data/secret_key` | Django's secret key, generated once per install, readable only by the bot |
 | `/data/cache/` | Shared cache for the web workers (lookups, login-test limit) |
 
-- **The volume survives** restarts, rebuilds, updates, and even removing the containers. The scripts never run `down`, `volume rm` or `prune`, and a test checks that.
+- **The volume survives** restarts, rebuilds, updates, and even removing the containers. The scripts never run `down`, `volume rm`, `volume prune` or `system prune`, and a test checks that (it also proves the check itself catches those commands). The only clean-up is described in section 3.
 - **The volume name is fixed** by `name: alertbot`, so it doesn't depend on the folder the scripts are in.
 - **Backups made by `update.bat` and `backup.bat`** are also copied to the `backups` folder next to the scripts, outside Docker. They contain passwords, so keep them private.
 
@@ -76,19 +78,24 @@ Every script explains problems in plain words and never deletes anything.
 2. **New version:** a release download pulls the published image (`docker compose pull`); a source folder rebuilds (`docker compose build --pull`). If this fails, the current version keeps running.
 3. **Restart:** `docker compose up -d` recreates the containers with the new image, keeping the same volume. On start, `web` backs up again if the update brings database changes, then migrates.
 4. **Check:** waits for `/api/health/`, then opens the panel.
+5. **Tidy up:** only after a successful update, removes this bot's old images that nothing uses any more (`docker image prune` limited to images labelled "Bluesky Discord Alert Bot"; never volumes). Without this, every update would leave about 260 MB behind.
+
+If nothing changed since the last update, Docker rebuilds or downloads the same image and leaves the running bot as it is.
 
 ### If an update goes wrong
 Your data and the backups are untouched; nothing in the update deletes anything.
 - **Go back to the previous version:**
   - Release download: set `ALERTBOT_IMAGE` in `docker\compose.env` to the previous version tag (e.g. `…:1.1.0`) and run `start.bat`.
   - Source folder: `git checkout <previous tag>`, then `update.bat`.
-- **Restore a backup:** only needed if the data itself is wrong.
-  1. Run `stop.bat`.
-  2. Copy the backup into the volume:
-     ```
-     docker compose -p alertbot --env-file docker\compose.env -f docker-compose.yml run --rm --no-deps -v "%CD%\backups:/restore:ro" web sh -c "rm -f /data/db.sqlite3-wal /data/db.sqlite3-shm && cp /restore/<file>.sqlite3 /data/db.sqlite3"
-     ```
-  3. Run `start.bat`.
+  - An older version can't run on a database that a newer one has already updated. Restore the backup made before the update first (below).
+- **Restore a backup** with `restore.bat`.
+
+### Restoring a backup (`restore.bat`)
+1. Copies every backup inside Docker into the `backups` folder (existing files are kept), and lists them all, newest first.
+2. You type the number of the backup to put back, and confirm.
+3. Backs up the current data first (`db-before-restore-*`), so a restore can itself be undone with `restore.bat`.
+4. Stops the bot and puts the backup back (`manage.py restore_db`). The backup is checked first: it must open, pass SQLite's integrity check and be this bot's database; otherwise nothing changes. The old database's journal files are removed so they can't be replayed onto the restored file.
+5. Starts the bot. If the backup comes from an older version, it is migrated on start (with a backup first, as always).
 
 ## 4. Security inside Docker
 
@@ -100,7 +107,7 @@ Your data and the backups are untouched; nothing in the update deletes anything.
 - **`DEBUG` is off**, set in `docker-compose.yml`.
 - **The image holds no secrets:** no `.env`, database or backups (`.dockerignore`, plus a check in the `Dockerfile`). It runs as user `bot`, not root, and the code isn't writable by the bot.
 - **The control panel is built inside the image** (step 9). A `panel` stage installs the exact Node.js packages from `frontend/package-lock.json` (`npm ci --ignore-scripts`) and builds the React app. Only the built files are copied into the image that runs; it has no Node.js. The page is served with a strict Content Security Policy (see [FRONTEND.md](FRONTEND.md)).
-- **Docker uses only `docker\compose.env`**, which holds no secrets. The scripts always pass it with `--env-file`, so Docker never reads the folder's old `.env`. The settings `.env` copy is off in Docker (`SETTINGS_ENV_MIRROR_PATH=""`).
+- **Docker uses only `docker\compose.env`**, which holds no secrets. The scripts always pass it with `--env-file`, so Docker never reads the folder's old `.env`. Nothing writes `.env` (the copy kept for older versions was removed in step 10); setup only reads an old `.env` once, to import it.
 - **Container logs** go through the same filter that hides webhook tokens. Docker keeps at most 3 files of 10 MB.
 
 ## 5. For developers
@@ -127,7 +134,13 @@ Your data and the backups are untouched; nothing in the update deletes anything.
 
   They never touch the `alertbot` project or its volume.
 
-## 6. Releases (prebuilt images)
+## 6. Tested with
+
+- Windows 11, Docker Desktop 4.25 (Docker Engine 24, Compose v2.23) in step 8, and Docker Desktop 4.96.1 (Docker Engine 29.9, Compose v5.6) in step 10.
+- The real-container tests (`config/tests_docker.py`) cover: setup with an import, local-only port, DEBUG off, Host/Origin/CSRF/JSON protection, the React panel in a browser, crashed services coming back, restart/rebuild/recreate keeping data, update with backup and a new image, a migration backed up on start, removed containers keeping the volume, stop, and restore (also undoing a restore).
+- Checked by hand in step 10: recovery after a full Docker Desktop restart, the upgrade of a step 9 install with `update.bat`, a folder with a Chinese name, the release download with a registry standing in for ghcr.io, and the import of a copy of a real first-version install with networking switched off.
+
+## 7. Releases (prebuilt images)
 
 Non-technical users should get the **release download**, so nothing is built on their computer.
 
@@ -138,7 +151,7 @@ Non-technical users should get the **release download**, so nothing is built on 
    3. pushes `ghcr.io/<owner>/<repo>:1.0.0` and `:stable`;
    4. attaches `BlueskyDiscordAlertBot-stable.zip` to the GitHub release.
 3. **The zip** (`docker/make_release_bundle.py`) contains only:
-   - the five scripts and `docker/scripts/common.bat`;
+   - the six scripts and `docker/scripts/common.bat`;
    - `docker-compose.yml`;
    - `docker/compose.env` with `ALERTBOT_IMAGE=ghcr.io/<owner>/<repo>:stable`;
    - a short `README.txt`.

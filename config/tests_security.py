@@ -18,7 +18,6 @@ from discord_alerts import channels
 from discord_alerts.models import DiscordWebhook
 from discord_alerts.sender import DeliveryResult
 from .security import check_local_only
-from .tests import TempEnvMixin
 
 HOOK = "https://discord.com/api/webhooks/1/first-secret-token"
 HOOK2 = "https://discord.com/api/webhooks/2/second-secret-token"
@@ -26,7 +25,7 @@ PASSWORD = "abcd-efgh-ijkl-mnop"
 EVIL = "http://evil.example"
 
 
-class SecurityTestCase(TempEnvMixin, TestCase):
+class SecurityTestCase(TestCase):
     """A client that checks CSRF the way a real browser request is checked."""
 
     def setUp(self):
@@ -38,7 +37,6 @@ class SecurityTestCase(TempEnvMixin, TestCase):
         self.account = MonitoredAccount.objects.create(handle="artist.bsky.social", first_poll_done=True)
         store.save({"bluesky_handle": "bot.bsky.social", "bluesky_password": PASSWORD})
         for target, value in (("discord_alerts.sender.deliver_alert", DeliveryResult(True)),
-                              ("config.frontend_views.send_discord_alert", True),
                               ("discord_alerts.views.send_discord_alert", True)):
             patcher = mock.patch(target, return_value=value)
             patcher.start()
@@ -67,7 +65,6 @@ class SecurityTestCase(TempEnvMixin, TestCase):
             ("post", "/api/accounts/check_all/", None),
             ("post", "/api/settings/", {"poll_interval_minutes": 9}),
             ("patch", "/api/settings/", {"poll_interval_minutes": 8}),
-            ("post", "/api/settings/test-discord/", {"url": HOOK2}),
             ("post", "/api/settings/test-login/", {"bluesky_handle": "x.bsky.social", "bluesky_password": "pw"}),
             ("post", "/api/webhooks/", {"name": "#new", "url": HOOK2 + "x"}),
             ("patch", f"/api/webhooks/{s}/", {"name": "#renamed"}),
@@ -142,9 +139,7 @@ class CsrfTests(SecurityTestCase):
     def test_the_control_panel_page_can_make_changes(self):
         page = self.client.get("/")
         self.assertIn("csrftoken", page.cookies, "the page sets the token cookie")
-        # Step 9: the React panel sends the token from frontend/src/api/client.ts; the previous
-        # page (still at /classic/) from its inline script.
-        self.assertContains(self.client.get("/classic/"), "X-CSRFToken")
+        # The React panel sends the token from frontend/src/api/client.ts.
         client_code = (Path(settings.BASE_DIR) / "frontend" / "src" / "api" / "client.ts").read_text(encoding="utf-8")
         self.assertIn('headers["X-CSRFToken"]', client_code)
         token = page.cookies["csrftoken"].value
@@ -173,11 +168,12 @@ class CsrfTests(SecurityTestCase):
 
     def test_reading_needs_no_token(self):
         for path in ("/api/accounts/", "/api/webhooks/", "/api/settings/", "/api/status/", "/api/activity/",
-                     "/api/check-jobs/", "/api/csrf/", f"/api/accounts/{self.account.pk}/"):
+                     "/api/check-jobs/", "/api/csrf/", f"/api/accounts/{self.account.pk}/",
+                     f"/api/accounts/{self.account.pk}/posts/"):
             self.assertEqual(self.client.get(path).status_code, 200, path)
 
     def test_refusals_never_echo_what_was_sent(self):
-        res = self.client.post("/api/settings/", {"bluesky_password": PASSWORD, "discord_webhook_url": HOOK2},
+        res = self.client.post("/api/settings/", {"bluesky_password": PASSWORD, "bluesky_handle": HOOK2},
                                format="json", HTTP_ORIGIN=EVIL)
         self.assertEqual(res.status_code, 403)
         self.assertNotIn(PASSWORD, res.content.decode())

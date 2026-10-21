@@ -83,12 +83,9 @@ class DiscordWebhookSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         make_default = validated_data.pop("is_default", None)
-        url_changed = "url" in validated_data and validated_data["url"] != instance.url
         for key, value in validated_data.items():
             setattr(instance, key, value)
         instance.save(update_fields=[*validated_data.keys(), "updated_at"])
         if make_default and not instance.is_default:
             channels.make_default(instance)
-        elif url_changed:
-            channels.sync_rollback_copies()
         return instance

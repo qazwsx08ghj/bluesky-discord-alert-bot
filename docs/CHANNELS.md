@@ -1,6 +1,6 @@
 # Named Discord channels (step 4)
 
-A channel is a `DiscordWebhook` row: a unique name plus a webhook URL (secret). Code: `discord_alerts/channels.py`. Tests: `discord_alerts/tests_channels.py` and `discord_alerts/tests_rollback.py`.
+A channel is a `DiscordWebhook` row: a unique name plus a webhook URL (secret). Code: `discord_alerts/channels.py`. Tests: `discord_alerts/tests_channels.py` and `config/tests_step10.py`.
 
 ## Routing
 
@@ -37,18 +37,18 @@ Before step 4, routing was the account's own `discord_webhook_url`, else the sav
 
 The database also refuses (`PROTECT`), so a channel assigned at the same moment is never lost. `PATCH is_default=false` on the default is refused; use `POST /api/webhooks/{id}/make_default/` on another channel instead.
 
-## API (all routes unchanged; fields added)
+## API
 
 - `/api/webhooks/`:
   - `url` is write-only. Responses show `url_masked`, `account_count`, `last_delivery` and `updated_at`.
   - Edits can leave `url` out, or send the masked value back, to keep the saved URL.
   - Only Discord webhook URLs are accepted, and errors never repeat the value.
 - `/api/accounts/`:
-  - New `channel_id` (null = follow the default), plus read-only `channel {id, name, is_default}` and `uses_default_channel`.
-  - The old `discord_webhook_url` field still works: a URL is matched to a channel or saved as a new one, `""` means follow the default, and the masked value means unchanged. Responses show only the masked URL.
+  - `channel_id` (null = follow the default), plus read-only `channel {id, name, is_default}` and `uses_default_channel`.
+  - The old `discord_webhook_url` field was removed in step 10; sending it is refused (`400`) with a pointer to `channel_id`.
 - `/api/settings/`:
-  - `discord_webhook_url` (masked) and `has_discord_webhook_url` describe the default channel. New: `default_channel {id, name}`.
-  - Saving a URL there makes the channel with that URL the default, or creates "Default channel". The previous default channel is kept.
+  - `default_channel {id, name}` names the default channel. Change it with `POST /api/webhooks/{id}/make_default/`.
+  - The old `discord_webhook_url` and `has_discord_webhook_url` fields were removed in step 10.
 
 ## Secrets
 
@@ -60,17 +60,6 @@ The database also refuses (`PROTECT`), so a channel assigned at the same moment 
   - Nothing private is served. Django serves only static and media folders, and a startup check (`botconfig.E001`) refuses to start if one of them is, or contains, the project folder, the database, `.env` or `backups/`.
   - Tests request the private paths directly, with and without debug mode, and all of them return `404`.
 
-## Rollback to step 3
+## The old columns (removed in step 10)
 
-The old columns are kept as exact copies after every channel change:
-- `MonitoredAccount.discord_webhook_url` holds the account's channel URL, or `""`.
-- `BotSettings.discord_webhook_url`, and with it `.env`, holds the default channel's URL.
-
-Step 3 code routes by those, so after `git checkout <step 3 commit>` it sends every account to the same place. The new columns accept inserts from older code. `Step3RollbackTests` checks both by running the real step 3 code. To remove the step 4 schema as well, before checking out:
-
-```
-python manage.py migrate bluesky_monitor 0002
-python manage.py migrate discord_alerts 0001
-```
-
-The backup taken before this step is in `backups/2026-10-21_before-step-4/`. These copies end on the same schedule as the `.env` copy: they are removed in step 10.
+Until step 10, the pre-step-4 columns `MonitoredAccount.discord_webhook_url` and `BotSettings.discord_webhook_url` (and `.env`) were kept as copies of the channels, so step 3 code could run after a rollback. Step 10 removed them (`bluesky_monitor` 0007, `botconfig` 0002). Before a column is dropped, any URL in it that has no channel gets one, so no account loses its destination, and both migrations can be undone (they fill the columns from the channels again). `config/tests_step10.py` checks both directions.
