@@ -78,8 +78,8 @@ class PollerTests(TestCase):
         self.assertEqual(self.send.call_count, 1)
 
     def test_account_webhook_overrides_default(self):
-        self.account.discord_webhook_url = CUSTOM_HOOK
-        self.account.save()
+        from discord_alerts import channels
+        channels.assign(self.account, channels.channel_for_url(CUSTOM_HOOK, "#custom"))
         self.poll_with()
         self.poll_with(feed_item("a"))
         self.assertEqual(self.send.call_args.kwargs["webhook_url"], CUSTOM_HOOK)

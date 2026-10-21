@@ -118,8 +118,13 @@ _LOG_LEVEL = os.getenv("BOT_LOG_LEVEL", "WARNING" if _RUNNING_TESTS else "INFO")
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "filters": {"redact_webhooks": {"()": "discord_alerts.logfilter.RedactWebhooks"}},
+    "handlers": {"console": {"class": "logging.StreamHandler", "filters": ["redact_webhooks"]}},
     "loggers": {
+        # Django's own messages (request errors, server log) also go through the filter.
+        "django": {"handlers": ["console"], "level": "ERROR" if _RUNNING_TESTS else "INFO", "propagate": False},
+        "apscheduler": {"handlers": ["console"], "level": "WARNING", "propagate": False},
+        "urllib3": {"handlers": ["console"], "level": "WARNING", "propagate": False},
         "bluesky_monitor": {"handlers": ["console"], "level": _LOG_LEVEL},
         "discord_alerts": {"handlers": ["console"], "level": _LOG_LEVEL},
         "botconfig": {"handlers": ["console"], "level": _LOG_LEVEL},
