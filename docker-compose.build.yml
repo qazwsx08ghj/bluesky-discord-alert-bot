@@ -1,0 +1,14 @@
+# Development and source installs: build the image from this folder instead of downloading it.
+# The scripts add this file when ALERTBOT_IMAGE in docker/compose.env is empty.
+#   docker compose --env-file docker/compose.env -f docker-compose.yml -f docker-compose.build.yml up -d --build
+services:
+  web:
+    build:
+      context: .
+      args:
+        ALERTBOT_VERSION: ${ALERTBOT_VERSION:-dev}
+  checker:
+    build:
+      context: .
+      args:
+        ALERTBOT_VERSION: ${ALERTBOT_VERSION:-dev}

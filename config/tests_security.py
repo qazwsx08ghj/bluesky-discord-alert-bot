@@ -242,8 +242,11 @@ class LocalOnlyTests(TestCase):
         with override_settings(ALLOWED_HOSTS=["localhost", "127.0.0.1", "[::1]"]):
             self.assertEqual(check_local_only(), [])
 
-    def test_start_script_listens_on_this_computer_only(self):
-        script = (settings.BASE_DIR / "start.bat").read_text(encoding="utf-8")
+    def test_start_scripts_listen_on_this_computer_only(self):
+        # Docker (step 8): published on 127.0.0.1 only; without Docker: runserver on 127.0.0.1.
+        compose = (settings.BASE_DIR / "docker-compose.yml").read_text(encoding="utf-8")
+        self.assertIn('"127.0.0.1:${ALERTBOT_PORT:-8000}:8000"', compose)
+        script = (settings.BASE_DIR / "dev" / "start-without-docker.bat").read_text(encoding="utf-8")
         self.assertIn("runserver 127.0.0.1:8000", script)
         self.assertNotIn("0.0.0.0", script)
 
@@ -290,8 +293,8 @@ class AdminRemovedTests(TestCase):
         self.assertEqual(self.client.get("/api/accounts/").status_code, 200)
 
     def test_setup_no_longer_asks_for_an_admin_user(self):
-        script = (settings.BASE_DIR / "setup.bat").read_text(encoding="utf-8")
-        self.assertNotIn("createsuperuser", script)
+        for name in ("setup.bat", "dev/setup-without-docker.bat"):
+            self.assertNotIn("createsuperuser", (settings.BASE_DIR / name).read_text(encoding="utf-8"))
 
 
 class ErrorFormatTests(TestCase):

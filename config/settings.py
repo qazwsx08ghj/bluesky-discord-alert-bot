@@ -1,13 +1,29 @@
 import os
 import sys
 from pathlib import Path
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
+
+def _secret_key():
+    """SECRET_KEY from the environment, else from SECRET_KEY_FILE (Docker: generated once per
+    install by `manage.py prepare_data` and kept in the data volume)."""
+    if os.getenv("SECRET_KEY"):
+        return os.environ["SECRET_KEY"]
+    path = os.getenv("SECRET_KEY_FILE")
+    if path and Path(path).is_file():
+        key = Path(path).read_text(encoding="utf-8").strip()
+        if key:
+            return key
+    return "change-me-in-production"
+
+
+SECRET_KEY = _secret_key()
+# Shown by /api/health/; set when the Docker image is built (ALERTBOT_VERSION).
+APP_VERSION = os.getenv("ALERTBOT_VERSION", "dev")
 DEBUG = os.getenv("DEBUG", "False") == "True"
 # Local only (step 7): the panel has no login, so it answers only to this computer's own names.
 # This also blocks DNS-rebinding attacks. See config/security.py and docs/API.md.
@@ -50,6 +66,9 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "same-origin"
 # Error pages and reports hide webhook URLs and tokens too.
 DEFAULT_EXCEPTION_REPORTER_FILTER = "config.security.SafeReporterFilter"
+# config.security.RequestGuardMiddleware replaces (and extends) CsrfViewMiddleware, so Django's
+# "CSRF middleware missing" deployment warning doesn't apply.
+SILENCED_SYSTEM_CHECKS = ["security.W003"]
 
 ROOT_URLCONF = "config.urls"
 
@@ -78,6 +97,14 @@ DATABASES = {
         "OPTIONS": {"timeout": 20},
     }
 }
+# Where `manage.py backup_db` puts copies (Docker: /data/backups, inside the data volume).
+BACKUP_DIR = Path(os.getenv("BACKUP_DIR") or BASE_DIR / "backups")
+
+# Docker runs several web workers; a file cache lets them share the profile lookup cache and
+# the login test limit. Without CACHE_DIR (and in tests) each process has its own memory cache.
+if os.getenv("CACHE_DIR"):
+    CACHES = {"default": {"BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
+                          "LOCATION": os.environ["CACHE_DIR"]}}
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
@@ -114,8 +141,18 @@ _RUNNING_TESTS = len(sys.argv) > 1 and sys.argv[1] == "test"
 # Bot settings live in the database since step 3 (botconfig/store.py). These .env values
 # are read only once, to fill the database the first time. Edits here are ignored after that.
 # Tests never see the real values; they set their own.
+# LEGACY_ENV_FILE: read them from that file instead (Docker setup: the old install's .env,
+# mounted read-only, so its settings can be brought over once).
+_LEGACY_FILE = os.getenv("LEGACY_ENV_FILE", "")
+_LEGACY_VALUES = dotenv_values(_LEGACY_FILE) if _LEGACY_FILE and Path(_LEGACY_FILE).is_file() else None
+
+
 def _legacy(key, default=""):
-    return default if _RUNNING_TESTS else os.getenv(key, default)
+    if _RUNNING_TESTS:
+        return default
+    if _LEGACY_FILE:
+        return (_LEGACY_VALUES or {}).get(key) or default
+    return os.getenv(key, default)
 
 
 BLUESKY_HANDLE = _legacy("BLUESKY_HANDLE")
@@ -143,6 +180,9 @@ ACTIVITY_MAX_EVENTS = int(os.getenv("ACTIVITY_MAX_EVENTS", "10000"))
 # this past its planned time counts as overdue.
 SCHEDULER_STALL_MINUTES = int(os.getenv("SCHEDULER_STALL_MINUTES", "10"))
 SCHEDULER_OVERDUE_GRACE_SECONDS = int(os.getenv("SCHEDULER_OVERDUE_GRACE_SECONDS", "120"))
+# Step 8: a standalone checker (`run_scheduler`, the Docker checker service) exits if its own
+# heartbeat hasn't run for this long, so Docker restarts it. 0 turns the watchdog off.
+SCHEDULER_WATCHDOG_SECONDS = int(os.getenv("SCHEDULER_WATCHDOG_SECONDS", "300"))
 
 # Step 6: profile lookup, login test, "Check all"
 BLUESKY_PUBLIC_API_URL = os.getenv("BLUESKY_PUBLIC_API_URL", "https://public.api.bsky.app")  # read-only, no login

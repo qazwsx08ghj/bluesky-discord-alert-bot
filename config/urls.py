@@ -2,11 +2,13 @@ from django.urls import path, include
 from activity.views import status_view
 from bluesky_monitor.views import check_job_detail, check_job_latest, check_job_list, profile_lookup
 from .frontend_views import index, bot_settings, test_discord, test_login
+from .health import health
 from .security import csrf_token
 
 urlpatterns = [
     path("", index, name="index"),
     path("api/csrf/", csrf_token, name="csrf-token"),
+    path("api/health/", health, name="health"),
     path("api/accounts/", include("bluesky_monitor.urls")),
     path("api/webhooks/", include("discord_alerts.urls")),
     path("api/settings/", bot_settings, name="bot-settings"),
