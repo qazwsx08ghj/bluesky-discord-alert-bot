@@ -122,6 +122,14 @@ ACTIVITY_MAX_EVENTS = int(os.getenv("ACTIVITY_MAX_EVENTS", "10000"))
 SCHEDULER_STALL_MINUTES = int(os.getenv("SCHEDULER_STALL_MINUTES", "10"))
 SCHEDULER_OVERDUE_GRACE_SECONDS = int(os.getenv("SCHEDULER_OVERDUE_GRACE_SECONDS", "120"))
 
+# Step 6: profile lookup, login test, "Check all"
+BLUESKY_PUBLIC_API_URL = os.getenv("BLUESKY_PUBLIC_API_URL", "https://public.api.bsky.app")  # read-only, no login
+BLUESKY_REQUEST_TIMEOUT_SECONDS = int(os.getenv("BLUESKY_REQUEST_TIMEOUT_SECONDS", "10"))
+PROFILE_LOOKUP_CACHE_SECONDS = int(os.getenv("PROFILE_LOOKUP_CACHE_SECONDS", "60"))
+LOGIN_TEST_LIMIT = int(os.getenv("LOGIN_TEST_LIMIT", "5"))  # tests per window
+LOGIN_TEST_WINDOW_SECONDS = int(os.getenv("LOGIN_TEST_WINDOW_SECONDS", "300"))
+CHECK_ALL_TIME_LIMIT_SECONDS = int(os.getenv("CHECK_ALL_TIME_LIMIT_SECONDS", "50"))
+
 _LOG_LEVEL = os.getenv("BOT_LOG_LEVEL", "WARNING" if _RUNNING_TESTS else "INFO")
 LOGGING = {
     "version": 1,

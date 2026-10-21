@@ -234,3 +234,10 @@ The old `templates/index.html` and `index` view are kept until the React app rep
   - Retention: 30 days or 10,000 entries, whichever comes first; only log rows are deleted, never the delivery queue.
   - Secrets are scrubbed before anything is stored; the console log filter uses the same patterns.
   - Not done here (planned for step 6): per-account `state` / `first_check` in the account API, `test-login`, `check_all`. `SeenPost` retention is not implemented yet.
+- **Step 6 (done):** see `docs/ACCOUNTS_AND_CHECKS.md`.
+  - `GET /api/bluesky/profile/?handle=`: uses Bluesky's public API (no login), cleans up handles and links, and answers found / not_found / unavailable / invalid / rate_limited / error. Answers are cached for 60 s, and the query is echoed for stale-answer handling. **Changed from the plan:** "not found" is a `200` with `result: not_found` (not a `404`), and it doesn't use the shared session.
+  - `POST /api/settings/test-login/`: a throwaway sign-in that saves nothing (5 tests per 5 minutes). A working test of the saved login ends a back-off. `GET /api/settings/` adds `bluesky_login`.
+  - `POST /api/accounts/check_all/`: **changed from the plan,** it runs in the request through the scheduler's own `check_accounts()` (per-account locks, claims) and returns per-account results, instead of a `202` with a queued run.
+  - One account's unexpected error no longer stops a scheduled check.
+  - Account API: `state`, `first_check`, `last_success_at`, `last_error` and the announce options. Handles are normalized, with `already_watched`. Reposts and replies are classified and announced per account.
+  - Not done here: the planned `GET /api/accounts/{id}/posts/` and dropping the nested `seen_posts` (left for the React step); storing `did`/`avatar_url` on accounts; `SeenPost` retention.

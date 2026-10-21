@@ -26,28 +26,43 @@ def _discord_reply(resp) -> str:
         return ""
 
 
-def build_payload(handle: str, display_name: str, text: str, post_url: str) -> dict:
+def _author_from_url(post_url: str) -> str:
+    """The original author's handle from a bsky.app post link (…/profile/<handle>/post/<id>)."""
+    parts = (post_url or "").split("/profile/", 1)
+    return parts[1].split("/", 1)[0] if len(parts) == 2 else ""
+
+
+def build_payload(handle: str, display_name: str, text: str, post_url: str, kind: str = "post") -> dict:
+    """The Discord embed. kind: post (as before), repost (shows the original author) or reply."""
+    title, footer = f"New post from {display_name}", f"@{handle} on Bluesky"
+    if kind == "repost":
+        author = _author_from_url(post_url)
+        title = f"{display_name} reposted"
+        footer = f"Reposted by @{handle} · original post by @{author} on Bluesky" if author else footer
+    elif kind == "reply":
+        title = f"New reply from {display_name}"
     return {
         "embeds": [
             {
-                "title": f"New post from {display_name}",
+                "title": title,
                 "description": text or "(no text)",
                 "url": post_url,
                 "color": 0x0085FF,  # Bluesky blue
-                "footer": {"text": f"@{handle} on Bluesky"},
+                "footer": {"text": footer},
             }
         ]
     }
 
 
 @sensitive_variables("webhook_url")
-def deliver_alert(webhook_url: str, handle: str, display_name: str, text: str, post_url: str) -> DeliveryResult:
+def deliver_alert(webhook_url: str, handle: str, display_name: str, text: str, post_url: str,
+                  kind: str = "post") -> DeliveryResult:
     """POST a Discord embed and report exactly what happened.
 
     ``wait=true`` makes Discord reply only after the message is stored, so a success here
     means the message really exists. That keeps resends after a timeout rare.
     """
-    payload = build_payload(handle, display_name, text, post_url)
+    payload = build_payload(handle, display_name, text, post_url, kind)
     try:
         resp = requests.post(webhook_url, json=payload, params={"wait": "true"}, timeout=10)
         if resp.status_code == 429:

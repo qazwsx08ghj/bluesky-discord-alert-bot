@@ -179,14 +179,18 @@ class AccountApiTests(APITestCase):
         with mock.patch("bluesky_monitor.views.poll_account", return_value=0) as poll:
             res = self.client.post(f"{self.url}{acc.id}/poll_now/")
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.data, {"new_posts_announced": 0, "was_first_poll": True})
+        # The original fields keep their values; step 6 only adds fields (state, first_check, ...).
+        self.assertEqual({k: res.data[k] for k in ("new_posts_announced", "was_first_poll")},
+                         {"new_posts_announced": 0, "was_first_poll": True})
+        self.assertEqual(res.data["state"], "waiting_first_check")
         poll.assert_called_once()
 
         acc.first_poll_done = True
         acc.save()
         with mock.patch("bluesky_monitor.views.poll_account", return_value=3):
             res = self.client.post(f"{self.url}{acc.id}/poll_now/")
-        self.assertEqual(res.data, {"new_posts_announced": 3, "was_first_poll": False})
+        self.assertEqual({k: res.data[k] for k in ("new_posts_announced", "was_first_poll")},
+                         {"new_posts_announced": 3, "was_first_poll": False})
 
     def test_poll_now_unknown_account_is_404(self):
         self.assertEqual(self.client.post(f"{self.url}999/poll_now/").status_code, 404)

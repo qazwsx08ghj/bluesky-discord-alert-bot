@@ -53,7 +53,7 @@ class DiscordWebhookViewSet(viewsets.ModelViewSet):
             webhook_url=webhook.url,
             handle="test.bsky.social",
             display_name="Test Account",
-            text="This is a test announcement from your DRF bot.",
+            text="This is a test message from your Bluesky → Discord Alert Bot. If you can see it, this channel is set up correctly.",
             post_url="https://bsky.app",
         )
         channels.record_delivery(webhook.pk, ok, "" if ok else "The test message wasn't accepted by Discord.")

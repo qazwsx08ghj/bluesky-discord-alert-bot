@@ -107,6 +107,21 @@ class DuplicatePreventionAcrossProcessesTests(ProcessTestCase):
         self.assertEqual(set(sends.values()), {1}, f"duplicates: {sends}")
 
 
+class CheckAllAcrossProcessesTests(ProcessTestCase):
+    def test_check_all_during_a_scheduled_check_sends_each_post_once(self):
+        def args(i, start_at):
+            return ("cycle", "S", self.log, start_at) if i == 0 else ("check_all", self.log, start_at)
+
+        outs = self.run_together(4, args)
+        sends = self.sends()
+        self.assertEqual(len(sends), 5, outs)
+        self.assertEqual(set(sends.values()), {1}, f"duplicates: {sends}")
+        results = [o for o in outs[1:]]
+        self.assertTrue(all(o in ("artist.bsky.social=checked", "artist.bsky.social=already_checking")
+                            for o in results), results)
+        self.assertIn("already_checking", " ".join(results), "overlapping checks were turned away, not repeated")
+
+
 class InterruptedSendTests(ProcessTestCase):
     def test_send_interrupted_by_a_crash_is_delivered_once_after_recovery(self):
         self.env["ACCOUNT_LOCK_SECONDS"] = "8"  # long enough to observe it held after the crash

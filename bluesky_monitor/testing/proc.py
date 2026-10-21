@@ -130,6 +130,15 @@ elif action == "cycle":  # cycle <instance> <log> <start_ts>
     wait_until(start)
     print("RAN" if scheduler.run_cycle(instance) else "STANDBY", flush=True)
 
+elif action == "check_all":  # check_all <log> <start_ts>: the "Check all" button
+    from bluesky_monitor import check_all
+
+    log, start = args
+    install_fakes(log)
+    wait_until(start)
+    body = check_all.run()
+    print(" ".join(f"{r['handle']}={r['result']}" for r in body["accounts"]), flush=True)
+
 elif action == "status":
     for p in SeenPost.objects.order_by("id"):
         print(p.post_uri.rsplit("/", 1)[1], p.status, p.attempts)
