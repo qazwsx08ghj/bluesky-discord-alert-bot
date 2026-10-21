@@ -24,6 +24,7 @@ SPECTACULAR_SETTINGS = {
         "body. Webhook URLs and the App Password are write-only. Background, security rules and "
         "error codes: docs/API.md."
     ),
+    "LICENSE": {"name": "MIT", "identifier": "MIT"},
     "VERSION": "1.0.0",  # the contract's own version; bump it when the API changes
     "OAS_VERSION": "3.1.0",
     "SERVE_INCLUDE_SCHEMA": False,

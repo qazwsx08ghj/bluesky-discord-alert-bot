@@ -26,7 +26,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     ALERTBOT_VERSION=${ALERTBOT_VERSION}
 LABEL org.opencontainers.image.title="Bluesky Discord Alert Bot" \
-      org.opencontainers.image.version="${ALERTBOT_VERSION}"
+      org.opencontainers.image.version="${ALERTBOT_VERSION}" \
+      org.opencontainers.image.licenses="MIT"
 
 # The bot runs as an ordinary user. /data is the persistent volume (database, backups, key).
 RUN useradd --uid 1000 --create-home --shell /usr/sbin/nologin bot \

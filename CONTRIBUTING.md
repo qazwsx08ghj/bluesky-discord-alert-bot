@@ -135,3 +135,12 @@ Keep it that way: a test that could reach the real services or real data is a bu
   - Only masked forms are shown.
   - Never commit `.env`, databases or backups.
 - **Exact versions.** Python versions are in `requirements-lock.txt` (and `requirements-dev.txt`); Node.js versions are in `package-lock.json`. Run the audits after an update.
+
+## 8. License
+
+The project is MIT-licensed ([LICENSE](LICENSE)). By contributing, you agree that your contribution is released under the same license.
+
+When you add a dependency:
+- **Check its license first.** MIT, BSD, ISC and Apache-2.0 are fine.
+- **Ask before adding anything copyleft** (GPL, AGPL, LGPL) or with unusual terms, if it would ship to users in the Docker image or the built panel. Development-only tools matter less, because they aren't distributed.
+- **Fonts, icons and images** need a license that allows redistribution, such as the SIL Open Font License or CC0.

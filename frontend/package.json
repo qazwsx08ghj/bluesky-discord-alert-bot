@@ -1,6 +1,7 @@
 {
   "name": "alertbot-control-panel",
   "private": true,
+  "license": "MIT",
   "version": "1.0.0",
   "type": "module",
   "description": "Control panel for the Bluesky to Discord Alert Bot (built into the Docker image).",

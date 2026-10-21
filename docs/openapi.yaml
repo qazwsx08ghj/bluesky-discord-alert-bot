@@ -7,6 +7,9 @@ info:
     DELETE) needs the CSRF token from GET /api/csrf/ in the X-CSRFToken header, together
     with its csrftoken cookie, and a JSON body. Webhook URLs and the App Password
     are write-only. Background, security rules and error codes: docs/API.md.'
+  license:
+    name: MIT
+    identifier: MIT
 paths:
   /api/accounts/:
     get:

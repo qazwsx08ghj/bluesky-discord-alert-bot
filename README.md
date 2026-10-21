@@ -189,3 +189,9 @@ Your old `db.sqlite3` and `.env` files are only read. After moving, you can keep
 - [docs/FRONTEND.md](docs/FRONTEND.md): the control panel, for developers.
 - [docs/API.md](docs/API.md): the bot's API, for developers.
 - [CONTRIBUTING.md](CONTRIBUTING.md): for developers: the project's layout, working on the panel or the backend separately, the API contract (`docs/openapi.yaml`), tests and CI.
+
+## License
+
+The bot is free and open source under the [MIT License](LICENSE). You may use, copy, change and share it, including commercially, as long as the copyright and license notice stay with it. It comes with no warranty.
+
+It is built on other open-source software, which keeps its own licenses. This project is not affiliated with Bluesky or Discord.
