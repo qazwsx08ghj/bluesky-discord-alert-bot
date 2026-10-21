@@ -1,6 +1,6 @@
 # Activity log and status (step 5)
 
-Code: `activity/` (log, problem categories, retention, status, API). The checker writes its health in `bluesky_monitor/scheduler.py` and `poller.py`. Tests: `activity/tests.py` and `activity/tests_rollback.py`.
+Code: `activity/` (log, problem categories, retention, status, API). The checker writes its health in `bluesky_monitor/scheduler.py` and `poller.py`. Tests: `activity/tests.py`.
 
 ## `GET /api/status/`
 
@@ -71,7 +71,7 @@ Event types:
 ## Separate from the delivery queue
 
 - Posts waiting to be sent live in `SeenPost`. The log lives in `ActivityEvent`, and nothing in the log points to a queued post.
-- The log refers to accounts and channels by id plus a name, without a foreign key. Deleting an account or channel is never blocked by its log entries, the entries keep the name, and older code can delete them too after a rollback.
+- The log refers to accounts and channels by id plus a name, without a foreign key. Deleting an account or channel is never blocked by its log entries, the entries keep the name.
 - Writing to the log never raises an error. If the database refuses the entry, the check or send still completes.
 
 ## Retention
@@ -99,11 +99,6 @@ Event types:
   - `MonitoredAccount.last_checked_at`, `last_check_ok` and `last_check_category`
   - `SchedulerState.last_cycle_summary`
   
-  All are nullable, so step 4 code can still insert rows (`bluesky_monitor` 0004).
-- **Rollback to step 4:**
-  ```
-  python manage.py migrate activity zero
-  python manage.py migrate bluesky_monitor 0003
-  ```
-  Then check out the step 4 commit. Without the schema rollback, step 4 code also runs unchanged on the step 5 database; `Step4RollbackTests` runs the real step 4 code to check this.
+  (`bluesky_monitor` 0004).
+- **Going back:** since step 10, the older versions' compatibility copies are gone, so an older version can't run on this database. To go back, restore a backup made before the update (`restore.bat`) and run the matching version (docs/DOCKER.md, "If an update goes wrong").
 - The backup taken before this step is in `backups/2026-10-21_before-step-5/`.

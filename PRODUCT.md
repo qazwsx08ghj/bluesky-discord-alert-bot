@@ -8,7 +8,7 @@ web
 
 ## Stack
 
-In place since step 9 (the previous single-template page, `templates/index.html`, stays at `/classic/` as a fallback for now):
+In place since step 9:
 
 - **Frontend:** React, kept logically separate from the backend.
 - **Backend:** Django + Django REST Framework. Django exposes REST APIs only, shaped so a future React Native client can reuse them.
@@ -48,9 +48,9 @@ A self-hosted, no-code bridge from Bluesky to Discord: the owner runs it on thei
 Confirmed functionality (from code):
 
 - Watched accounts: add (handle, optional display name, optional per-account webhook), list, pause/resume, remove, "Check Now" per account, "Check All Now". (`/api/accounts/`)
-- Webhooks model with a single default. (`/api/webhooks/`)
-- Settings: Bluesky handle, app password (write-only; the API reports only whether one is set), default webhook URL, poll interval. (`/api/settings/`)
-- Send a test message to Discord. (`/api/settings/test-discord/`)
+- Named Discord channels with a single default. (`/api/webhooks/`)
+- Settings: Bluesky handle, app password (write-only; the API reports only whether one is set), poll interval. (`/api/settings/`)
+- Send a test message to a Discord channel. (`/api/webhooks/{id}/test/`)
 - Discord embeds use Bluesky blue `0x0085FF` and link to the post on bsky.app.
 
 Constraints:

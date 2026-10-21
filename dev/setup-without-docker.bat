@@ -14,7 +14,7 @@ call venv\Scripts\activate
 
 echo.
 echo [2/3] Installing required packages...
-pip install -r requirements.txt
+pip install -r requirements-lock.txt
 
 echo.
 echo [3/3] Setting up database...
@@ -29,6 +29,7 @@ python manage.py migrate --fake-initial
 echo.
 echo ============================================
 echo  Setup complete!
-echo  Run start.bat to launch the bot.
+echo  Run dev\start-without-docker.bat to launch the bot.
+echo  For the control panel, build it once: in frontend\ run npm ci, then npm run build.
 echo ============================================
 pause

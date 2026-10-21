@@ -25,7 +25,6 @@ x-bot: &bot
     BACKUP_DIR: /data/backups
     SECRET_KEY_FILE: /data/secret_key
     CACHE_DIR: /data/cache
-    SETTINGS_ENV_MIRROR_PATH: ""  # no .env copy inside Docker; settings live in the database
     SCHEDULER_IN_WEB: "0"         # the checker is its own service
     TZ: UTC
   logging:

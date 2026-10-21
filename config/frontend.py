@@ -10,9 +10,8 @@ Django only reads that folder. Only names that look like built files are served,
 from FRONTEND_DIST/assets, so nothing else on disk (the database, .env, backups) can ever
 be reached through these addresses.
 
-If the panel hasn't been built (a source checkout run without Docker and without Node.js),
-the previous page (templates/index.html) is shown instead, so the bot is never left
-without a control panel. It also stays at /classic/ for now.
+If the panel hasn't been built (only possible in a source checkout run without Docker),
+a short page says how to build it. The API keeps working either way.
 """
 import logging
 import re
@@ -20,7 +19,6 @@ from pathlib import Path
 
 from django.conf import settings
 from django.http import FileResponse, Http404, HttpResponse
-from django.shortcuts import render
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_safe
 
@@ -55,6 +53,14 @@ ASSET_TYPES = {
 
 _page_cache = {"path": None, "mtime": None, "html": None}
 
+NOT_BUILT = """<!doctype html><html lang="en"><meta charset="utf-8"><title>Control panel not built</title>
+<body style="font:15px/1.5 system-ui,sans-serif;max-width:40rem;margin:4rem auto;padding:0 1rem">
+<h1 style="font-size:1.3rem">The control panel isn't built yet</h1>
+<p>This copy of the bot runs from its source code, and the control panel hasn't been built.
+The Docker version (<b>setup.bat</b>) always includes it.</p>
+<p>Developers: in the <code>frontend</code> folder run <code>npm ci</code> and <code>npm run build</code>,
+then reload this page. See docs/FRONTEND.md.</p></body></html>"""
+
 
 def _dist() -> Path:
     return Path(settings.FRONTEND_DIST)
@@ -77,22 +83,16 @@ def built_page() -> str | None:
 def app(request, *args, **kwargs):
     html = built_page()
     if html is None:
-        logger.warning("The React control panel isn't built (%s); showing the previous page", _dist())
-        response = render(request, "index.html")
-        response["X-Alertbot-Panel"] = "classic"
+        logger.warning("The control panel isn't built (%s)", _dist())
+        response = HttpResponse(NOT_BUILT, content_type="text/html; charset=utf-8", status=503)
+        response["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'"
+        response["X-Alertbot-Panel"] = "not-built"
         return response
     response = HttpResponse(html, content_type="text/html; charset=utf-8")
     response["Content-Security-Policy"] = APP_CSP
     response["Cache-Control"] = "no-cache"  # a new version shows up on the next load
     response["X-Alertbot-Panel"] = "react"
     return response
-
-
-@require_safe
-@ensure_csrf_cookie
-def classic(request):
-    """The previous control panel (templates/index.html), kept as a fallback for now."""
-    return render(request, "index.html")
 
 
 def _file(path: Path, cache: str) -> FileResponse:

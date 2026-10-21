@@ -99,7 +99,7 @@ test.describe("every day", () => {
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByText("Saved. The bot now checks every 10 minutes.")).toBeVisible();
     const settings = await (await request.get("/api/settings/")).json();
-    expect(settings.poll_interval_minutes).toBe("10");
+    expect(settings.poll_interval_minutes).toBe(10);
 
     await page.getByRole("button", { name: "Dark" }).click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");

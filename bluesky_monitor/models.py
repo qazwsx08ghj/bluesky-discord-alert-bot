@@ -18,13 +18,6 @@ class MonitoredAccount(models.Model):
     # PROTECT: a channel can't be deleted while accounts still use it.
     channel = models.ForeignKey("discord_alerts.DiscordWebhook", null=True, blank=True,
                                 on_delete=models.PROTECT, related_name="accounts")
-    # Before step 4: the account's own webhook URL. Kept as a copy of channel.url (or "")
-    # so older code still routes the same after a rollback. Not read by this version.
-    discord_webhook_url = models.URLField(
-        max_length=500,
-        blank=True,
-        help_text="Copy of the channel URL, for rollback only",
-    )
     is_active = models.BooleanField(default=True)
     first_poll_done = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)

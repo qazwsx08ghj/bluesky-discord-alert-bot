@@ -1,6 +1,6 @@
 # Profile lookup, login test, Check all, and account status (step 6)
 
-Code: `bluesky_monitor/profiles.py`, `check_all.py`, `account_status.py`, `poller.py` (`check_accounts`), `bluesky.py` (`try_login`), `config/frontend_views.py` (`test_login`). Tests: `bluesky_monitor/tests_step6.py`, `tests_processes.py` (`CheckAllAcrossProcessesTests`), `tests_rollback.py`.
+Code: `bluesky_monitor/profiles.py`, `check_all.py`, `account_status.py`, `poller.py` (`check_accounts`), `bluesky.py` (`try_login`), `config/frontend_views.py` (`test_login`). Tests: `bluesky_monitor/tests_step6.py`, `tests_processes.py` (`CheckAllAcrossProcessesTests`).
 
 One rule for all three new endpoints: **the HTTP status says whether Bluesky could be asked, and `result` says what the answer was.** A negative answer (not found, wrong password) is a `200`, so a search-as-you-type box doesn't log an error for every keystroke. Every body carries `code` and a plain-language `message`, plus `problem` (`{category, title, explanation, fix}`) when there is something to fix.
 
@@ -136,11 +136,7 @@ Times are timestamps, never "3 minutes ago" text, so they don't go stale between
 - **`bluesky_monitor` 0005, new nullable columns:**
   - `MonitoredAccount`: `announce_posts`, `announce_reposts`, `announce_replies`, `first_checked_at`, `first_check_posts`, `last_success_at`, `last_error_at`, `last_error_category`
   - `SeenPost`: `kind`
-- **Rollback safety:** all columns are nullable, so step 5 code can still add accounts and posts. Missing announce values mean the defaults, and posts without a kind are sent as plain posts.
+- Missing announce values mean the defaults, and posts without a kind are sent as plain posts.
 - **Backfill:** existing accounts get the announce defaults. A working step 5 check becomes `last_success_at`, and a failing one becomes `last_error_*`.
-- **Rollback to step 5:**
-  ```
-  python manage.py migrate bluesky_monitor 0004
-  ```
-  Then check out the step 5 commit. Without the schema rollback, step 5 code also runs unchanged on the step 6 database; `Step5RollbackTests` runs the real step 5 code to check this.
+- **Going back:** since step 10, the older versions' compatibility copies are gone, so an older version can't run on this database. To go back, restore a backup made before the update (`restore.bat`) and run the matching version (docs/DOCKER.md, "If an update goes wrong").
 - The backup taken before this step is in `backups/2026-10-21_before-step-6/`.

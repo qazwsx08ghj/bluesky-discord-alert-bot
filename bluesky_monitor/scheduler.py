@@ -34,6 +34,7 @@ from django.db import close_old_connections, connection
 from django.utils import timezone
 
 from activity import log as activity, retention
+from . import retention as post_retention
 from activity.models import ActivityEvent
 from botconfig.secrets import scrub
 from . import locks
@@ -197,6 +198,7 @@ def run_cycle(instance_id: str = INSTANCE_ID) -> bool:
         last_cycle_summary=summary.as_dict() if isinstance(summary, CycleSummary) else None,
     )
     retention.prune_quietly()
+    post_retention.prune_quietly()
     return True
 
 

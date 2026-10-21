@@ -5,17 +5,11 @@ Routing rule (step 4):
     default channel  otherwise (account.channel is null)
 Changing the default therefore moves only accounts that follow the default.
 
-For rollback, two older columns are kept as copies and updated after every change here:
-MonitoredAccount.discord_webhook_url (the account's own channel URL, or "") and the
-saved settings' default webhook URL (BotSettings.discord_webhook_url, also copied to .env).
-Step 3 code routes by exactly those, so it sends to the same places.
-
 Webhook URLs are secrets: nothing here logs them or puts them in an error message.
 """
 import logging
 
 from django.db import transaction
-from django.db.models import OuterRef, Subquery
 from django.db.models.deletion import ProtectedError
 
 from .models import DiscordWebhook
@@ -83,18 +77,16 @@ def make_default(channel: DiscordWebhook) -> DiscordWebhook:
         DiscordWebhook.objects.filter(pk=channel.pk).update(is_default=True)
     channel.refresh_from_db()
     logger.info("Default channel is now %r (id %s)", channel.name, channel.pk)
-    sync_rollback_copies()
     return channel
 
 
 def clear_default():
     DiscordWebhook.objects.filter(is_default=True).update(is_default=False)
     logger.info("No default channel is set")
-    sync_rollback_copies()
 
 
 def set_default_url(url: str):
-    """The settings page's single 'default webhook' field (kept from before step 4).
+    """Make the channel with this URL the default (`import_env_settings --force`).
 
     A URL already used by a channel makes that channel the default; a new URL becomes a
     new channel. The previous default channel is kept (it may be assigned to accounts).
@@ -112,7 +104,6 @@ def assign(account, channel):
     """Give an account its own channel, or None to follow the default."""
     type(account).objects.filter(pk=account.pk).update(channel=channel)
     account.channel = channel
-    sync_rollback_copies()
 
 
 def delete_channel(channel: DiscordWebhook, reassign_to=None):
@@ -156,26 +147,12 @@ def delete_channel(channel: DiscordWebhook, reassign_to=None):
             raise ChannelError("channel_in_use", "A watched account was just assigned to this channel. "
                                                  "Please try again.")
     logger.info("Channel %r deleted; %d account(s) moved", channel.name, len(accounts))
-    sync_rollback_copies()
-
-
-# -- rollback copies ----------------------------------------------------------------
-def sync_rollback_copies():
-    """Copy the current routing into the pre-step-4 columns (see the module docstring)."""
-    from bluesky_monitor.models import MonitoredAccount
-    from botconfig import store
-
-    MonitoredAccount.objects.filter(channel=None).exclude(discord_webhook_url="").update(discord_webhook_url="")
-    MonitoredAccount.objects.exclude(channel=None).update(
-        discord_webhook_url=Subquery(DiscordWebhook.objects.filter(pk=OuterRef("channel_id")).values("url")[:1]))
-    default = DiscordWebhook.objects.filter(is_default=True).first()
-    store.save({"discord_webhook_url": default.url if default else ""}, _from_channels=True)
 
 
 def adopt_imported_default(url: str):
-    """Called once, by the first settings import: the .env webhook becomes the default
-    channel, unless a default was already chosen (by the migration or in the panel).
-    Never clears a default."""
+    """Called once, by the first settings import: an earlier install's .env webhook becomes
+    the default channel, unless a default was already chosen (by a migration or in the
+    panel). Never clears a default."""
     if url and not DiscordWebhook.objects.filter(is_default=True).exists():
         channel = channel_for_url(url, DEFAULT_NAME)
         DiscordWebhook.objects.filter(pk=channel.pk).update(is_default=True)

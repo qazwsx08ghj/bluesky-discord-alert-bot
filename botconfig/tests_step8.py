@@ -48,7 +48,7 @@ class DataFolderTestCase(SimpleTestCase):
         self.env = {k: v for k, v in os.environ.items() if k != "RUN_MAIN"}
         self.env.update({k: "" for k in BLANKED})
         self.env.update(DATABASE_PATH=str(self.db), BACKUP_DIR=str(self.backups), SECRET_KEY_FILE=str(self.key),
-                        CACHE_DIR=str(self.data / "cache"), SETTINGS_ENV_MIRROR_PATH="", SCHEDULER_IN_WEB="0",
+                        CACHE_DIR=str(self.data / "cache"), SCHEDULER_IN_WEB="0",
                         BOT_LOG_LEVEL="CRITICAL", PYTHONIOENCODING="utf-8")
 
     def manage(self, *args, ok=True, env=None):

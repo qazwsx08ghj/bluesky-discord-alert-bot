@@ -38,7 +38,6 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
-    "django_apscheduler",
     "botconfig",
     "bluesky_monitor",
     "discord_alerts",
@@ -75,7 +74,7 @@ ROOT_URLCONF = "config.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [BASE_DIR / "templates"],
+        "DIRS": [],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -135,8 +134,6 @@ REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "config.security.api_exception_handler",
 }
 
-APSCHEDULER_DATETIME_FORMAT = "N j, Y, f:s a"
-APSCHEDULER_RUN_NOW_TIMEOUT = 25
 
 _RUNNING_TESTS = len(sys.argv) > 1 and sys.argv[1] == "test"
 
@@ -162,12 +159,6 @@ BLUESKY_PASSWORD = _legacy("BLUESKY_PASSWORD")
 DISCORD_WEBHOOK_URL = _legacy("DISCORD_WEBHOOK_URL")
 POLL_INTERVAL_MINUTES = _legacy("POLL_INTERVAL_MINUTES", "5")
 
-# Saved settings are also copied into this .env file so older versions keep working after a
-# rollback. Temporary; removed in step 10 (see docs/SETTINGS_MIGRATION.md). Empty = off.
-# Off while running tests, so tests can never touch the real .env.
-SETTINGS_ENV_MIRROR_PATH = os.environ.get(
-    "SETTINGS_ENV_MIRROR_PATH", "" if _RUNNING_TESTS else str(BASE_DIR / ".env"))
-
 # Checker coordination (see bluesky_monitor/locks.py and poller.py)
 SCHEDULER_LEASE_SECONDS = int(os.getenv("SCHEDULER_LEASE_SECONDS", "90"))
 SCHEDULER_HEARTBEAT_SECONDS = int(os.getenv("SCHEDULER_HEARTBEAT_SECONDS", "30"))
@@ -178,6 +169,8 @@ SEND_RETRY_WINDOW_HOURS = int(os.getenv("SEND_RETRY_WINDOW_HOURS", "24"))
 # Activity log (see activity/retention.py): keep 30 days, never more than 10,000 events.
 ACTIVITY_RETENTION_DAYS = int(os.getenv("ACTIVITY_RETENTION_DAYS", "30"))
 ACTIVITY_MAX_EVENTS = int(os.getenv("ACTIVITY_MAX_EVENTS", "10000"))
+# Post history (bluesky_monitor/retention.py): finished post records kept per account.
+SEEN_POSTS_KEPT_PER_ACCOUNT = int(os.getenv("SEEN_POSTS_KEPT_PER_ACCOUNT", "1000"))
 # /api/status/: a check running longer than this counts as stuck; a check later than
 # this past its planned time counts as overdue.
 SCHEDULER_STALL_MINUTES = int(os.getenv("SCHEDULER_STALL_MINUTES", "10"))

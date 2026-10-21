@@ -11,25 +11,23 @@ from activity import problems, status as bot_status
 from bluesky_monitor import bluesky
 from bluesky_monitor.models import BlueskySessionState
 from botconfig import store
-from botconfig.secrets import is_masked, mask_webhook_url
 from botconfig.serializers import SettingsUpdateSerializer
 from discord_alerts import channels
-from discord_alerts.sender import send_discord_alert
 
 
 def _settings_response(row):
-    """Settings as the control panel sees them. Secrets are never included."""
+    """Settings as the control panel sees them. Secrets are never included.
+
+    Discord channels, including the default one, are managed under /api/webhooks/.
+    """
     default = channels.default_channel()
     return {
         "bluesky_handle": row.bluesky_handle,
-        "discord_webhook_url": mask_webhook_url(default.url) if default else "",
-        "default_channel": {"id": default.id, "name": default.name} if default else None,
-        "poll_interval_minutes": str(row.poll_interval_minutes),  # a string, as before step 3
         "has_bluesky_password": bool(row.bluesky_password),
-        "has_discord_webhook_url": default is not None,
+        "default_channel": {"id": default.id, "name": default.name} if default else None,
+        "poll_interval_minutes": row.poll_interval_minutes,
         "settings_version": row.version,
         "updated_at": row.updated_at,
-        "env_file_in_sync": row.env_mirror_ok,
         # Step 6: whether the saved login works, as the checker last saw it
         # (ok, failed, rate_limited, not_configured, or unknown = not tried yet). Same as /api/status/.
         "bluesky_login": bot_status.bluesky_login(timezone.now()),
@@ -53,32 +51,7 @@ def bot_settings(request):
     except store.SettingsSaveError as exc:
         return Response({"code": "settings_not_saved", "message": str(exc)}, status=503)
 
-    body = {"status": "saved", "settings": _settings_response(result.settings)}
-    if not result.env_file_ok:
-        body["warning"] = ("Saved and in use. The copy in the .env file couldn't be updated; "
-                           "the bot will try again automatically.")
-    return Response(body)
-
-
-@api_view(["POST"])
-@sensitive_variables("url", "saved")
-def test_discord(request):
-    saved = store.default_webhook_url()
-    url = (request.data.get("url") or "").strip()
-    if not url or is_masked(url):  # the masked URL from GET means "the saved one"
-        url = saved
-    if not url:
-        return Response({"status": "error", "message": "No webhook URL configured"}, status=400)
-    ok = send_discord_alert(
-        webhook_url=url,
-        handle="bluesky.bot",
-        display_name="Bluesky Bot",
-        text="This is a test message from your Bluesky → Discord Alert Bot!",
-        post_url="https://bsky.app",
-    )
-    if ok:
-        return Response({"status": "sent"})
-    return Response({"status": "failed", "message": "Webhook request failed — check the URL"}, status=502)
+    return Response({"status": "saved", "settings": _settings_response(result.settings)})
 
 
 # -- POST /api/settings/test-login/ ---------------------------------------------------------------

@@ -4,8 +4,8 @@ from rest_framework.response import Response
 
 from activity import log as activity, problems
 from . import account_status, check_all as check_all_run, jobs, profiles
-from .models import CheckJob, MonitoredAccount
-from .serializers import MonitoredAccountSerializer
+from .models import CheckJob, MonitoredAccount, SeenPost
+from .serializers import MonitoredAccountSerializer, SeenPostSerializer
 from .bluesky import BlueskyLoginError
 from .poller import AccountBusy, poll_account
 
@@ -53,6 +53,15 @@ class MonitoredAccountViewSet(viewsets.ModelViewSet):
                              "new_posts": report.new_posts, "posts_sent": report.posts_sent,
                              "not_announced": report.turned_off + report.no_channel}
         return Response({"new_posts_announced": body["new_posts_announced"], **body}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"])
+    def posts(self, request, pk=None):
+        """GET /api/accounts/{id}/posts/ — the posts noticed for this account, newest first,
+        20 per page (?page=2). Replaces the nested `seen_posts` list removed in step 10."""
+        account = self.get_object()
+        queryset = SeenPost.objects.filter(account=account).order_by("-seen_at", "-id")
+        page = self.paginate_queryset(queryset)
+        return self.get_paginated_response(SeenPostSerializer(page, many=True).data)
 
     @action(detail=False, methods=["post"])
     def check_all(self, request):

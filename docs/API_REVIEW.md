@@ -93,7 +93,7 @@ Smaller items: "Check All Now" loops in the browser one account at a time; `setu
 **One scheduler process, in its own container.**
 - Remove the scheduler start from `AppConfig.ready()`. Add the management command `python manage.py run_scheduler` (`BlockingScheduler`).
 - `docker-compose.yml` runs it as a separate `scheduler` service from the same image as `web`. `web` runs gunicorn with no scheduler, so the number of web workers no longer matters.
-- Jobs are defined in code and use `MemoryJobStore`, so no stale jobs come back from the database. `django_apscheduler` stays installed for now so its existing tables and migrations aren't disturbed; removing it is an optional cleanup later.
+- Jobs are defined in code and use `MemoryJobStore`, so no stale jobs come back from the database. `django_apscheduler` stayed installed for a while so its tables weren't disturbed; it was removed in step 10 (its old tables are left in place, unused).
 - The poll job runs with `max_instances=1` and `coalesce=True`, plus a misfire grace time, so a slow cycle never overlaps the next one.
 - The heartbeat job (every 30 seconds) also re-reads `BotSettings` and reschedules the poll job when the interval changes. That gives "apply immediately" with no restart.
 
@@ -212,7 +212,7 @@ The old `templates/index.html` and `index` view are kept until the React app rep
   - **Known limit:** if a process dies after Discord stored a message but before it is marked sent, that one post is sent a second time after the 2-minute stale timeout. Discord webhooks have no idempotency key, so this narrow window can't be closed completely; `?wait=true` keeps it as small as possible.
   - One shared Bluesky session per cycle, saved for every process; refreshes are saved; expired sessions log in again once; a rejected password backs off for 10 to 60 minutes.
   - Existing `SeenPost` rows are backfilled as `sent`, so nothing old is announced again.
-- **Step 3 (done):** see `botconfig/` and `docs/SETTINGS_MIGRATION.md`.
+- **Step 3 (done):** see `botconfig/` and `docs/SETTINGS.md` (renamed from SETTINGS_MIGRATION.md in step 10).
   - `BotSettings` (one row) is the source of truth; every reader asks `botconfig.store`, so changes apply without a restart (interval within 30 s via the heartbeat).
   - Imported once from `.env`; never overwritten afterwards (`import_env_settings --force` is the explicit override).
   - Saves: validate, then one conditional database UPDATE, then an atomic `.env` copy stamped with the settings version. A failed copy is recorded, reported, and repaired on the next save or start.
@@ -262,3 +262,25 @@ The old `templates/index.html` and `index` view are kept until the React app rep
   - Docker: a `panel` build stage (Node.js 22, `npm ci --ignore-scripts`) builds it; the image that runs has no Node.js.
   - Tests: 50 frontend integration tests (fake API), 14 browser tests against the real app with fake Bluesky and Discord (`config/testing/demo_server.py`), Django tests for serving and file safety, and `@docker` browser checks in the real-container tests.
   - Not done here: storing `did`/`avatar_url` on accounts (the table shows initials; the add drawer shows the real avatar), the paged posts endpoint, and removing `/classic/` (planned with the other step 10 clean-ups).
+- **Step 10 (done):** legacy removal, release readiness. See `docs/API.md` section 7, `docs/DOCKER.md` and `docs/SETTINGS.md`.
+  - **Removed:**
+    - the `.env` copy of saved settings (`SETTINGS_ENV_MIRROR_PATH`, `botconfig/envfile.py`, `export_env_settings`);
+    - the rollback columns (`bluesky_monitor` 0007 and `botconfig` 0002 drop them after giving any orphaned URL a channel; both can be undone);
+    - the legacy API fields (`discord_webhook_url` on accounts and settings, `has_discord_webhook_url`, `env_file_in_sync`, the save `warning`) and `POST /api/settings/test-discord/`;
+    - `/classic/` with `templates/index.html`, the rollback test suites for steps 3–6, and `requirements.txt` (the developer setup uses `requirements-lock.txt`).
+
+    Sending a removed field is refused with a pointer to its replacement.
+  - **Added:**
+    - `GET /api/accounts/{id}/posts/` (paged), replacing the unbounded nested `seen_posts`;
+    - per-account post history retention (1,000 finished posts; waiting posts are never removed);
+    - `restore.bat` with `manage.py restore_db` (checks the backup, backs up the current data first);
+    - automatic restart of a stuck Docker Desktop (offered once);
+    - clean-up of the bot's unused images after a successful update.
+  - **Fixed:** the scripts' never-delete-data test held stray control characters instead of `` since step 8, so most of its patterns couldn't match. It is fixed and now also tests itself.
+  - **Security update:** Django 4.2.30 (out of support since April 2026, 9 known vulnerabilities per pip-audit) → Django 5.2.18 LTS (supported until April 2028). No code or migration changes were needed. The unused `django-apscheduler` app was removed; its old tables stay, unused. pip-audit and npm audit report no known vulnerabilities.
+  - **Verified:**
+    - a copy of the owner's real first-version install, migrated and imported both without Docker and in Docker with networking off;
+    - the upgrade of a step 9 Docker install with `update.bat`;
+    - recovery after a Docker Desktop restart on Docker Desktop 4.96.1;
+    - a Chinese folder name;
+    - the release download through a local registry.

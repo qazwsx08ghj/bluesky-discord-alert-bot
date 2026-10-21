@@ -101,8 +101,8 @@ class DockerDeploymentTests(SimpleTestCase):
                                       f"DISCORD_WEBHOOK_URL={FAKE_WEBHOOK}\nPOLL_INTERVAL_MINUTES=5\n", encoding="utf-8")
 
     # -- helpers ----------------------------------------------------------------------------------
-    def script(self, name):
-        res = subprocess.run(["cmd", "/d", "/c", str(self.dir / name)], cwd=self.dir, env=self.env,
+    def script(self, name, **extra):
+        res = subprocess.run(["cmd", "/d", "/c", str(self.dir / name)], cwd=self.dir, env={**self.env, **extra},
                              stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="ascii",
                              errors="replace", timeout=900)
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
@@ -176,8 +176,8 @@ class DockerDeploymentTests(SimpleTestCase):
         self.assertTrue(self.healthy())
         self.assertEqual(self.handles(), ["old.bsky.social"], "the earlier install's account was imported")
         status, cfg = self.request("GET", "/api/settings/")
-        self.assertEqual((cfg["bluesky_handle"], cfg["has_bluesky_password"], cfg["has_discord_webhook_url"]),
-                         ("fake.bsky.social", True, True))
+        self.assertEqual((cfg["bluesky_handle"], cfg["has_bluesky_password"], cfg["default_channel"]["name"]),
+                         ("fake.bsky.social", True, "Default channel"))
         self.assertNotIn(FAKE_PASSWORD, json.dumps(cfg))
         self.assertNotIn("fake-test-token", json.dumps(cfg))
         for service in ("web", "checker"):
@@ -229,7 +229,7 @@ class DockerDeploymentTests(SimpleTestCase):
             self.assertIn("immutable", res.headers["Cache-Control"])
         for path in ("/assets/../manage.py", "/assets/db.sqlite3", "/frontend/package.json", "/static/x"):
             self.assertEqual(self.request("GET", path)[0], 404, path)
-        self.assertEqual(self.request("GET", "/classic/")[0], 200)
+        self.assertEqual(self.request("GET", "/classic/")[0], 404, "the old page was removed in step 10")
 
         # The same browser checks as frontend/e2e/docker.spec.ts, in Chromium, against these containers.
         npx = shutil.which("npx")
@@ -263,12 +263,19 @@ class DockerDeploymentTests(SimpleTestCase):
 
     def test_6_update_backs_up_first_and_keeps_all_data(self):
         old_id = self.container("web")
+        # A new version: a changed file makes the rebuilt image differ, like a real update.
+        with open(self.dir / "config" / "__init__.py", "a", encoding="utf-8") as f:
+            f.write("# new version" + chr(10))
         out = self.script("update.bat")
         self.assertIn("The update is complete", out)
         exported = list((self.dir / "backups").glob("db-before-update-*.sqlite3"))
         self.assertEqual(len(exported), 1, "a copy of the pre-update backup is in the Windows folder")
         self.assertTrue(any(b.startswith("db-before-update-") for b in self.backups()))
         self.assertNotEqual(self.container("web"), old_id, "the update recreated the containers")
+        image = subprocess.run(["docker", "image", "inspect", "-f", "{{.Id}}", "bluesky-alert-bot:test"],
+                               capture_output=True, text=True, timeout=60).stdout.strip()
+        self.assertEqual(self.inspect("web", "{{.Image}}"), image, "the bot runs the newly built version")
+        self.assertEqual(self.inspect("checker", "{{.Image}}"), image)
         self.assertEqual(self.handles(), ["new.bsky.social", "old.bsky.social"])
 
     def test_7_a_database_update_on_start_is_backed_up_first(self):
@@ -296,3 +303,29 @@ class DockerDeploymentTests(SimpleTestCase):
         self.assertEqual(self.dc("ps", "-q"), "")
         self.assertIn(f"{self.project}_bot-data", subprocess.run(["docker", "volume", "ls", "-q"], capture_output=True,
                                                                   text=True).stdout.split())
+
+    def restore_number(self, prefix):
+        """The number restore.bat shows for the newest backup starting with prefix (newest first)."""
+        self.dc("run", "--rm", "--no-deps", "-v", f"{self.dir / 'backups'}:/export", "web", "backups")
+        files = sorted((self.dir / "backups").glob("*.sqlite3"), key=lambda p: p.stat().st_mtime, reverse=True)
+        return next(i for i, f in enumerate(files, start=1) if f.name.startswith(prefix))
+
+    def test_9b_restore_puts_a_backup_back_and_can_itself_be_undone(self):
+        self.script("start.bat")
+        headers = self.token_headers()
+        status, _ = self.request("POST", "/api/accounts/", {"handle": "after-backup.bsky.social", "is_active": False},
+                                 headers=headers)
+        self.assertEqual(status, 201)
+        self.assertEqual(self.handles(), ["after-backup.bsky.social", "new.bsky.social", "old.bsky.social"])
+
+        out = self.script("restore.bat", ALERTBOT_RESTORE_CHOICE=str(self.restore_number("db-before-update-")))
+        self.assertIn("Done. The bot is running with the data from db-before-update-", out)
+        self.assertEqual(self.handles(), ["new.bsky.social", "old.bsky.social"], "the backup's accounts")
+        self.assertEqual(self.request("GET", "/api/settings/")[1]["bluesky_handle"], "fake.bsky.social")
+
+        out = self.script("restore.bat", ALERTBOT_RESTORE_CHOICE=str(self.restore_number("db-before-restore-")))
+        self.assertIn("data from db-before-restore-", out)
+        self.assertEqual(self.handles(), ["after-backup.bsky.social", "new.bsky.social", "old.bsky.social"],
+                         "the restore was undone with the backup it made first")
+        self.wait_until(lambda: self.request("GET", "/api/status/")[1]["scheduler"]["state"] in ("running", "checking"),
+                        what="the checker after the restore")

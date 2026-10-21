@@ -117,7 +117,6 @@ export interface Account {
   channel_id: number | null;
   channel: { id: number; name: string; is_default: boolean } | null;
   uses_default_channel: boolean;
-  discord_webhook_url: string;
   announce_posts: boolean;
   announce_reposts: boolean;
   announce_replies: boolean;
@@ -177,13 +176,10 @@ export interface ChannelInput {
 export interface Settings {
   bluesky_handle: string;
   has_bluesky_password: boolean;
-  discord_webhook_url: string;
-  has_discord_webhook_url: boolean;
   default_channel: { id: number; name: string } | null;
-  poll_interval_minutes: string;
+  poll_interval_minutes: number;
   settings_version: number;
   updated_at: string | null;
-  env_file_in_sync: boolean;
   bluesky_login: BlueskyLogin;
 }
 

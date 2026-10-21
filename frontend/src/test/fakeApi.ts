@@ -150,7 +150,6 @@ function toAccount(s: FakeState, a: FakeAccount): Account {
     channel_id: a.channel_id,
     channel: channel ? { id: channel.id, name: channel.name, is_default: channel.is_default } : null,
     uses_default_channel: a.channel_id === null,
-    discord_webhook_url: channel ? mask(channel.url) : "",
     announce_posts: a.announce_posts,
     announce_reposts: a.announce_reposts,
     announce_replies: a.announce_replies,
@@ -288,13 +287,10 @@ export function handlersFor(s: FakeState): HttpHandler[] {
         HttpResponse.json({
           bluesky_handle: s.handle,
           has_bluesky_password: Boolean(s.password),
-          discord_webhook_url: d ? mask(d.url) : "",
-          has_discord_webhook_url: Boolean(d),
           default_channel: d ? { id: d.id, name: d.name } : null,
-          poll_interval_minutes: String(s.interval),
+          poll_interval_minutes: s.interval,
           settings_version: s.requests.length + 1,
           updated_at: now(),
-          env_file_in_sync: true,
           bluesky_login: login(s),
         })
       );

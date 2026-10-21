@@ -35,7 +35,7 @@ test.describe("@docker the built panel", () => {
     await select.selectOption(other);
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByText(`Saved. The bot now checks every ${other} minutes.`)).toBeVisible();
-    expect((await (await request.get("/api/settings/")).json()).poll_interval_minutes).toBe(other);
+    expect((await (await request.get("/api/settings/")).json()).poll_interval_minutes).toBe(Number(other));
     await select.selectOption(before);
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByText(new RegExp(`Saved\. The bot now checks every ${before} minute`))).toBeVisible();

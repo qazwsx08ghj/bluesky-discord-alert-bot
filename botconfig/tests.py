@@ -1,11 +1,9 @@
-"""Step 3: settings in the database.
+"""Settings in the database: the one-time import from an earlier install's .env, saving,
+the management commands, backups and secret handling.
 
-Covers the first-time import, repeated startups, saving, partial failures, the .env copy
-kept for rollback, the management commands and secret handling. Every test that touches
-a .env file uses a temporary one.
+Since step 10 nothing writes .env any more (it was copied there for rollbacks before).
 """
 import logging
-import os
 import tempfile
 from io import StringIO
 from pathlib import Path
@@ -15,14 +13,15 @@ from django.conf import settings
 from django.core.management import call_command
 from django.db import DatabaseError
 from django.test import TestCase, override_settings
-from dotenv import dotenv_values
 from rest_framework.test import APITestCase
 
 from bluesky_monitor import poller, scheduler
 from bluesky_monitor.models import MonitoredAccount
 from bluesky_monitor.tests import FakeSession, feed_item
+from discord_alerts import channels
+from discord_alerts.models import DiscordWebhook
 from discord_alerts.sender import DeliveryResult
-from . import envfile, store
+from . import store
 from .models import BotSettings
 from .secrets import is_masked, mask_webhook_url
 
@@ -32,26 +31,6 @@ PASSWORD = "abcd-efgh-ijkl-mnop"
 LEGACY = dict(BLUESKY_HANDLE="me.bsky.social", BLUESKY_PASSWORD=PASSWORD,
               DISCORD_WEBHOOK_URL=HOOK, POLL_INTERVAL_MINUTES="10")
 SECRETS = (PASSWORD, "abcdefghijklmnopqrstuvwxyz", "ZYXWVUTSRQPONMLKJIHGFEDCBA", "s3cret pass#word")
-
-
-class TempEnv:
-    """A temporary .env file that the store mirrors into."""
-
-    def setUp(self):
-        super().setUp()
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        self.dir = Path(tmp.name)
-        self.env = self.dir / ".env"
-        patcher = override_settings(SETTINGS_ENV_MIRROR_PATH=str(self.env))
-        patcher.enable()
-        self.addCleanup(patcher.disable)
-
-    def env_values(self):
-        return dotenv_values(self.env, encoding="utf-8")
-
-    def leftover_temp_files(self):
-        return [p.name for p in self.dir.iterdir() if p.name.startswith(".env.tmp-")]
 
 
 class LogCapture:
@@ -80,23 +59,31 @@ class LogCapture:
 
 # -- 1. First-time import -----------------------------------------------------------
 @override_settings(**LEGACY)
-class FirstImportTests(TempEnv, LogCapture, TestCase):
+class FirstImportTests(LogCapture, TestCase):
     def test_settings_are_imported_from_env_once(self):
         logs = self.capture_logs()
         row = store.get()
-        self.assertEqual((row.bluesky_handle, row.bluesky_password, row.discord_webhook_url,
-                          row.poll_interval_minutes), ("me.bsky.social", PASSWORD, HOOK, 10))
+        self.assertEqual((row.bluesky_handle, row.bluesky_password, row.poll_interval_minutes),
+                         ("me.bsky.social", PASSWORD, 10))
         self.assertEqual(row.source, BotSettings.SOURCE_ENV)
         self.assertIsNotNone(row.imported_at)
         self.assertEqual(row.version, 1)
         self.assertIn("BLUESKY_PASSWORD=set", logs.getvalue())
+        self.assertIn("DISCORD_WEBHOOK_URL=set", logs.getvalue())
         self.assert_no_secrets(logs.getvalue())
+
+    def test_the_env_webhook_becomes_the_default_channel(self):
+        store.get()
+        default = channels.default_channel()
+        self.assertEqual((default.url, default.name), (HOOK, "Default channel"))
+        self.assertEqual(store.default_webhook_url(), HOOK)
 
     @override_settings(BLUESKY_HANDLE="", BLUESKY_PASSWORD="", DISCORD_WEBHOOK_URL="", POLL_INTERVAL_MINUTES="5")
     def test_nothing_in_env_starts_with_empty_settings(self):
         row = store.get()
         self.assertEqual(row.source, BotSettings.SOURCE_DEFAULTS)
         self.assertEqual((row.bluesky_handle, row.poll_interval_minutes), ("", 5))
+        self.assertIsNone(channels.default_channel())
 
     @override_settings(BLUESKY_HANDLE="@me.bsky.social ", POLL_INTERVAL_MINUTES="120")
     def test_values_are_tidied_and_out_of_range_interval_is_clamped(self):
@@ -117,71 +104,25 @@ class FirstImportTests(TempEnv, LogCapture, TestCase):
         self.assertEqual(row.pk, winner.pk)
         self.assertEqual(BotSettings.objects.count(), 1)
 
-    def test_import_does_not_write_env_until_the_checker_starts(self):
-        store.get()
-        self.assertFalse(self.env.exists())
-
-
-# -- 2. Repeated startups -----------------------------------------------------------
-@override_settings(**LEGACY)
-class RepeatedStartupTests(TempEnv, LogCapture, TestCase):
     def test_later_startups_never_overwrite_saved_settings(self):
         store.get()
         store.save({"poll_interval_minutes": 15, "bluesky_handle": "saved.bsky.social"})
-        with override_settings(BLUESKY_HANDLE="other.bsky.social", POLL_INTERVAL_MINUTES="2"):
+        with override_settings(BLUESKY_HANDLE="other.bsky.social", POLL_INTERVAL_MINUTES="2",
+                               DISCORD_WEBHOOK_URL=NEW_HOOK):
             for _ in range(3):
                 store.startup_check()
         row = store.get()
         self.assertEqual((row.bluesky_handle, row.poll_interval_minutes), ("saved.bsky.social", 15))
-
-    def test_first_start_stamps_env_and_keeps_a_copy_of_the_original(self):
-        original = b"SECRET_KEY=keep-me\r\nBLUESKY_HANDLE=me.bsky.social\r\n"
-        self.env.write_bytes(original)
-        store.startup_check()
-        self.assertEqual(self.env_values()[envfile.STAMP_KEY], "1")
-        self.assertEqual((self.dir / ".env.before-db-settings").read_bytes(), original)
-        self.assertIn(b"\r\n", self.env.read_bytes(), "Windows line endings are kept")
-        self.assertEqual(self.env_values()["SECRET_KEY"], "keep-me")
-
-    def test_repeated_startups_change_nothing(self):
-        store.startup_check()
-        first = self.env.read_bytes()
-        version = store.get().version
-        for _ in range(3):
-            store.startup_check()
-        self.assertEqual(self.env.read_bytes(), first)
-        self.assertEqual(store.get().version, version)
-
-    def test_hand_edited_env_is_reported_but_not_applied_or_overwritten(self):
-        store.startup_check()
-        text = self.env.read_text(encoding="utf-8").replace("POLL_INTERVAL_MINUTES=10", "POLL_INTERVAL_MINUTES=3")
-        self.env.write_text(text, encoding="utf-8")
-        logs = self.capture_logs()
-        self.assertEqual(store.startup_check(), ["POLL_INTERVAL_MINUTES"])
-        self.assertEqual(store.get().poll_interval_minutes, 10, "the database wins")
-        self.assertIn("POLL_INTERVAL_MINUTES=3", self.env.read_text(encoding="utf-8"), "the edit isn't thrown away")
-        self.assertIn("import_env_settings --force", logs.getvalue())
-
-    def test_checker_start_runs_the_settings_check(self):
-        with mock.patch("botconfig.store.startup_check") as check:
-            scheduler._mark_started("A")
-        check.assert_called_once()
-
-    def test_a_settings_problem_does_not_stop_the_checker_starting(self):
-        with mock.patch("botconfig.store.startup_check", side_effect=RuntimeError("boom")):
-            scheduler._mark_started("A")  # no exception
+        self.assertEqual(channels.default_channel().url, HOOK)
 
 
-# -- 3. Saving and applying without a restart ----------------------------------------
+# -- 2. Saving ----------------------------------------------------------------------
 @override_settings(**LEGACY)
-class SaveTests(TempEnv, LogCapture, TestCase):
-    def test_save_bumps_version_and_updates_env(self):
+class SaveTests(LogCapture, TestCase):
+    def test_save_bumps_the_version(self):
         result = store.save({"poll_interval_minutes": 20})
         self.assertEqual(result.changed, ["poll_interval_minutes"])
         self.assertEqual(result.settings.version, 2)
-        self.assertEqual(self.env_values()["POLL_INTERVAL_MINUTES"], "20")
-        self.assertEqual(self.env_values()[envfile.STAMP_KEY], "2")
-        self.assertTrue(result.settings.env_mirror_ok)
 
     def test_saving_the_same_values_changes_nothing(self):
         store.get()
@@ -191,9 +132,19 @@ class SaveTests(TempEnv, LogCapture, TestCase):
 
     def test_logs_name_changed_keys_but_never_values(self):
         logs = self.capture_logs()
-        store.save({"bluesky_password": "s3cret pass#word", "discord_webhook_url": NEW_HOOK})
+        store.save({"bluesky_password": "s3cret pass#word"})
         self.assertIn("BLUESKY_PASSWORD", logs.getvalue())
         self.assert_no_secrets(logs.getvalue())
+
+    def test_saving_never_writes_any_file(self):
+        """Step 10: no .env copy. Saving and starting touch only the database."""
+        store.get()
+        with mock.patch("builtins.open", side_effect=AssertionError("a file was opened")), \
+                mock.patch("pathlib.Path.write_text", side_effect=AssertionError("a file was written")), \
+                mock.patch("pathlib.Path.write_bytes", side_effect=AssertionError("a file was written")):
+            store.save({"poll_interval_minutes": 20, "bluesky_password": "new-pass-word-1234"})
+            store.startup_check()
+        self.assertEqual(store.get().poll_interval_minutes, 20)
 
     def test_two_saves_at_once_keep_both_changes(self):
         """A save that read an older version retries on the new one instead of overwriting it."""
@@ -213,11 +164,12 @@ class SaveTests(TempEnv, LogCapture, TestCase):
         self.assertEqual((row.bluesky_handle, row.poll_interval_minutes), ("other.bsky.social", 30))
         self.assertEqual(row.version, 3)
 
-    def test_new_webhook_is_used_by_the_next_announcement(self):
+    def test_a_new_default_channel_is_used_by_the_next_announcement(self):
         account = MonitoredAccount.objects.create(handle="artist.bsky.social", first_poll_done=True)
+        store.get()
         with mock.patch("discord_alerts.sender.deliver_alert", return_value=DeliveryResult(True)) as send:
             poller.poll_account(account, session=FakeSession(feed_item("a")))
-            store.save({"discord_webhook_url": NEW_HOOK})
+            channels.make_default(DiscordWebhook.objects.create(name="new", url=NEW_HOOK))
             poller.poll_account(account, session=FakeSession(feed_item("b"), feed_item("a")))
         self.assertEqual([c.kwargs["webhook_url"] for c in send.call_args_list], [HOOK, NEW_HOOK])
 
@@ -230,138 +182,44 @@ class SaveTests(TempEnv, LogCapture, TestCase):
         self.assertEqual(sched.get_job(scheduler.POLL_JOB_ID).trigger.interval, timedelta(minutes=2))
 
 
-# -- 4. Partial failures ------------------------------------------------------------
+# -- 3. The settings API: invalid input and failures --------------------------------
 @override_settings(**LEGACY)
-class PartialFailureTests(TempEnv, LogCapture, APITestCase):
+class SettingsApiFailureTests(LogCapture, APITestCase):
     url = "/api/settings/"
 
     def setUp(self):
         super().setUp()
-        store.startup_check()  # imported and stamped, as after a normal start
-        self.env_before = self.env.read_bytes()
+        store.startup_check()
 
-    def test_invalid_input_changes_nothing_anywhere(self):
+    def test_invalid_input_changes_nothing(self):
         for body in ({"poll_interval_minutes": 0}, {"poll_interval_minutes": 61},
-                     {"poll_interval_minutes": "soon"}, {"discord_webhook_url": "not a url"},
-                     {"bluesky_handle": "has spaces", "poll_interval_minutes": 20}):
+                     {"poll_interval_minutes": "soon"}, {"bluesky_handle": "has spaces", "poll_interval_minutes": 20},
+                     {"discord_webhook_url": NEW_HOOK, "poll_interval_minutes": 20}):
             with self.subTest(body=body):
                 res = self.client.post(self.url, body, format="json")
                 self.assertEqual(res.status_code, 400)
                 self.assertEqual(res.data["code"], "invalid_settings")
                 self.assertEqual(store.get().version, 1)
-                self.assertEqual(self.env.read_bytes(), self.env_before)
+                self.assertNotIn("abcdefghijklmnopqrstuvwxyz", str(res.data))
+                self.assertNotIn("ZYXWVUTSRQPONMLKJIHGFEDCBA", str(res.data))
 
-    def test_database_failure_leaves_env_untouched(self):
+    def test_the_old_webhook_field_points_to_the_channels(self):
+        res = self.client.patch(self.url, {"discord_webhook_url": NEW_HOOK}, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("/api/webhooks/", res.data["fields"]["discord_webhook_url"][0])
+        self.assertEqual(channels.default_channel().url, HOOK)
+
+    def test_database_failure_is_reported_and_changes_nothing(self):
         with mock.patch.object(BotSettings.objects, "filter", side_effect=DatabaseError("disk I/O error")):
             res = self.client.post(self.url, {"poll_interval_minutes": 20}, format="json")
         self.assertEqual(res.status_code, 503)
         self.assertEqual(res.data["code"], "settings_not_saved")
-        self.assertEqual(self.env.read_bytes(), self.env_before)
         self.assertEqual(store.get().poll_interval_minutes, 10)
 
-    def test_env_write_failure_keeps_the_database_save_and_says_so(self):
-        logs = self.capture_logs()
-        with mock.patch("botconfig.envfile.os.replace", side_effect=PermissionError(13, "Access is denied")):
-            res = self.client.post(self.url, {"poll_interval_minutes": 20, "bluesky_password": "s3cret pass#word"},
-                                   format="json")
-        self.assertEqual(res.status_code, 200)
-        self.assertIn("warning", res.data)
-        self.assertFalse(res.data["settings"]["env_file_in_sync"])
-        row = store.get()
-        self.assertEqual((row.poll_interval_minutes, row.version), (20, 2), "the new settings are in use")
-        self.assertFalse(row.env_mirror_ok)
-        self.assertEqual(self.env.read_bytes(), self.env_before, ".env is the complete old file, not half-written")
-        self.assertEqual(self.leftover_temp_files(), [])
-        self.assert_no_secrets(logs.getvalue() + str(res.data))
 
-    def test_failed_env_copy_is_repaired_on_the_next_start(self):
-        with mock.patch("botconfig.envfile.os.replace", side_effect=PermissionError(13, "Access is denied")):
-            store.save({"poll_interval_minutes": 20})
-        store.startup_check()
-        self.assertEqual(self.env_values()["POLL_INTERVAL_MINUTES"], "20")
-        self.assertEqual(self.env_values()[envfile.STAMP_KEY], "2")
-        self.assertTrue(store.get().env_mirror_ok)
-
-    def test_failed_env_copy_is_repaired_by_the_next_save(self):
-        with mock.patch("botconfig.envfile.os.replace", side_effect=PermissionError(13, "Access is denied")):
-            store.save({"poll_interval_minutes": 20})
-        store.save({"bluesky_handle": "next.bsky.social"})
-        values = self.env_values()
-        self.assertEqual((values["POLL_INTERVAL_MINUTES"], values["BLUESKY_HANDLE"]), ("20", "next.bsky.social"))
-
-    def test_crash_between_database_save_and_env_copy_is_repaired(self):
-        """Simulates the process dying right after the database commit."""
-        with mock.patch("botconfig.store.sync_env_file", return_value=(True, "")):
-            store.save({"poll_interval_minutes": 25})
-        self.assertEqual(self.env_values()["POLL_INTERVAL_MINUTES"], "10", ".env is behind (version 1)")
-        self.assertEqual(store.startup_check(), [], "a stale copy is repaired, not reported as a hand edit")
-        self.assertEqual(self.env_values()["POLL_INTERVAL_MINUTES"], "25")
-
-    def test_a_save_landing_during_the_env_write_is_copied_too(self):
-        real_write = envfile.write
-        calls = []
-
-        def write_while_another_save_lands(path, values):
-            real_write(path, values)
-            if not calls:
-                calls.append(1)
-                BotSettings.objects.filter(pk=1).update(poll_interval_minutes=45, version=store.get().version + 1)
-
-        with mock.patch("botconfig.envfile.write", side_effect=write_while_another_save_lands):
-            store.save({"poll_interval_minutes": 20})
-        self.assertEqual(self.env_values()["POLL_INTERVAL_MINUTES"], "45")
-        self.assertEqual(self.env_values()[envfile.STAMP_KEY], str(store.get().version))
-
-
-# -- 5. Rollback compatibility (in-process; the real old code is run in tests_rollback.py)
+# -- 4. Management commands ---------------------------------------------------------
 @override_settings(**LEGACY)
-class RollbackCopyTests(TempEnv, TestCase):
-    def old_step2_read_env(self):
-        """The control panel's .env reader from before step 3, unchanged."""
-        values = {}
-        for line in self.env.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, _, val = line.partition("=")
-                values[key.strip()] = val.strip()
-        return values
-
-    def test_old_code_reads_exactly_the_saved_settings(self):
-        store.save({"bluesky_handle": "rolled.bsky.social", "bluesky_password": PASSWORD,
-                    "discord_webhook_url": NEW_HOOK, "poll_interval_minutes": 7})
-        loaded = self.env_values()  # what the old settings.py loads (python-dotenv)
-        self.assertEqual(loaded["BLUESKY_HANDLE"], "rolled.bsky.social")
-        self.assertEqual(loaded["BLUESKY_PASSWORD"], PASSWORD)
-        self.assertEqual(loaded["DISCORD_WEBHOOK_URL"], NEW_HOOK)
-        self.assertEqual(int(loaded["POLL_INTERVAL_MINUTES"]), 7)
-        old_panel = self.old_step2_read_env()
-        self.assertEqual(old_panel["BLUESKY_HANDLE"], "rolled.bsky.social")
-        self.assertEqual(old_panel["POLL_INTERVAL_MINUTES"], "7")
-
-    def test_unusual_passwords_survive_the_round_trip(self):
-        for pw in ("s3cret pass#word", "it's", 'say "hi" #1', "dollar$sign", "back\\slash", "équipe"):
-            with self.subTest(pw=pw):
-                store.save({"bluesky_password": pw})
-                self.assertEqual(self.env_values()["BLUESKY_PASSWORD"], pw)
-
-    def test_each_key_appears_once_even_if_duplicated_before(self):
-        self.env.write_text("BLUESKY_HANDLE=a\nBLUESKY_HANDLE=b\n# keep me\n", encoding="utf-8")
-        store.save({"bluesky_handle": "c.bsky.social"})
-        text = self.env.read_text(encoding="utf-8")
-        self.assertEqual(text.count("BLUESKY_HANDLE="), 1)
-        self.assertIn("# keep me", text)
-
-    def test_export_command_rewrites_env_for_a_rollback(self):
-        store.save({"poll_interval_minutes": 12})
-        self.env.write_text("SECRET_KEY=x\n", encoding="utf-8")  # e.g. .env replaced by an old copy
-        call_command("export_env_settings", stdout=StringIO())
-        values = self.env_values()
-        self.assertEqual((values["POLL_INTERVAL_MINUTES"], values["SECRET_KEY"]), ("12", "x"))
-
-
-# -- 6. Management commands ---------------------------------------------------------
-@override_settings(**LEGACY)
-class CommandTests(TempEnv, LogCapture, TestCase):
+class CommandTests(LogCapture, TestCase):
     def test_import_command_does_nothing_when_settings_exist(self):
         store.save({"poll_interval_minutes": 30})
         out = StringIO()
@@ -376,12 +234,13 @@ class CommandTests(TempEnv, LogCapture, TestCase):
         self.assertIn("BLUESKY_PASSWORD=set", out.getvalue())
         self.assert_no_secrets(out.getvalue())
 
-    def test_forced_import_replaces_settings_with_env_values(self):
+    def test_forced_import_replaces_settings_and_the_default_channel(self):
         store.save({"poll_interval_minutes": 30, "bluesky_handle": "panel.bsky.social"})
+        channels.make_default(DiscordWebhook.objects.create(name="panel", url=NEW_HOOK))
         call_command("import_env_settings", "--force", stdout=StringIO())
         row = store.get()
         self.assertEqual((row.bluesky_handle, row.poll_interval_minutes), ("me.bsky.social", 10))
-        self.assertEqual(self.env_values()[envfile.STAMP_KEY], str(row.version))
+        self.assertEqual(channels.default_channel().url, HOOK)
 
     @override_settings(BLUESKY_PASSWORD="")
     def test_forced_import_with_blank_password_keeps_the_saved_one(self):
@@ -437,7 +296,7 @@ class BackupCommandTests(TestCase):
         self.assertEqual(len(self.backups()), 5)
 
 
-# -- 7. Secrets ---------------------------------------------------------------------
+# -- 5. Secrets ---------------------------------------------------------------------
 class SecretTests(TestCase):
     def test_webhook_masking(self):
         self.assertEqual(mask_webhook_url(HOOK), "https://discord.com/api/webhooks/123456789/****wxyz")
@@ -452,13 +311,6 @@ class SecretTests(TestCase):
         self.assertNotIn(PASSWORD, str(row) + repr(row))
 
     def test_tests_never_use_the_real_env_file(self):
-        self.assertEqual(settings.SETTINGS_ENV_MIRROR_PATH, "")
-        self.assertIsNone(store.env_path())
         self.assertEqual(settings.BLUESKY_PASSWORD, "", "real .env values are not loaded in tests")
-
-    @override_settings(**LEGACY)
-    def test_mirror_off_means_no_env_writes(self):
-        with mock.patch("botconfig.envfile.write") as write:
-            store.save({"poll_interval_minutes": 20})
-            store.startup_check()
-        write.assert_not_called()
+        self.assertEqual(settings.DISCORD_WEBHOOK_URL, "")
+        self.assertFalse(hasattr(settings, "SETTINGS_ENV_MIRROR_PATH"), "the .env copy is gone")
