@@ -122,7 +122,8 @@ export function useLatestJob() {
     queryFn: async () => (await api.get<{ results: CheckJob[] }>("/api/check-jobs/?limit=1")).results[0] ?? null,
     refetchInterval: (query) => {
       const job = query.state.data;
-      return job && !job.final ? Math.max(0.5, job.poll_after_seconds) * 1000 : false;
+      // poll_after_seconds is null once a job is final; while it runs the API always sets it.
+      return job && !job.final ? Math.max(0.5, job.poll_after_seconds ?? 2) * 1000 : false;
     },
   });
 }

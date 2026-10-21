@@ -1,0 +1,158 @@
+# Checks for every change, in separate jobs so a failure says which part broke.
+# Also run by release.yml before anything is published. See CONTRIBUTING.md, "Continuous integration".
+# Every job uses fake credentials, temporary databases and no real Bluesky or Discord.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:      # release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "22"
+
+jobs:
+  backend:
+    name: Backend (Django tests, Python audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-*.txt
+      - run: pip install -r requirements-dev.txt
+      - name: No known vulnerabilities in the Python packages (the image's and the developer tools)
+        run: pip install pip-audit && pip-audit -r requirements-docker.txt && pip-audit -r requirements-dev.txt
+      - run: python manage.py check
+      - name: No model change without a migration
+        run: python manage.py makemigrations --check --dry-run
+      - name: Django tests (the contract tests run in their own job)
+        run: python manage.py test --exclude-tag contract
+
+  contract:
+    name: API contract (OpenAPI, generated types, response conformance)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-*.txt
+      - run: pip install -r requirements-dev.txt
+      - name: docs/openapi.yaml matches the code
+        run: python manage.py api_contract
+      - name: Every API answer matches the contract
+        run: python manage.py test --tag contract
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: frontend/src/api/schema.gen.ts matches the contract, and the panel compiles against it
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund --ignore-scripts
+          npm run api:check
+          npm run typecheck
+
+  frontend:
+    name: Frontend (types, tests, build, npm audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund --ignore-scripts
+          npm audit --audit-level=moderate
+          npm run typecheck
+          npm test
+          npm run build
+
+  browser:
+    name: Browser tests (real app, fake Bluesky and Discord)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-*.txt
+      - run: pip install -r requirements-lock.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Playwright against config/testing/demo_server.py (no network)
+        working-directory: frontend
+        env:
+          PYTHON: python
+        run: |
+          npm ci --no-audit --no-fund --ignore-scripts
+          npx playwright install --with-deps chromium
+          npm run e2e
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: frontend/test-results/
+          retention-days: 7
+
+  windows-scripts:
+    name: Windows scripts (setup, start, update, stop, backup, restore)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-*.txt
+      - run: pip install -r requirements-dev.txt
+      - name: The real .bat files under cmd.exe, with a fake docker and curl
+        run: python manage.py test config.tests_deploy
+
+  docker:
+    name: Docker (image, Compose files, development stack)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compose files are valid
+        run: |
+          docker compose --env-file docker/compose.env -f docker-compose.yml -f docker-compose.build.yml config --quiet
+          docker compose -f dev/docker-compose.yml config --quiet
+      - name: Build the image (not pushed)
+        run: docker build --build-arg ALERTBOT_VERSION=ci -t bluesky-alert-bot:ci .
+      - name: The image has no Node.js, no developer tools and no private files
+        run: |
+          docker run --rm --entrypoint sh bluesky-alert-bot:ci -c '
+            ! command -v node &&
+            ! python -c "import drf_spectacular" 2>/dev/null &&
+            test ! -e /app/.env && test ! -e /app/db.sqlite3 && test ! -e /app/dev &&
+            test -f /app/frontend/dist/index.html'
+          docker image ls bluesky-alert-bot:ci
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-*.txt
+      - run: pip install -r requirements-dev.txt
+      - name: The development stack is safe (no files, credentials or internet; fake Discord)
+        env:
+          RUN_DOCKER_TESTS: "1"
+        run: python manage.py test config.tests_dev_stack

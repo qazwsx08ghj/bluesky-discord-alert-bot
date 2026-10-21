@@ -27,6 +27,7 @@ frontend/playwright-report/
 
 # Not needed to run the bot
 prototype/
+dev/
 *.bat
 docker-compose*.yml
 docker/compose.env

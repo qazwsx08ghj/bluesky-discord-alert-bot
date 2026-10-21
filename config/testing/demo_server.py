@@ -2,6 +2,8 @@
 
     python config/testing/demo_server.py --port 8765 --scenario working
 
+Without Python: docker compose -f dev/docker-compose.yml up --build (see CONTRIBUTING.md).
+
 Everything runs in this one process: the real Django app, API and checker, against a
 temporary database. Only the outside world is replaced:
 - Bluesky: a small fake world of accounts and posts (profile lookup, login, feeds).
@@ -339,6 +341,9 @@ def _reset(scenario):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--port", type=int, default=8765)
+    # 0.0.0.0 only inside the development container (dev/docker-compose.yml), where Docker
+    # publishes the port on 127.0.0.1 of the computer. Outgoing connections stay blocked either way.
+    parser.add_argument("--host", default="127.0.0.1", choices=["127.0.0.1", "0.0.0.0"])
     parser.add_argument("--scenario", default="working", choices=["empty", "working", "problem"])
     args = parser.parse_args()
 
@@ -367,7 +372,7 @@ def main():
     scheduler.start()
     print(f"Demo bot ({args.scenario}) on http://127.0.0.1:{args.port}/  data: {data_dir}", flush=True)
     try:
-        call_command("runserver", f"127.0.0.1:{args.port}", use_reloader=False, use_threading=True,
+        call_command("runserver", f"{args.host}:{args.port}", use_reloader=False, use_threading=True,
                      skip_checks=True)
     finally:
         scheduler.stop()

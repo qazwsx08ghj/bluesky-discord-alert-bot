@@ -3,3 +3,6 @@
 *.cmd text eol=crlf
 *.png binary
 *.sqlite3 binary
+# Generated from the code; regenerate rather than edit (see CONTRIBUTING.md).
+docs/openapi.yaml linguist-generated=true
+frontend/src/api/schema.gen.ts linguist-generated=true

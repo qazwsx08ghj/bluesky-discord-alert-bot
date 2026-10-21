@@ -1,0 +1,137 @@
+# Contributing
+
+This page is for people who change the bot's code. People who only use the bot need just the [README](README.md); they never install Python, Node.js or Git.
+
+The project has two halves that meet at one place, the API:
+- **Backend:** Django and Django REST Framework, plus the background checker. See [docs/BACKEND.md](docs/BACKEND.md).
+- **Frontend:** the React control panel in `frontend/`. See [docs/FRONTEND.md](docs/FRONTEND.md).
+- **The contract between them:** [`docs/openapi.yaml`](docs/openapi.yaml), an OpenAPI 3.1 description of every endpoint, generated from the backend code. The frontend's TypeScript types are generated from it. [docs/API.md](docs/API.md) explains the API in words; for the exact fields and types, the contract is authoritative.
+
+You can work on either half without the other's tools.
+
+## 1. Project map
+
+```
+activity/            activity log, problems, GET /api/status/
+bluesky_monitor/     watched accounts, Bluesky login, the checker (scheduler, poller), Check All jobs
+discord_alerts/      Discord channels (webhooks) and sending
+botconfig/           settings stored in the database; backup, restore and start-up commands
+config/              settings, URLs, security, serving the panel, the API contract (openapi.py)
+  testing/           the demo server (fake Bluesky and Discord) and fakes for the script tests
+frontend/            the React control panel (built into the Docker image)
+docs/                documentation, openapi.yaml (generated), screenshots
+docker/              the Docker entry point, the scripts' shared code, the release download builder
+dev/                 for developers only: the demo stack in Docker, and running without Docker
+*.bat                the Windows scripts users run (setup, start, update, stop, backup, restore)
+```
+
+## 2. Frontend only (no Python needed)
+
+You need Node.js 20.19 or newer (22 recommended), and Docker if you want a running demo bot.
+
+```
+docker compose -f dev/docker-compose.yml up --build      # the demo bot at http://127.0.0.1:8765/
+cd frontend
+npm ci
+set ALERTBOT_API=http://127.0.0.1:8765                   # PowerShell: $env:ALERTBOT_API="http://127.0.0.1:8765"
+npm run dev                                              # the panel at http://localhost:5173, live reload
+```
+
+The demo bot is the real backend with made-up accounts, a fake Bluesky and a fake Discord. It is safe by construction:
+- it has no access to your `.env`, your database or any folder of yours;
+- its container has no internet;
+- it can't touch the real bot's containers or data;
+- everything is gone after `docker compose -f dev/docker-compose.yml down`.
+
+`DEMO_SCENARIO=empty` shows a first visit; `problem` shows a rejected App Password. Messages "sent" to Discord are listed at http://127.0.0.1:8765/__demo__/discord/.
+
+Without Docker, `npm test` still works: it runs the whole panel against a fake API in a simulated browser.
+
+Types: never write API shapes by hand. `src/api/types.ts` only gives short names to the generated `src/api/schema.gen.ts`. If the panel needs something the API doesn't have, that is a backend change first (section 4).
+
+## 3. Backend only (no Node.js needed)
+
+You need Python 3.11.
+
+```
+python -m venv venv
+venv\Scripts\activate                      # macOS/Linux: source venv/bin/activate
+pip install -r requirements-dev.txt        # the app's exact versions plus the contract tools
+python manage.py test                      # every backend test, about 3 minutes
+```
+
+`dev\setup-without-docker.bat` does the same and creates a database. `requirements-dev.txt` adds only development tools (drf-spectacular, jsonschema, PyYAML); they are never in the Docker image and never used while the bot runs.
+
+The Django tests check the panel's serving with a temporary build, so they don't need Node.js. To see the panel itself, use the Docker install (`setup.bat`), or build it once with Node.js (`cd frontend && npm ci && npm run build`).
+
+**Never use your real data for development.** Tests use temporary databases and fake credentials. For anything else, point `DATABASE_PATH` at a scratch file, or use the demo server: `python config\testing\demo_server.py`.
+
+## 4. Changing the API
+
+The contract is generated from the code, and the frontend's types from the contract. Both files are committed, so a change to the API shows up in review as a change to `docs/openapi.yaml`.
+
+1. Change the view or serializer, with its tests.
+2. If the change adds or changes a field, response or error, describe it in `config/openapi.py`. Request and response shapes are documented there, next to the views; the real views aren't touched.
+3. Regenerate and check:
+   ```
+   python manage.py api_contract --write     # rewrites docs/openapi.yaml
+   python manage.py test --tag contract      # every API answer matches the contract
+   cd frontend
+   npm run api:types                         # rewrites src/api/schema.gen.ts
+   npm run typecheck                         # shows every place in the panel affected
+   ```
+4. Update `docs/API.md` (the words), and the fake API in `frontend/src/test/fakeApi.ts`. Its answers use `satisfies` with the generated types, so they can't drift silently.
+5. Commit the code, `docs/openapi.yaml` and `schema.gen.ts` together.
+
+**Rules:**
+- **Keep existing behaviour.** Don't change what the API returns just to make the contract simpler: describe what it really does. If the contract and the code disagree, the conformance tests fail; fix the description, unless the code has a bug.
+- **Don't break clients.** Adding fields is fine. Removing or renaming fields, or changing a type, breaks clients (the panel and a future mobile app); discuss it first.
+- **Don't edit the generated files by hand.** The checks regenerate them and fail on any difference.
+
+`python manage.py api_contract` (without `--write`) and `npm run api:check` only check, and fail if the files are out of date. CI runs both. The output is identical on every computer: sorted, LF line endings, exact tool versions.
+
+## 5. Tests
+
+| Command | What it checks | Needs |
+|---|---|---|
+| `python manage.py test` | Every backend test: API, checker, delivery, security, serving the panel, the contract, the Windows scripts (on Windows) | Python |
+| `python manage.py test --tag contract` | Every operation's real answers against `docs/openapi.yaml` (closed objects: no undocumented fields), and the file is current | Python |
+| `python manage.py api_contract` | `docs/openapi.yaml` matches the code | Python |
+| `npm test` (in `frontend/`) | The panel against a fake API, in a simulated browser | Node.js |
+| `npm run typecheck`, `npm run api:check` | TypeScript, and that `schema.gen.ts` matches the contract | Node.js |
+| `npm run e2e` | Chromium against the real app with fake Bluesky and Discord | Node.js, Python |
+| `RUN_DOCKER_TESTS=1` + `manage.py test config.tests_docker` | The real scripts and containers, on Windows | Docker Desktop |
+| `RUN_DOCKER_TESTS=1` + `manage.py test config.tests_dev_stack` | The demo stack: no files, credentials or internet; fake Discord | Docker |
+
+**Every test is isolated:**
+- fake credentials;
+- temporary databases and folders;
+- no real Bluesky or Discord;
+- nothing reads or writes your `.env`.
+
+Keep it that way: a test that could reach the real services or real data is a bug.
+
+## 6. Continuous integration
+
+`.github/workflows/ci.yml` runs on every push to `main` and every pull request, in separate jobs:
+
+| Job | Runs on | Checks |
+|---|---|---|
+| Backend | Linux | `pip-audit`, `manage.py check`, missing migrations, Django tests (except the contract) |
+| API contract | Linux | `api_contract`, `test --tag contract`, `npm run api:check`, typecheck |
+| Frontend | Linux | `npm audit`, typecheck, `npm test`, build |
+| Browser tests | Linux | Playwright against the demo server |
+| Windows scripts | Windows | the real `.bat` files under cmd.exe, with a fake Docker |
+| Docker | Linux | Compose files, image build (not pushed), image contents, the demo stack's safety |
+
+`release.yml` runs all of them first, and publishes nothing unless every one passes.
+
+## 7. Ground rules
+
+- **Users never need developer tools.** Keep the one-click Windows scripts, the Docker layout, and `127.0.0.1`-only access working.
+- **Never delete user data.** The scripts never remove the Docker volume. Every database change is backed up first. Tests check both.
+- **Secrets stay secret.**
+  - Webhook URLs and passwords never appear in API answers, logs or pages.
+  - Only masked forms are shown.
+  - Never commit `.env`, databases or backups.
+- **Exact versions.** Python versions are in `requirements-lock.txt` (and `requirements-dev.txt`); Node.js versions are in `package-lock.json`. Run the audits after an update.

@@ -1,0 +1,13 @@
+# For contributors and CI only: the app's exact versions, plus the tools that build and check the
+# API contract (docs/openapi.yaml). None of these are in the Docker image or used while the bot runs.
+#   pip install -r requirements-dev.txt
+-r requirements-lock.txt
+drf-spectacular==0.30.0
+attrs==26.1.0
+inflection==0.5.1
+jsonschema==4.26.0
+jsonschema-specifications==2025.9.1
+PyYAML==6.0.3
+referencing==0.37.0
+rpds-py==2026.9.1
+uritemplate==4.2.0

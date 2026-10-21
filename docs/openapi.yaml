@@ -1,0 +1,3034 @@
+openapi: 3.1.0
+info:
+  title: Bluesky → Discord Alert Bot API
+  version: 1.0.0
+  description: 'The control panel''s REST API. It is reachable only from the computer
+    the bot runs on (127.0.0.1) and has no login. Every change (POST, PUT, PATCH,
+    DELETE) needs the CSRF token from GET /api/csrf/ in the X-CSRFToken header, together
+    with its csrftoken cookie, and a JSON body. Webhook URLs and the App Password
+    are write-only. Background, security rules and error codes: docs/API.md.'
+paths:
+  /api/accounts/:
+    get:
+      operationId: accounts_list
+      summary: Watched accounts, newest first
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - accounts
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAccountList'
+          description: ''
+    post:
+      operationId: accounts_create
+      description: '`handle` accepts @handle, a bsky.app link or a DID. Sending the
+        removed `discord_webhook_url` field is refused; use `channel_id`.'
+      summary: Watch an account
+      tags:
+      - accounts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountRequest'
+        required: true
+      security:
+      - csrfToken: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - type: object
+                  additionalProperties:
+                    type: array
+                    items:
+                      type: string
+                - $ref: '#/components/schemas/Error'
+          description: 'Form errors per field, e.g. {"handle": ["You''re already watching
+            @a.bsky.social."]}. No `code`: this shape is kept from the first API version.
+            Or the standard error with code `invalid_json` when the body isn''t valid
+            JSON.'
+        '403':
+          description: 'Refused: missing or wrong CSRF token (code `csrf_failed`),
+            or sent from another website (code `cross_site_request`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '415':
+          description: The body isn't JSON (code `json_required`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/accounts/{id}/:
+    get:
+      operationId: accounts_retrieve
+      summary: One account
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      tags:
+      - accounts
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unknown id or address (code `not_found`).
+    put:
+      operationId: accounts_update
+      summary: Replace an account's settings
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      tags:
+      - accounts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountRequest'
+        required: true
+      security:
+      - csrfToken: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - type: object
+                  additionalProperties:
+                    type: array
+                    items:
+                      type: string
+                - $ref: '#/components/schemas/Error'
+          description: 'Form errors per field, e.g. {"handle": ["You''re already watching
+            @a.bsky.social."]}. No `code`: this shape is kept from the first API version.
+            Or the standard error with code `invalid_json` when the body isn''t valid
+            JSON.'
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unknown id or address (code `not_found`).
+        '403':
+          description: 'Refused: missing or wrong CSRF token (code `csrf_failed`),
+            or sent from another website (code `cross_site_request`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '415':
+          description: The body isn't JSON (code `json_required`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      operationId: accounts_partial_update
+      summary: Change an account (pause, channel, name, …)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      tags:
+      - accounts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedAccountRequest'
+      security:
+      - csrfToken: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - type: object
+                  additionalProperties:
+                    type: array
+                    items:
+                      type: string
+                - $ref: '#/components/schemas/Error'
+          description: 'Form errors per field, e.g. {"handle": ["You''re already watching
+            @a.bsky.social."]}. No `code`: this shape is kept from the first API version.
+            Or the standard error with code `invalid_json` when the body isn''t valid
+            JSON.'
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unknown id or address (code `not_found`).
+        '403':
+          description: 'Refused: missing or wrong CSRF token (code `csrf_failed`),
+            or sent from another website (code `cross_site_request`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '415':
+          description: The body isn't JSON (code `json_required`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      operationId: accounts_destroy
+      summary: Stop watching an account
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      tags:
+      - accounts
+      security:
+      - csrfToken: []
+      responses:
+        '204':
+          description: No response body
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unknown id or address (code `not_found`).
+        '403':
+          description: 'Refused: missing or wrong CSRF token (code `csrf_failed`),
+            or sent from another website (code `cross_site_request`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '415':
+          description: The body isn't JSON (code `json_required`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/accounts/{id}/poll_now/:
+    post:
+      operationId: accounts_poll_now_create
+      description: Runs inside the request (a few seconds).
+      summary: Check one account now
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      tags:
+      - accounts
+      security:
+      - csrfToken: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PollResult'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unknown id or address (code `not_found`).
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: '`already_checking`.'
+        '403':
+          description: 'Refused: missing or wrong CSRF token (code `csrf_failed`),
+            or sent from another website (code `cross_site_request`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '415':
+          description: The body isn't JSON (code `json_required`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/accounts/{id}/posts/:
+    get:
+      operationId: accounts_posts_list
+      description: |-
+        GET /api/accounts/{id}/posts/ — the posts noticed for this account, newest first,
+        20 per page (?page=2). Replaces the nested `seen_posts` list removed in step 10.
+      summary: Posts noticed for an account, newest first
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - accounts
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPostList'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unknown id or address (code `not_found`).
+  /api/accounts/check_all/:
+    post:
+      operationId: accounts_check_all_create
+      description: 'Returns the job (also when one was already running: created=false).
+        Location header: the job''s address.'
+      summary: Check every account in the background
+      tags:
+      - accounts
+      security:
+      - csrfToken: []
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckJobStarted'
+          description: ''
+        '403':
+          description: 'Refused: missing or wrong CSRF token (code `csrf_failed`),
+            or sent from another website (code `cross_site_request`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '415':
+          description: The body isn't JSON (code `json_required`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/activity/:
+    get:
+      operationId: activity_list
+      description: 'Cursor-paged: follow `next`.'
+      summary: The activity log, newest first
+      parameters:
+      - in: query
+        name: account
+        schema:
+          type: integer
+      - in: query
+        name: before
+        schema:
+          type: string
+        description: A date or a time.
+      - in: query
+        name: channel
+        schema:
+          type: integer
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - in: query
+        name: group
+        schema:
+          type: string
+          enum:
+          - all
+          - failed_checks
+          - failed_sends
+          - problems
+          - retries
+          - sent
+      - in: query
+        name: level
+        schema:
+          type: string
+        description: success, info, warning, error; comma-separated.
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: since
+        schema:
+          type: string
+        description: A date (2026-10-21) or a time (2026-10-21T14:30:00Z).
+      - in: query
+        name: type
+        schema:
+          type: string
+        description: Event types, comma-separated, e.g. post_sent,send_failed.
+      tags:
+      - status
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedActivityEventList'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: '`invalid_filter`, with `fields`.'
+  /api/activity/{id}/:
+    get:
+      operationId: activity_retrieve
+      description: |-
+        GET /api/activity/ (newest first) and GET /api/activity/{id}/ (adds `technical`).
+
+        Filters (all optional, combined with AND):
+          group=all|sent|failed_checks|failed_sends|retries|problems
+          type=post_sent,send_failed,...   level=success,info,warning,error
+          account=<id>   channel=<id>   since=<date or time>   before=<date or time>
+        Paging: page_size (50, at most 200); follow `next` / `previous` links.
+      summary: One activity entry, with `technical`
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this activity event.
+        required: true
+      tags:
+      - status
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityEventDetail'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unknown id or address (code `not_found`).
+  /api/bluesky/profile/:
+    get:
+      operationId: bluesky_profile
+      description: Uses Bluesky's public API (no login). The same body for every outcome;
+        a missing profile is a 200 with result=not_found. For search-as-you-type,
+        ignore answers whose `query` isn't the current text.
+      summary: Look up a Bluesky profile
+      parameters:
+      - in: query
+        name: handle
+        schema:
+          type: string
+        description: A handle, @handle, bsky.app profile link or DID.
+        required: true
+      tags:
+      - bluesky
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileLookup'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileLookup'
+          description: Not a valid handle (result=invalid).
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileLookup'
+          description: Bluesky is limiting requests.
+        '502':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileLookup'
+          description: Bluesky answered with an error.
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileLookup'
+          description: Bluesky couldn't be reached.
+  /api/check-jobs/:
+    get:
+      operationId: check_jobs_list
+      description: Newest first. An empty list before the first Check All.
+      summary: Recent Check All jobs
+      parameters:
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: 1–50, default 10.
+      tags:
+      - accounts
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckJobList'
+          description: ''
+  /api/check-jobs/{job_id}/:
+    get:
+      operationId: check_jobs_retrieve
+      description: Poll every `poll_after_seconds` until `final`.
+      summary: One Check All job
+      parameters:
+      - in: path
+        name: job_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - accounts
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckJob'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: '`check_job_not_found`.'
+  /api/check-jobs/latest/:
+    get:
+      operationId: check_jobs_latest
+      description: GET /api/check-jobs/latest/ — the newest job, so the panel can
+        show it again after a refresh.
+      summary: The newest Check All job
+      tags:
+      - accounts
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckJob'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: '`no_check_jobs`: Check All hasn''t been used yet.'
+  /api/csrf/:
+    get:
+      operationId: csrf_token
+      description: Sets the csrftoken cookie and returns the same token. Send it in
+        X-CSRFToken on every change.
+      summary: Get the CSRF token
+      tags:
+      - security
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Csrf'
+          description: ''
+  /api/health/:
+    get:
+      operationId: health
+      description: 200 when the database answers and is fully migrated; otherwise
+        503 with the same body. Used by Docker and the Windows scripts.
+      summary: Is the panel ready?
+      tags:
+      - status
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+          description: ''
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+          description: Starting or updating.
+  /api/settings/:
+    get:
+      operationId: settings_retrieve
+      summary: The settings
+      tags:
+      - settings
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Settings'
+          description: ''
+    post:
+      operationId: settings_save
+      summary: Change settings (same as PATCH)
+      tags:
+      - settings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettingsChangeRequest'
+      security:
+      - csrfToken: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsSaved'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: '`invalid_settings`, with `fields`. Nothing was saved.'
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: '`settings_not_saved`: the database couldn''t be written.'
+        '403':
+          description: 'Refused: missing or wrong CSRF token (code `csrf_failed`),
+            or sent from another website (code `cross_site_request`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '415':
+          description: The body isn't JSON (code `json_required`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      operationId: settings_update
+      description: Applies at once, no restart. Discord channels are under /api/webhooks/;
+        sending the removed `discord_webhook_url` field is refused (400).
+      summary: Change settings
+      tags:
+      - settings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedSettingsChangeRequest'
+      security:
+      - csrfToken: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsSaved'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: '`invalid_settings`, with `fields`. Nothing was saved.'
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: '`settings_not_saved`: the database couldn''t be written.'
+        '403':
+          description: 'Refused: missing or wrong CSRF token (code `csrf_failed`),
+            or sent from another website (code `cross_site_request`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '415':
+          description: The body isn't JSON (code `json_required`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/settings/test-login/:
+    post:
+      operationId: settings_test_login
+      description: Signs in once with a throwaway session; never saves anything. At
+        most 5 tests per 5 minutes. A rejected login is a 200 with result=rejected.
+      summary: Test a Bluesky login
+      tags:
+      - settings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginTestCredentialsRequest'
+      security:
+      - csrfToken: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginTest'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/LoginTest'
+                - $ref: '#/components/schemas/Error'
+          description: Nothing to test (result=invalid). Or the standard error with
+            code `invalid_json` when the body isn't valid JSON.
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginTest'
+          description: Too many tests, or Bluesky is limiting sign-ins. Retry-After
+            header.
+        '502':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginTest'
+          description: Bluesky answered with an error.
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginTest'
+          description: Bluesky couldn't be reached.
+        '403':
+          description: 'Refused: missing or wrong CSRF token (code `csrf_failed`),
+            or sent from another website (code `cross_site_request`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '415':
+          description: The body isn't JSON (code `json_required`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/status/:
+    get:
+      operationId: status
+      description: Overall state, checker health, Bluesky login, setup progress, counts
+        and current problems.
+      summary: The bot's status
+      tags:
+      - status
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+          description: ''
+  /api/webhooks/:
+    get:
+      operationId: webhooks_list
+      description: |-
+        Named Discord channels. Routes are unchanged from before step 4.
+
+        DELETE refuses (409) while accounts use the channel or it is the default, unless
+        `?reassign_to=<channel id>` or `?reassign_to=default` says where they should go.
+      summary: Discord channels
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - channels
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedChannelList'
+          description: ''
+    post:
+      operationId: webhooks_create
+      description: |-
+        Named Discord channels. Routes are unchanged from before step 4.
+
+        DELETE refuses (409) while accounts use the channel or it is the default, unless
+        `?reassign_to=<channel id>` or `?reassign_to=default` says where they should go.
+      summary: Add a channel
+      tags:
+      - channels
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+        required: true
+      security:
+      - csrfToken: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - type: object
+                  additionalProperties:
+                    type: array
+                    items:
+                      type: string
+                - $ref: '#/components/schemas/Error'
+          description: 'Form errors per field, e.g. {"handle": ["You''re already watching
+            @a.bsky.social."]}. No `code`: this shape is kept from the first API version.
+            Or the standard error with code `invalid_json` when the body isn''t valid
+            JSON.'
+        '403':
+          description: 'Refused: missing or wrong CSRF token (code `csrf_failed`),
+            or sent from another website (code `cross_site_request`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '415':
+          description: The body isn't JSON (code `json_required`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/webhooks/{id}/:
+    get:
+      operationId: webhooks_retrieve
+      description: |-
+        Named Discord channels. Routes are unchanged from before step 4.
+
+        DELETE refuses (409) while accounts use the channel or it is the default, unless
+        `?reassign_to=<channel id>` or `?reassign_to=default` says where they should go.
+      summary: One channel
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this discord webhook.
+        required: true
+      tags:
+      - channels
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unknown id or address (code `not_found`).
+    put:
+      operationId: webhooks_update
+      description: Leave `url` out, or send the masked value back, to keep the saved
+        URL.
+      summary: Replace a channel
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this discord webhook.
+        required: true
+      tags:
+      - channels
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+        required: true
+      security:
+      - csrfToken: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - type: object
+                  additionalProperties:
+                    type: array
+                    items:
+                      type: string
+                - $ref: '#/components/schemas/Error'
+          description: 'Form errors per field, e.g. {"handle": ["You''re already watching
+            @a.bsky.social."]}. No `code`: this shape is kept from the first API version.
+            Or the standard error with code `invalid_json` when the body isn''t valid
+            JSON.'
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unknown id or address (code `not_found`).
+        '403':
+          description: 'Refused: missing or wrong CSRF token (code `csrf_failed`),
+            or sent from another website (code `cross_site_request`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '415':
+          description: The body isn't JSON (code `json_required`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      operationId: webhooks_partial_update
+      description: Leave `url` out, or send the masked value back, to keep it.
+      summary: Change a channel
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this discord webhook.
+        required: true
+      tags:
+      - channels
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedChannelRequest'
+      security:
+      - csrfToken: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - type: object
+                  additionalProperties:
+                    type: array
+                    items:
+                      type: string
+                - $ref: '#/components/schemas/Error'
+          description: 'Form errors per field, e.g. {"handle": ["You''re already watching
+            @a.bsky.social."]}. No `code`: this shape is kept from the first API version.
+            Or the standard error with code `invalid_json` when the body isn''t valid
+            JSON.'
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unknown id or address (code `not_found`).
+        '403':
+          description: 'Refused: missing or wrong CSRF token (code `csrf_failed`),
+            or sent from another website (code `cross_site_request`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '415':
+          description: The body isn't JSON (code `json_required`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      operationId: webhooks_destroy
+      description: |-
+        Named Discord channels. Routes are unchanged from before step 4.
+
+        DELETE refuses (409) while accounts use the channel or it is the default, unless
+        `?reassign_to=<channel id>` or `?reassign_to=default` says where they should go.
+      summary: Delete a channel
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this discord webhook.
+        required: true
+      - in: query
+        name: reassign_to
+        schema:
+          type: string
+        description: 'Where its accounts go: a channel id, or `default`.'
+      tags:
+      - channels
+      security:
+      - csrfToken: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: '`invalid_reassign`.'
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unknown id or address (code `not_found`).
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: '`channel_in_use` (with `accounts`), `channel_is_default` or
+            `no_default_channel`.'
+        '403':
+          description: 'Refused: missing or wrong CSRF token (code `csrf_failed`),
+            or sent from another website (code `cross_site_request`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '415':
+          description: The body isn't JSON (code `json_required`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/webhooks/{id}/make_default/:
+    post:
+      operationId: webhooks_make_default_create
+      description: Make this the default channel. Accounts with their own channel
+        keep it.
+      summary: Make this the default channel
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this discord webhook.
+        required: true
+      tags:
+      - channels
+      security:
+      - csrfToken: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unknown id or address (code `not_found`).
+        '403':
+          description: 'Refused: missing or wrong CSRF token (code `csrf_failed`),
+            or sent from another website (code `cross_site_request`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '415':
+          description: The body isn't JSON (code `json_required`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/webhooks/{id}/test/:
+    post:
+      operationId: webhooks_test_create
+      description: Send a test message to verify the webhook works.
+      summary: Send a test message
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this discord webhook.
+        required: true
+      tags:
+      - channels
+      security:
+      - csrfToken: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sent'
+          description: ''
+        '502':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sent'
+          description: Discord didn't accept it.
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unknown id or address (code `not_found`).
+        '403':
+          description: 'Refused: missing or wrong CSRF token (code `csrf_failed`),
+            or sent from another website (code `cross_site_request`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '415':
+          description: The body isn't JSON (code `json_required`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  schemas:
+    Account:
+      type: object
+      description: A watched account, with its current status (bluesky_monitor/account_status.py).
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        handle:
+          type: string
+          description: e.g. user.bsky.social
+          maxLength: 255
+        display_name:
+          type: string
+          maxLength: 255
+        channel_id:
+          type:
+          - integer
+          - 'null'
+        channel:
+          oneOf:
+          - $ref: '#/components/schemas/AccountChannel'
+          - type: 'null'
+          readOnly: true
+        uses_default_channel:
+          type: boolean
+          readOnly: true
+        is_active:
+          type: boolean
+        announce_posts:
+          type: boolean
+        announce_reposts:
+          type: boolean
+        announce_replies:
+          type: boolean
+        first_poll_done:
+          type: boolean
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        state:
+          allOf:
+          - $ref: '#/components/schemas/AccountState'
+          readOnly: true
+        state_label:
+          type: string
+          readOnly: true
+        state_message:
+          type: string
+          readOnly: true
+        checking_now:
+          type: boolean
+          readOnly: true
+        problem:
+          oneOf:
+          - $ref: '#/components/schemas/AccountProblem'
+          - type: 'null'
+          readOnly: true
+        first_check:
+          allOf:
+          - $ref: '#/components/schemas/FirstCheck'
+          readOnly: true
+        last_checked_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          readOnly: true
+        last_check_ok:
+          type:
+          - boolean
+          - 'null'
+          readOnly: true
+        last_success_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          readOnly: true
+        last_error:
+          oneOf:
+          - $ref: '#/components/schemas/LastError'
+          - type: 'null'
+          readOnly: true
+      required:
+      - announce_posts
+      - announce_replies
+      - announce_reposts
+      - channel
+      - channel_id
+      - checking_now
+      - created_at
+      - display_name
+      - first_check
+      - first_poll_done
+      - handle
+      - id
+      - is_active
+      - last_check_ok
+      - last_checked_at
+      - last_error
+      - last_success_at
+      - problem
+      - state
+      - state_label
+      - state_message
+      - uses_default_channel
+    AccountChannel:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        is_default:
+          type: boolean
+      required:
+      - id
+      - is_default
+      - name
+    AccountCheckResult:
+      enum:
+      - checked
+      - failed
+      - skipped
+      - already_checking
+      type: string
+    AccountProblem:
+      type: object
+      description: A failure explained in plain language. `fix` says where the panel
+        can fix it.
+      properties:
+        category:
+          type: string
+          description: Problem code, e.g. bluesky_login_rejected (docs/ACTIVITY_AND_STATUS.md).
+        title:
+          type: string
+        explanation:
+          type: string
+        fix:
+          $ref: '#/components/schemas/Fix'
+        severity:
+          allOf:
+          - $ref: '#/components/schemas/AccountProblemSeverity'
+          description: 'warning: usually clears by itself.'
+      required:
+      - category
+      - explanation
+      - fix
+      - severity
+      - title
+    AccountProblemSeverity:
+      enum:
+      - error
+      - warning
+      type: string
+    AccountRef:
+      type: object
+      properties:
+        id:
+          type: integer
+        handle:
+          type: string
+      required:
+      - handle
+      - id
+    AccountRequest:
+      type: object
+      description: A watched account, with its current status (bluesky_monitor/account_status.py).
+      properties:
+        handle:
+          type: string
+          minLength: 1
+          description: e.g. user.bsky.social
+          maxLength: 255
+        display_name:
+          type: string
+          maxLength: 255
+        channel_id:
+          type:
+          - integer
+          - 'null'
+        is_active:
+          type: boolean
+        announce_posts:
+          type: boolean
+        announce_reposts:
+          type: boolean
+        announce_replies:
+          type: boolean
+      required:
+      - handle
+    AccountState:
+      enum:
+      - checking
+      - paused
+      - error
+      - waiting_first_check
+      - active
+      type: string
+    ActivityEvent:
+      type: object
+      description: |-
+        One log line. `problem` explains a failure in plain language ({category, title,
+        explanation, fix}); the technical cause is only in the single-event view.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        repeat_count:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        type:
+          type: string
+          maxLength: 32
+        level:
+          $ref: '#/components/schemas/ActivityLevel'
+        message:
+          type: string
+          maxLength: 500
+        problem:
+          oneOf:
+          - $ref: '#/components/schemas/Problem'
+          - type: 'null'
+          readOnly: true
+        account:
+          oneOf:
+          - $ref: '#/components/schemas/ActivityRef'
+          - type: 'null'
+          readOnly: true
+        channel:
+          oneOf:
+          - $ref: '#/components/schemas/ActivityRef'
+          - type: 'null'
+          readOnly: true
+        attempt:
+          type:
+          - integer
+          - 'null'
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        is_retry:
+          type: boolean
+          readOnly: true
+        detail:
+          type: object
+          additionalProperties: {}
+          readOnly: true
+          description: Extra facts, e.g. post_url, post_text, seeded_posts.
+      required:
+      - account
+      - attempt
+      - channel
+      - created_at
+      - detail
+      - id
+      - is_retry
+      - last_seen_at
+      - level
+      - message
+      - problem
+      - repeat_count
+      - type
+    ActivityEventDetail:
+      type: object
+      description: |-
+        One log line. `problem` explains a failure in plain language ({category, title,
+        explanation, fix}); the technical cause is only in the single-event view.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        repeat_count:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        type:
+          type: string
+          maxLength: 32
+        level:
+          $ref: '#/components/schemas/ActivityLevel'
+        message:
+          type: string
+          maxLength: 500
+        problem:
+          oneOf:
+          - $ref: '#/components/schemas/Problem'
+          - type: 'null'
+          readOnly: true
+        account:
+          oneOf:
+          - $ref: '#/components/schemas/ActivityRef'
+          - type: 'null'
+          readOnly: true
+        channel:
+          oneOf:
+          - $ref: '#/components/schemas/ActivityRef'
+          - type: 'null'
+          readOnly: true
+        attempt:
+          type:
+          - integer
+          - 'null'
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        is_retry:
+          type: boolean
+          readOnly: true
+        detail:
+          type: object
+          additionalProperties: {}
+          readOnly: true
+          description: Extra facts, e.g. post_url, post_text, seeded_posts.
+        technical:
+          type: string
+          maxLength: 1000
+      required:
+      - account
+      - attempt
+      - channel
+      - created_at
+      - detail
+      - id
+      - is_retry
+      - last_seen_at
+      - level
+      - message
+      - problem
+      - repeat_count
+      - technical
+      - type
+    ActivityLevel:
+      enum:
+      - success
+      - info
+      - warning
+      - error
+      type: string
+    ActivityRef:
+      type: object
+      properties:
+        id:
+          type:
+          - integer
+          - 'null'
+        label:
+          type: string
+      required:
+      - id
+      - label
+    BlankEnum:
+      enum:
+      - ''
+    BlueskyLogin:
+      type: object
+      properties:
+        state:
+          allOf:
+          - $ref: '#/components/schemas/LoginState'
+          description: 'unknown: saved, not tried yet.'
+        handle:
+          type: string
+        problem:
+          oneOf:
+          - $ref: '#/components/schemas/Problem'
+          - type: 'null'
+        retry_after:
+          type:
+          - string
+          - 'null'
+          format: date-time
+      required:
+      - handle
+      - problem
+      - retry_after
+      - state
+    BotState:
+      enum:
+      - running
+      - problem
+      - not_configured
+      - unavailable
+      type: string
+    Channel:
+      type: object
+      description: |-
+        A named channel. `url` is write-only; responses show `url_masked`.
+
+        On edit, leave `url` out (or send the masked value back) to keep the saved URL.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          description: 'Friendly label, e.g. #announcements'
+          maxLength: 255
+        url_masked:
+          type: string
+          readOnly: true
+          description: e.g. https://discord.com/api/webhooks/1234/****abcd
+        is_default:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          readOnly: true
+        account_count:
+          type: integer
+          readOnly: true
+        last_delivery:
+          oneOf:
+          - $ref: '#/components/schemas/LastDelivery'
+          - type: 'null'
+          readOnly: true
+      required:
+      - account_count
+      - created_at
+      - id
+      - is_default
+      - last_delivery
+      - name
+      - updated_at
+      - url_masked
+    ChannelRef:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+      required:
+      - id
+      - name
+    ChannelRequest:
+      type: object
+      description: |-
+        A named channel. `url` is write-only; responses show `url_masked`.
+
+        On edit, leave `url` out (or send the masked value back) to keep the saved URL.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: 'Friendly label, e.g. #announcements'
+          maxLength: 255
+        url:
+          type: string
+          writeOnly: true
+          minLength: 1
+          maxLength: 500
+        is_default:
+          type: boolean
+      required:
+      - name
+    CheckJob:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          $ref: '#/components/schemas/JobKind'
+        url:
+          type: string
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        final:
+          type: boolean
+        status_label:
+          type: string
+        message:
+          type: string
+        result:
+          oneOf:
+          - $ref: '#/components/schemas/JobResult'
+          - $ref: '#/components/schemas/NullEnum'
+        problem:
+          oneOf:
+          - $ref: '#/components/schemas/Problem'
+          - type: 'null'
+        requested_at:
+          type: string
+          format: date-time
+        started_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        finished_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        updated_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        progress:
+          $ref: '#/components/schemas/JobProgress'
+        counts:
+          $ref: '#/components/schemas/JobCounts'
+        accounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/JobAccount'
+        checker_running:
+          type:
+          - boolean
+          - 'null'
+        poll_after_seconds:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: Ask again after this long; null once final.
+      required:
+      - accounts
+      - checker_running
+      - counts
+      - final
+      - finished_at
+      - id
+      - kind
+      - message
+      - poll_after_seconds
+      - problem
+      - progress
+      - requested_at
+      - result
+      - started_at
+      - status
+      - status_label
+      - updated_at
+      - url
+    CheckJobList:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/CheckJob'
+      required:
+      - results
+    CheckJobStarted:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          $ref: '#/components/schemas/JobKind'
+        url:
+          type: string
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        final:
+          type: boolean
+        status_label:
+          type: string
+        message:
+          type: string
+        result:
+          oneOf:
+          - $ref: '#/components/schemas/JobResult'
+          - $ref: '#/components/schemas/NullEnum'
+        problem:
+          oneOf:
+          - $ref: '#/components/schemas/Problem'
+          - type: 'null'
+        requested_at:
+          type: string
+          format: date-time
+        started_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        finished_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        updated_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        progress:
+          $ref: '#/components/schemas/JobProgress'
+        counts:
+          $ref: '#/components/schemas/JobCounts'
+        accounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/JobAccount'
+        checker_running:
+          type:
+          - boolean
+          - 'null'
+        poll_after_seconds:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: Ask again after this long; null once final.
+        created:
+          type: boolean
+          description: 'false: a Check All was already queued or running; this is
+            that job.'
+      required:
+      - accounts
+      - checker_running
+      - counts
+      - created
+      - final
+      - finished_at
+      - id
+      - kind
+      - message
+      - poll_after_seconds
+      - problem
+      - progress
+      - requested_at
+      - result
+      - started_at
+      - status
+      - status_label
+      - updated_at
+      - url
+    CheckSummary:
+      type: object
+      properties:
+        result:
+          $ref: '#/components/schemas/AccountCheckResult'
+        message:
+          type: string
+        new_posts:
+          type: integer
+        posts_sent:
+          type: integer
+        not_announced:
+          type: integer
+      required:
+      - message
+      - new_posts
+      - not_announced
+      - posts_sent
+      - result
+    CheckerState:
+      enum:
+      - running
+      - checking
+      - stalled
+      - stopped
+      - not_started
+      type: string
+    Csrf:
+      type: object
+      properties:
+        csrf_token:
+          type: string
+        header_name:
+          type: string
+        cookie_name:
+          type: string
+      required:
+      - cookie_name
+      - csrf_token
+      - header_name
+    CurrentProblem:
+      type: object
+      description: A failure explained in plain language. `fix` says where the panel
+        can fix it.
+      properties:
+        category:
+          type: string
+          description: Problem code, e.g. bluesky_login_rejected (docs/ACTIVITY_AND_STATUS.md).
+        title:
+          type: string
+        explanation:
+          type: string
+        fix:
+          $ref: '#/components/schemas/Fix'
+        code:
+          type: string
+        severity:
+          $ref: '#/components/schemas/ProblemSeverity'
+        message:
+          type: string
+        since:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        account:
+          $ref: '#/components/schemas/AccountRef'
+        channel:
+          $ref: '#/components/schemas/ChannelRef'
+      required:
+      - category
+      - code
+      - explanation
+      - fix
+      - message
+      - severity
+      - since
+      - title
+    Error:
+      type: object
+      description: |-
+        Every error (except form field errors): a stable `code` for programs and a plain-language
+        `message` to show. Some errors add more fields.
+      properties:
+        code:
+          type: string
+          description: Stable error code, e.g. csrf_failed, not_found, already_checking.
+        message:
+          type: string
+          description: Plain-language explanation, safe to show.
+        detail:
+          type: string
+          description: DRF's own text; kept for older clients.
+        fields:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          description: Errors per field.
+        accounts:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          description: 'Channel delete: the accounts still posting to the channel.'
+        retry_after_seconds:
+          type: integer
+      required:
+      - code
+      - message
+    FirstCheck:
+      type: object
+      properties:
+        done:
+          type: boolean
+        at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        seeded_posts:
+          type:
+          - integer
+          - 'null'
+          description: Posts noted (never sent) on the first check.
+      required:
+      - at
+      - done
+      - seeded_posts
+    Fix:
+      enum:
+      - update_login
+      - update_webhook
+      - choose_channel
+      - check_handle
+      - restart_bot
+      - wait
+      - none
+      - add_account
+      type: string
+    Health:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/HealthStatus'
+        version:
+          type: string
+        database:
+          type: boolean
+        migrations_pending:
+          type:
+          - integer
+          - 'null'
+        checker:
+          oneOf:
+          - $ref: '#/components/schemas/CheckerState'
+          - $ref: '#/components/schemas/NullEnum'
+      required:
+      - checker
+      - database
+      - migrations_pending
+      - status
+      - version
+    HealthStatus:
+      enum:
+      - ok
+      - updating
+      - starting
+      - error
+      type: string
+    JobAccount:
+      type: object
+      properties:
+        id:
+          type: integer
+        handle:
+          type: string
+        result:
+          $ref: '#/components/schemas/JobAccountResult'
+        reason:
+          oneOf:
+          - $ref: '#/components/schemas/JobAccountReason'
+          - $ref: '#/components/schemas/NullEnum'
+        message:
+          type: string
+        problem:
+          oneOf:
+          - $ref: '#/components/schemas/Problem'
+          - type: 'null'
+        first_check:
+          type:
+          - boolean
+          - 'null'
+        new_posts:
+          type: integer
+        posts_sent:
+          type: integer
+        not_announced:
+          type: integer
+        state:
+          oneOf:
+          - $ref: '#/components/schemas/AccountState'
+          - $ref: '#/components/schemas/NullEnum'
+        state_label:
+          type:
+          - string
+          - 'null'
+      required:
+      - first_check
+      - handle
+      - id
+      - message
+      - new_posts
+      - not_announced
+      - posts_sent
+      - problem
+      - reason
+      - result
+      - state
+      - state_label
+    JobAccountReason:
+      enum:
+      - paused
+      - login_failed
+      - not_configured
+      - time_limit
+      - stopped
+      type: string
+    JobAccountResult:
+      enum:
+      - waiting
+      - checking
+      - checked
+      - failed
+      - skipped
+      - already_checking
+      type: string
+    JobCounts:
+      type: object
+      properties:
+        checked:
+          type: integer
+        failed:
+          type: integer
+        skipped:
+          type: integer
+        already_checking:
+          type: integer
+        waiting:
+          type: integer
+        new_posts:
+          type: integer
+        posts_sent:
+          type: integer
+      required:
+      - already_checking
+      - checked
+      - failed
+      - new_posts
+      - posts_sent
+      - skipped
+      - waiting
+    JobKind:
+      enum:
+      - check_all
+      type: string
+    JobProgress:
+      type: object
+      properties:
+        total:
+          type: integer
+        done:
+          type: integer
+        percent:
+          type: integer
+        current:
+          oneOf:
+          - $ref: '#/components/schemas/JobProgressCurrent'
+          - type: 'null'
+      required:
+      - current
+      - done
+      - percent
+      - total
+    JobProgressCurrent:
+      type: object
+      properties:
+        id:
+          type: integer
+        handle:
+          type: string
+      required:
+      - handle
+      - id
+    JobResult:
+      enum:
+      - ok
+      - partial
+      - failed
+      - nothing_to_check
+      - not_configured
+      - login_failed
+      type: string
+    JobStatus:
+      enum:
+      - queued
+      - running
+      - finished
+      - interrupted
+      - expired
+      type: string
+    LastCheck:
+      type: object
+      properties:
+        started_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        result:
+          oneOf:
+          - $ref: '#/components/schemas/LastCheckResult'
+          - $ref: '#/components/schemas/NullEnum'
+        message:
+          type: string
+        problem:
+          oneOf:
+          - $ref: '#/components/schemas/Problem'
+          - type: 'null'
+        accounts_checked:
+          type:
+          - integer
+          - 'null'
+        accounts_failed:
+          type:
+          - integer
+          - 'null'
+        posts_sent:
+          type:
+          - integer
+          - 'null'
+      required:
+      - accounts_checked
+      - accounts_failed
+      - finished_at
+      - message
+      - posts_sent
+      - problem
+      - result
+      - started_at
+    LastCheckResult:
+      enum:
+      - ok
+      - partial
+      - failed
+      - not_configured
+      - interrupted
+      type: string
+    LastDelivery:
+      type: object
+      properties:
+        at:
+          type: string
+          format: date-time
+        ok:
+          type:
+          - boolean
+          - 'null'
+        error:
+          type: string
+      required:
+      - at
+      - error
+      - ok
+    LastError:
+      type: object
+      description: A failure explained in plain language. `fix` says where the panel
+        can fix it.
+      properties:
+        category:
+          type: string
+          description: Problem code, e.g. bluesky_login_rejected (docs/ACTIVITY_AND_STATUS.md).
+        title:
+          type: string
+        explanation:
+          type: string
+        fix:
+          $ref: '#/components/schemas/Fix'
+        severity:
+          allOf:
+          - $ref: '#/components/schemas/AccountProblemSeverity'
+          description: 'warning: usually clears by itself.'
+        at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        ongoing:
+          type: boolean
+      required:
+      - at
+      - category
+      - explanation
+      - fix
+      - ongoing
+      - severity
+      - title
+    LoginState:
+      enum:
+      - ok
+      - failed
+      - rate_limited
+      - not_configured
+      - unknown
+      type: string
+    LoginTest:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        result:
+          $ref: '#/components/schemas/LoginTestResult'
+        code:
+          type: string
+        message:
+          type: string
+        saved:
+          type: boolean
+          description: 'Always false: a test never saves anything.'
+        problem:
+          oneOf:
+          - $ref: '#/components/schemas/Problem'
+          - type: 'null'
+        handle:
+          type: string
+        account:
+          oneOf:
+          - $ref: '#/components/schemas/LoginTestAccount'
+          - type: 'null'
+        used_saved_handle:
+          type: boolean
+        used_saved_password:
+          type: boolean
+        matches_saved:
+          type: boolean
+        password_looks_like_app_password:
+          type: boolean
+        warning:
+          type:
+          - string
+          - 'null'
+        retry_after_seconds:
+          type:
+          - integer
+          - 'null'
+        fields:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+      required:
+      - code
+      - message
+      - ok
+      - result
+      - saved
+    LoginTestAccount:
+      type: object
+      properties:
+        did:
+          type: string
+        handle:
+          type: string
+      required:
+      - did
+      - handle
+    LoginTestCredentialsRequest:
+      type: object
+      properties:
+        bluesky_handle:
+          type: string
+          description: 'Blank or left out: the saved handle.'
+        bluesky_password:
+          type: string
+          writeOnly: true
+          description: 'Blank or left out: the saved App Password.'
+    LoginTestResult:
+      enum:
+      - ok
+      - rejected
+      - app_password_needed
+      - rate_limited
+      - unavailable
+      - error
+      - invalid
+      - too_many_tests
+      type: string
+    LookupResult:
+      enum:
+      - found
+      - not_found
+      - unavailable
+      - invalid
+      - rate_limited
+      - error
+      type: string
+    NullEnum:
+      type: 'null'
+    OptionalSeverityProblem:
+      type: object
+      description: A failure explained in plain language. `fix` says where the panel
+        can fix it.
+      properties:
+        category:
+          type: string
+          description: Problem code, e.g. bluesky_login_rejected (docs/ACTIVITY_AND_STATUS.md).
+        title:
+          type: string
+        explanation:
+          type: string
+        fix:
+          $ref: '#/components/schemas/Fix'
+        severity:
+          $ref: '#/components/schemas/AccountProblemSeverity'
+      required:
+      - category
+      - explanation
+      - fix
+      - title
+    PaginatedAccountList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type:
+          - string
+          - 'null'
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type:
+          - string
+          - 'null'
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Account'
+    PaginatedActivityEventList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type:
+          - string
+          - 'null'
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type:
+          - string
+          - 'null'
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActivityEvent'
+    PaginatedChannelList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type:
+          - string
+          - 'null'
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type:
+          - string
+          - 'null'
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Channel'
+    PaginatedPostList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type:
+          - string
+          - 'null'
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type:
+          - string
+          - 'null'
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Post'
+    PatchedAccountRequest:
+      type: object
+      description: A watched account, with its current status (bluesky_monitor/account_status.py).
+      properties:
+        handle:
+          type: string
+          minLength: 1
+          description: e.g. user.bsky.social
+          maxLength: 255
+        display_name:
+          type: string
+          maxLength: 255
+        channel_id:
+          type:
+          - integer
+          - 'null'
+        is_active:
+          type: boolean
+        announce_posts:
+          type: boolean
+        announce_reposts:
+          type: boolean
+        announce_replies:
+          type: boolean
+    PatchedChannelRequest:
+      type: object
+      description: |-
+        A named channel. `url` is write-only; responses show `url_masked`.
+
+        On edit, leave `url` out (or send the masked value back) to keep the saved URL.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: 'Friendly label, e.g. #announcements'
+          maxLength: 255
+        url:
+          type: string
+          writeOnly: true
+          minLength: 1
+          maxLength: 500
+        is_default:
+          type: boolean
+    PatchedSettingsChangeRequest:
+      type: object
+      properties:
+        bluesky_handle:
+          type: string
+          maxLength: 255
+        bluesky_password:
+          type: string
+          writeOnly: true
+          description: 'Blank or left out: keep the saved one.'
+          maxLength: 255
+        poll_interval_minutes:
+          type: integer
+          maximum: 60
+          minimum: 1
+    PollResult:
+      type: object
+      properties:
+        new_posts_announced:
+          type: integer
+        was_first_poll:
+          type: boolean
+        state:
+          $ref: '#/components/schemas/AccountState'
+        state_label:
+          type: string
+        state_message:
+          type: string
+        first_check:
+          $ref: '#/components/schemas/FirstCheck'
+        problem:
+          oneOf:
+          - $ref: '#/components/schemas/OptionalSeverityProblem'
+          - type: 'null'
+        check:
+          $ref: '#/components/schemas/CheckSummary'
+        error:
+          type: string
+          description: Set when the bot's own Bluesky login didn't work.
+      required:
+      - first_check
+      - new_posts_announced
+      - problem
+      - state
+      - state_label
+      - state_message
+      - was_first_poll
+    Post:
+      type: object
+      description: |-
+        A post the bot has noticed (GET /api/accounts/{id}/posts/). `status`: seeded (noted on
+        the first check, never sent), pending, sending, retry, sent, failed (gave up), skipped
+        (no channel, or that kind of post isn't announced).
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        post_uri:
+          type: string
+          maxLength: 512
+        post_url:
+          oneOf:
+          - type: string
+            format: uri
+            maxLength: 200
+          - type: string
+            maxLength: 0
+        text:
+          type: string
+        kind:
+          oneOf:
+          - $ref: '#/components/schemas/PostKind'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        status:
+          $ref: '#/components/schemas/PostStatus'
+        attempts:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        seen_at:
+          type: string
+          format: date-time
+          readOnly: true
+        sent_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+      required:
+      - attempts
+      - id
+      - kind
+      - post_uri
+      - post_url
+      - seen_at
+      - sent_at
+      - status
+      - text
+    PostKind:
+      enum:
+      - post
+      - repost
+      - reply
+      type: string
+    PostStatus:
+      enum:
+      - seeded
+      - pending
+      - sending
+      - retry
+      - sent
+      - failed
+      - skipped
+      type: string
+    Problem:
+      type: object
+      description: A failure explained in plain language. `fix` says where the panel
+        can fix it.
+      properties:
+        category:
+          type: string
+          description: Problem code, e.g. bluesky_login_rejected (docs/ACTIVITY_AND_STATUS.md).
+        title:
+          type: string
+        explanation:
+          type: string
+        fix:
+          $ref: '#/components/schemas/Fix'
+      required:
+      - category
+      - explanation
+      - fix
+      - title
+    ProblemSeverity:
+      enum:
+      - error
+      - warning
+      - setup
+      type: string
+    Profile:
+      type: object
+      properties:
+        did:
+          type: string
+        handle:
+          type: string
+        display_name:
+          type: string
+        avatar_url:
+          type:
+          - string
+          - 'null'
+        description:
+          type: string
+        followers_count:
+          type:
+          - integer
+          - 'null'
+        posts_count:
+          type:
+          - integer
+          - 'null'
+        watch_as:
+          type: string
+          description: What to send as `handle` when adding the account.
+      required:
+      - avatar_url
+      - description
+      - did
+      - display_name
+      - followers_count
+      - handle
+      - posts_count
+      - watch_as
+    ProfileLookup:
+      type: object
+      properties:
+        query:
+          type: string
+        handle:
+          type: string
+        result:
+          $ref: '#/components/schemas/LookupResult'
+        exists:
+          type:
+          - boolean
+          - 'null'
+        profile:
+          oneOf:
+          - $ref: '#/components/schemas/Profile'
+          - type: 'null'
+        already_watched:
+          type: boolean
+        watched_account_id:
+          type:
+          - integer
+          - 'null'
+        code:
+          type: string
+        message:
+          type: string
+        problem:
+          oneOf:
+          - $ref: '#/components/schemas/Problem'
+          - type: 'null'
+        suggestion:
+          type:
+          - string
+          - 'null'
+        retryable:
+          type: boolean
+        retry_after_seconds:
+          type:
+          - integer
+          - 'null'
+        cached:
+          type: boolean
+      required:
+      - already_watched
+      - cached
+      - code
+      - exists
+      - handle
+      - message
+      - problem
+      - profile
+      - query
+      - result
+      - retry_after_seconds
+      - retryable
+      - suggestion
+      - watched_account_id
+    SchedulerHealth:
+      type: object
+      properties:
+        state:
+          $ref: '#/components/schemas/CheckerState'
+        healthy:
+          type: boolean
+        message:
+          type: string
+        problem:
+          oneOf:
+          - $ref: '#/components/schemas/Problem'
+          - type: 'null'
+        heartbeat_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        heartbeat_age_seconds:
+          type:
+          - integer
+          - 'null'
+        active_since:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        check_interval_minutes:
+          type: integer
+        checking_now:
+          type: boolean
+        current_check_started_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        last_check:
+          oneOf:
+          - $ref: '#/components/schemas/LastCheck'
+          - type: 'null'
+        next_check_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+      required:
+      - active_since
+      - check_interval_minutes
+      - checking_now
+      - current_check_started_at
+      - healthy
+      - heartbeat_age_seconds
+      - heartbeat_at
+      - last_check
+      - message
+      - next_check_at
+      - problem
+      - state
+    Sent:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/SentStatusEnum'
+      required:
+      - status
+    SentStatusEnum:
+      enum:
+      - sent
+      - failed
+      type: string
+    Settings:
+      type: object
+      properties:
+        bluesky_handle:
+          type: string
+        has_bluesky_password:
+          type: boolean
+          description: The App Password itself is never returned.
+        default_channel:
+          oneOf:
+          - $ref: '#/components/schemas/ChannelRef'
+          - type: 'null'
+        poll_interval_minutes:
+          type: integer
+          maximum: 60
+          minimum: 1
+        settings_version:
+          type: integer
+        updated_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        bluesky_login:
+          $ref: '#/components/schemas/BlueskyLogin'
+      required:
+      - bluesky_handle
+      - bluesky_login
+      - default_channel
+      - has_bluesky_password
+      - poll_interval_minutes
+      - settings_version
+      - updated_at
+    SettingsChangeRequest:
+      type: object
+      properties:
+        bluesky_handle:
+          type: string
+          maxLength: 255
+        bluesky_password:
+          type: string
+          writeOnly: true
+          description: 'Blank or left out: keep the saved one.'
+          maxLength: 255
+        poll_interval_minutes:
+          type: integer
+          maximum: 60
+          minimum: 1
+    SettingsSaved:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/SettingsSavedStatusEnum'
+        settings:
+          $ref: '#/components/schemas/Settings'
+      required:
+      - settings
+      - status
+    SettingsSavedStatusEnum:
+      enum:
+      - saved
+      type: string
+    Setup:
+      type: object
+      properties:
+        bluesky_login:
+          type: boolean
+        discord_channel:
+          type: boolean
+        accounts:
+          type: boolean
+        complete:
+          type: boolean
+        missing:
+          type: array
+          items:
+            $ref: '#/components/schemas/CurrentProblem'
+      required:
+      - accounts
+      - bluesky_login
+      - complete
+      - discord_channel
+      - missing
+    Status:
+      type: object
+      properties:
+        state:
+          $ref: '#/components/schemas/BotState'
+        headline:
+          type: string
+        message:
+          type: string
+        checked_at:
+          type: string
+          format: date-time
+        scheduler:
+          $ref: '#/components/schemas/SchedulerHealth'
+        bluesky_login:
+          $ref: '#/components/schemas/BlueskyLogin'
+        setup:
+          $ref: '#/components/schemas/Setup'
+        counts:
+          $ref: '#/components/schemas/StatusCounts'
+        problems:
+          type: array
+          items:
+            $ref: '#/components/schemas/CurrentProblem'
+        recent_errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActivityEvent'
+      required:
+      - bluesky_login
+      - checked_at
+      - counts
+      - headline
+      - message
+      - problems
+      - recent_errors
+      - scheduler
+      - setup
+      - state
+    StatusCounts:
+      type: object
+      properties:
+        accounts_total:
+          type: integer
+        accounts_active:
+          type: integer
+        channels:
+          type: integer
+        pending_deliveries:
+          type: integer
+        deliveries_waiting:
+          type: integer
+        deliveries_retrying:
+          type: integer
+        sent_last_24h:
+          type: integer
+        failed_sends_last_24h:
+          type: integer
+      required:
+      - accounts_active
+      - accounts_total
+      - channels
+      - deliveries_retrying
+      - deliveries_waiting
+      - failed_sends_last_24h
+      - pending_deliveries
+      - sent_last_24h
+  securitySchemes:
+    csrfToken:
+      type: apiKey
+      in: header
+      name: X-CSRFToken
+      description: The token from GET /api/csrf/, sent with its csrftoken cookie.
+tags:
+- name: status
+  description: Is the bot working? Health, status and the activity log.
+- name: settings
+  description: The bot's Bluesky login and check interval.
+- name: accounts
+  description: Watched Bluesky accounts, their checks and Check All.
+- name: channels
+  description: Named Discord channels (webhooks).
+- name: bluesky
+  description: Looking up Bluesky profiles.
+- name: security
+  description: The CSRF token for changes.

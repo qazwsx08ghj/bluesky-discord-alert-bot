@@ -8,6 +8,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
+    "api:types": "openapi-typescript ../docs/openapi.yaml --alphabetize -o src/api/schema.gen.ts",
+    "api:check": "openapi-typescript ../docs/openapi.yaml --alphabetize -o src/api/schema.gen.ts --check",
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "vite build && playwright test --project=panel",
@@ -31,6 +33,7 @@
     "@vitejs/plugin-react": "5.2.0",
     "jsdom": "26.1.0",
     "msw": "2.15.0",
+    "openapi-typescript": "7.13.0",
     "typescript": "5.9.3",
     "vite": "7.3.7",
     "vitest": "4.1.11"
