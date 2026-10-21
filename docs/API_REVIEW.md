@@ -284,3 +284,10 @@ The old `templates/index.html` and `index` view are kept until the React app rep
     - recovery after a Docker Desktop restart on Docker Desktop 4.96.1;
     - a Chinese folder name;
     - the release download through a local registry.
+- **Plan A+ (done): the API contract and independent frontend and backend work.** See `CONTRIBUTING.md` and `docs/BACKEND.md`.
+  - **The contract:** `docs/openapi.yaml` (OpenAPI 3.1), generated from the code by `config/openapi.py` with drf-spectacular. It covers 30 operations. The views are untouched, and drf-spectacular is a development tool only: it's in `requirements-dev.txt`, not in the image, and not imported by the running app. `python manage.py api_contract` checks it; `--write` regenerates it.
+  - **Conformance:** `config/tests_openapi.py` (tag `contract`) checks every operation's real answers, in every state, against the contract, with closed objects. A coverage test requires a checked successful answer for every operation.
+  - **Generated types:** `frontend/src/api/schema.gen.ts` comes from the contract (openapi-typescript, `npm run api:types`; `api:check` fails on drift). `types.ts` only names those types, and the fake API's answers are checked against them with `satisfies`.
+  - **No API behaviour changed.** One gap between API.md and the code was found and documented as is: `POST /api/settings/test-login/` answers `result: "too_many_tests"` (429) at its limit and `result: "invalid"` (400) for bad input, besides the listed results. The fake API's settings answer was corrected to match the real one.
+  - **CI:** `.github/workflows/ci.yml` has separate jobs: backend, contract, frontend, browser, Windows scripts and Docker. `release.yml` runs them all before publishing.
+  - **Development stack:** `dev/docker-compose.yml` runs the demo server (fake Bluesky and Discord) for frontend work without Python. It has no mounts, no credentials and no internet: an internal network, plus a relay for the port. Tested in real containers by `config/tests_dev_stack.py`.

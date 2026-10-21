@@ -14,7 +14,7 @@ call venv\Scripts\activate
 
 echo.
 echo [2/3] Installing required packages...
-pip install -r requirements-lock.txt
+pip install -r requirements-dev.txt
 
 echo.
 echo [3/3] Setting up database...

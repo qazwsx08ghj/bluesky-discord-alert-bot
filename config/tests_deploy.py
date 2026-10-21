@@ -107,6 +107,39 @@ class DockerFilesTests(SimpleTestCase):
         self.assertIn("eol=lf", (ROOT / ".gitattributes").read_text(encoding="utf-8"))
 
 
+class DevStackFileTests(SimpleTestCase):
+    """dev/docker-compose.yml, the optional demo bot for contributors (real containers: tests_dev_stack)."""
+
+    def test_dev_stack_is_isolated_by_construction(self):
+        import yaml
+
+        raw = (ROOT / "dev" / "docker-compose.yml").read_text(encoding="utf-8")
+        compose = yaml.safe_load(raw)
+        self.assertEqual(compose["name"], "alertbot-dev", "never the real bot's project (alertbot)")
+        self.assertEqual(compose["networks"]["no-internet"], {"internal": True})
+        demo, gateway = compose["services"]["demo"], compose["services"]["gateway"]
+        self.assertEqual(demo["networks"], ["no-internet"])
+        self.assertIn("config/testing/demo_server.py", demo["entrypoint"])
+        self.assertNotIn("ports", demo)
+        self.assertEqual(gateway["entrypoint"], ["python", "config/testing/dev_relay.py"])
+        self.assertTrue(all(p.startswith("127.0.0.1:") for p in gateway["ports"]), "this computer only")
+        for name, service in compose["services"].items():
+            self.assertEqual(service["image"], "bluesky-alert-bot:dev", name)
+            self.assertTrue(service["read_only"], name)
+            for key in ("volumes", "env_file", "environment"):
+                if key == "environment" and name == "demo":
+                    self.assertEqual(set(service[key]), {"DEMO_TRUSTED_ORIGINS"})
+                    continue
+                self.assertNotIn(key, service, f"{name}: {key}")
+        self.assertNotIn("volumes", compose)
+
+    def test_scripts_image_and_download_never_include_it(self):
+        self.assertIn("dev/", (ROOT / ".dockerignore").read_text(encoding="utf-8").split())
+        for path in [*ROOT.glob("*.bat"), *(ROOT / "docker").rglob("*.*"), ROOT / "docker-compose.yml"]:
+            self.assertNotIn("dev/docker-compose", path.read_text(encoding="utf-8", errors="replace"), path)
+        self.assertNotIn("docker-compose.dev", (ROOT / "docker" / "make_release_bundle.py").read_text(encoding="utf-8"))
+
+
 class BatchFileTests(SimpleTestCase):
     def test_batch_files_are_plain_ascii_with_windows_line_endings(self):
         for name in ALL_BATCH:

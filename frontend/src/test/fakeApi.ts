@@ -3,7 +3,12 @@
 // changes, masked webhook URLs, write-only App Password, channel delete rules, background
 // Check All jobs). Nothing here talks to a real server, Bluesky or Discord.
 import { http, HttpResponse, type HttpHandler } from "msw";
-import type { Account, ActivityEvent, BotStatus, Channel, CheckJob } from "../api/types";
+import type { components } from "../api/schema.gen";
+import type { Account, ActivityEvent, BotStatus, Channel, CheckJob, CursorPage, LoginTest, PollResult, ProfileLookup, Settings } from "../api/types";
+
+type Schemas = components["schemas"];
+/** Form errors per field, e.g. {handle: ["…"]} (the contract's 400 for accounts and channels). */
+type FieldErrors = Record<string, string[]>;
 
 export const TOKEN = "test-csrf-token";
 const WEBHOOK = /^https:\/\/(?:(?:ptb|canary)\.)?discord(?:app)?\.com\/api(?:\/v\d+)?\/webhooks\/\d+\/[A-Za-z0-9_-]+\/?$/;
@@ -173,8 +178,21 @@ function login(s: FakeState) {
   return {
     state: s.loginState,
     handle: s.handle,
-    problem: s.loginState === "failed" ? { category: "bluesky_login_rejected", title: "Bluesky rejected the bot's login", explanation: "Create a new App Password and save it in Settings.", fix: "update_login" } : null,
+    problem: s.loginState === "failed" ? { category: "bluesky_login_rejected", title: "Bluesky rejected the bot's login", explanation: "Create a new App Password and save it in Settings.", fix: "update_login" as const } : null,
     retry_after: null,
+  };
+}
+
+function settingsOf(s: FakeState): Settings {
+  const d = s.channels.find((c) => c.is_default);
+  return {
+    bluesky_handle: s.handle,
+    has_bluesky_password: Boolean(s.password),
+    default_channel: d ? { id: d.id, name: d.name } : null,
+    poll_interval_minutes: s.interval,
+    settings_version: s.requests.length + 1,
+    updated_at: now(),
+    bluesky_login: login(s),
   };
 }
 
@@ -202,7 +220,7 @@ export function statusOf(s: FakeState): BotStatus {
       check_interval_minutes: s.interval,
       checking_now: false,
       current_check_started_at: null,
-      last_check: { finished_at: minutesAgo(2), result: "ok", message: "Every account was checked.", problem: null, accounts_checked: 2, accounts_failed: 0, posts_sent: 0 },
+      last_check: { started_at: minutesAgo(3), finished_at: minutesAgo(2), result: "ok", message: "Every account was checked.", problem: null, accounts_checked: 2, accounts_failed: 0, posts_sent: 0 },
       next_check_at: new Date(Date.now() + 3 * 60_000).toISOString(),
     },
     bluesky_login: login(s),
@@ -259,9 +277,9 @@ export function handlersFor(s: FakeState): HttpHandler[] {
   const guard = (request: Request, body: unknown) => {
     const token = request.headers.get("X-CSRFToken");
     s.requests.push({ method: request.method, path: new URL(request.url).pathname + new URL(request.url).search, body, token });
-    if (token !== s.token) return HttpResponse.json({ code: "csrf_failed", message: "This request is missing its security token, so it was refused." }, { status: 403 });
+    if (token !== s.token) return HttpResponse.json({ code: "csrf_failed", message: "This request is missing its security token, so it was refused." } satisfies Schemas["Error"], { status: 403 });
     // Like the real server: only a request that has a body must send it as JSON.
-    if (body !== null && request.headers.get("Content-Type") !== "application/json") return HttpResponse.json({ code: "json_required", message: "Send JSON." }, { status: 415 });
+    if (body !== null && request.headers.get("Content-Type") !== "application/json") return HttpResponse.json({ code: "json_required", message: "Send JSON." } satisfies Schemas["Error"], { status: 415 });
     return null;
   };
   const read = async (request: Request) => {
@@ -276,25 +294,11 @@ export function handlersFor(s: FakeState): HttpHandler[] {
   return [
     http.get("*/api/csrf/", () => {
       document.cookie = `csrftoken=${s.token}; path=/`;
-      return HttpResponse.json({ csrf_token: s.token, header_name: "X-CSRFToken", cookie_name: "csrftoken" });
+      return HttpResponse.json({ csrf_token: s.token, header_name: "X-CSRFToken", cookie_name: "csrftoken" } satisfies Schemas["Csrf"]);
     }),
     http.get("*/api/status/", () => offline() ?? HttpResponse.json(statusOf(s))),
-    http.get("*/api/health/", () => offline() ?? HttpResponse.json({ status: "ok", version: "test", database: true, migrations_pending: 0, checker: "running" })),
-    http.get("*/api/settings/", () => {
-      const d = s.channels.find((c) => c.is_default);
-      return (
-        offline() ??
-        HttpResponse.json({
-          bluesky_handle: s.handle,
-          has_bluesky_password: Boolean(s.password),
-          default_channel: d ? { id: d.id, name: d.name } : null,
-          poll_interval_minutes: s.interval,
-          settings_version: s.requests.length + 1,
-          updated_at: now(),
-          bluesky_login: login(s),
-        })
-      );
-    }),
+    http.get("*/api/health/", () => offline() ?? HttpResponse.json({ status: "ok", version: "test", database: true, migrations_pending: 0, checker: "running" } satisfies Schemas["Health"])),
+    http.get("*/api/settings/", () => offline() ?? HttpResponse.json(settingsOf(s))),
     http.patch("*/api/settings/", async ({ request }) => {
       const body = await read(request);
       const refused = guard(request, body);
@@ -302,14 +306,14 @@ export function handlersFor(s: FakeState): HttpHandler[] {
       const fields: Record<string, string[]> = {};
       if ("poll_interval_minutes" in body && !(body.poll_interval_minutes >= 1 && body.poll_interval_minutes <= 60)) fields.poll_interval_minutes = ["Choose between 1 and 60 minutes."];
       if ("bluesky_handle" in body && /\s/.test(body.bluesky_handle)) fields.bluesky_handle = ["A Bluesky handle can't contain spaces."];
-      if (Object.keys(fields).length) return HttpResponse.json({ code: "invalid_settings", message: "Some settings weren't valid. Nothing was saved.", fields }, { status: 400 });
+      if (Object.keys(fields).length) return HttpResponse.json({ code: "invalid_settings", message: "Some settings weren't valid. Nothing was saved.", fields } satisfies Schemas["Error"], { status: 400 });
       if (body.bluesky_handle !== undefined) s.handle = body.bluesky_handle;
       if (body.bluesky_password) {
         s.password = body.bluesky_password;
         s.loginState = "unknown";
       }
       if (body.poll_interval_minutes) s.interval = body.poll_interval_minutes;
-      return HttpResponse.json({ status: "saved", settings: {} });
+      return HttpResponse.json({ status: "saved", settings: settingsOf(s) } satisfies Schemas["SettingsSaved"]);
     }),
     http.post("*/api/settings/test-login/", async ({ request }) => {
       const body = await read(request);
@@ -317,10 +321,10 @@ export function handlersFor(s: FakeState): HttpHandler[] {
       if (refused) return refused;
       const handle = (body.bluesky_handle || s.handle || "").trim();
       const password = (body.bluesky_password || s.password || "").trim();
-      if (!handle || !password) return HttpResponse.json({ ok: false, result: "invalid", code: "bluesky_not_configured", message: "Enter the bot's Bluesky handle and App Password.", saved: false }, { status: 400 });
-      if (password.includes("offline")) return HttpResponse.json({ ok: false, result: "unavailable", code: "bluesky_unavailable", message: "Couldn't reach Bluesky. Check the internet connection and try again.", problem: null, saved: false }, { status: 503 });
-      if (password.includes("wrong")) return HttpResponse.json({ ok: false, result: "rejected", code: "bluesky_login_rejected", message: "Bluesky didn't accept this handle and App Password. Check both and try again.", problem: null, saved: false });
-      return HttpResponse.json({ ok: true, result: "ok", code: "login_ok", message: "The login works. It isn't saved yet: press Save to start using it.", problem: null, saved: false, warning: null, account: { did: "did:plc:x", handle } });
+      if (!handle || !password) return HttpResponse.json({ ok: false, result: "invalid", code: "bluesky_not_configured", message: "Enter the bot's Bluesky handle and App Password.", saved: false } satisfies LoginTest, { status: 400 });
+      if (password.includes("offline")) return HttpResponse.json({ ok: false, result: "unavailable", code: "bluesky_unavailable", message: "Couldn't reach Bluesky. Check the internet connection and try again.", problem: null, saved: false } satisfies LoginTest, { status: 503 });
+      if (password.includes("wrong")) return HttpResponse.json({ ok: false, result: "rejected", code: "bluesky_login_rejected", message: "Bluesky didn't accept this handle and App Password. Check both and try again.", problem: null, saved: false } satisfies LoginTest);
+      return HttpResponse.json({ ok: true, result: "ok", code: "login_ok", message: "The login works. It isn't saved yet: press Save to start using it.", problem: null, saved: false, warning: null, account: { did: "did:plc:x", handle } } satisfies LoginTest);
     }),
     http.get("*/api/webhooks/", () => offline() ?? HttpResponse.json(page(s.channels.map((c) => toChannel(s, c))))),
     http.post("*/api/webhooks/", async ({ request }) => {
@@ -342,8 +346,8 @@ export function handlersFor(s: FakeState): HttpHandler[] {
       const refused = guard(request, body);
       if (refused) return refused;
       const channel = s.channels.find((c) => c.id === Number(params.id));
-      if (!channel) return HttpResponse.json({ code: "not_found", message: "Not found." }, { status: 404 });
-      if (body.url && !body.url.includes("****") && !WEBHOOK.test(body.url)) return HttpResponse.json({ url: ["Paste the full webhook URL from Discord. It starts with https://discord.com/api/webhooks/"] }, { status: 400 });
+      if (!channel) return HttpResponse.json({ code: "not_found", message: "Not found." } satisfies Schemas["Error"], { status: 404 });
+      if (body.url && !body.url.includes("****") && !WEBHOOK.test(body.url)) return HttpResponse.json({ url: ["Paste the full webhook URL from Discord. It starts with https://discord.com/api/webhooks/"] } satisfies FieldErrors, { status: 400 });
       if (body.name) channel.name = body.name;
       if (body.url && !body.url.includes("****")) channel.url = body.url;
       if (body.is_default) s.channels.forEach((c) => (c.is_default = c.id === channel.id));
@@ -361,18 +365,18 @@ export function handlersFor(s: FakeState): HttpHandler[] {
       const channel = s.channels.find((c) => c.id === Number(params.id))!;
       const ok = !channel.url.includes("broken");
       channel.last_delivery = { at: now(), ok, error: ok ? "" : "The test message wasn't accepted by Discord." };
-      if (!ok) return HttpResponse.json({ status: "failed" }, { status: 502 });
+      if (!ok) return HttpResponse.json({ status: "failed" } satisfies Schemas["Sent"], { status: 502 });
       s.discord.push({ channel: channel.name, text: "test" });
-      return HttpResponse.json({ status: "sent" });
+      return HttpResponse.json({ status: "sent" } satisfies Schemas["Sent"]);
     }),
     http.delete("*/api/webhooks/:id/", ({ request, params }) => {
       const refused = guard(request, null);
       if (refused) return refused;
       const channel = s.channels.find((c) => c.id === Number(params.id))!;
       const reassign = new URL(request.url).searchParams.get("reassign_to");
-      if (channel.is_default) return HttpResponse.json({ code: "channel_is_default", message: "This is the default channel." }, { status: 409 });
+      if (channel.is_default) return HttpResponse.json({ code: "channel_is_default", message: "This is the default channel." } satisfies Schemas["Error"], { status: 409 });
       const users = s.accounts.filter((a) => a.channel_id === channel.id);
-      if (users.length && !reassign) return HttpResponse.json({ code: "channel_in_use", message: "Accounts post here.", accounts: users.map((a) => ({ id: a.id, handle: a.handle })) }, { status: 409 });
+      if (users.length && !reassign) return HttpResponse.json({ code: "channel_in_use", message: "Accounts post here.", accounts: users.map((a) => ({ id: a.id, handle: a.handle })) } satisfies Schemas["Error"], { status: 409 });
       users.forEach((a) => (a.channel_id = reassign === "default" ? null : Number(reassign)));
       s.channels = s.channels.filter((c) => c !== channel);
       return new HttpResponse(null, { status: 204 });
@@ -382,7 +386,7 @@ export function handlersFor(s: FakeState): HttpHandler[] {
       const refused = guard(request, {});
       if (refused) return refused;
       const running = s.jobs.find((j) => !j.final);
-      if (running) return HttpResponse.json({ ...running, created: false }, { status: 202 });
+      if (running) return HttpResponse.json({ ...running, created: false } satisfies CheckJob, { status: 202 });
       const active = s.accounts.filter((a) => a.is_active);
       const job: CheckJob = {
         id: `job-${s.jobs.length + 1}`,
@@ -402,27 +406,27 @@ export function handlersFor(s: FakeState): HttpHandler[] {
         counts: { checked: 0, failed: 0, skipped: s.accounts.length - active.length, already_checking: 0, waiting: active.length, new_posts: 0, posts_sent: 0 },
         accounts: [
           ...active.map((a) => ({ id: a.id, handle: a.handle, result: "waiting" as const, reason: null, message: "Waiting to be checked.", problem: null, first_check: false, new_posts: 0, posts_sent: 0, not_announced: 0, state: "active" as const, state_label: "Active" })),
-          ...s.accounts.filter((a) => !a.is_active).map((a) => ({ id: a.id, handle: a.handle, result: "skipped" as const, reason: "paused", message: "Paused, so it wasn't checked.", problem: null, first_check: false, new_posts: 0, posts_sent: 0, not_announced: 0, state: "paused" as const, state_label: "Paused" })),
+          ...s.accounts.filter((a) => !a.is_active).map((a) => ({ id: a.id, handle: a.handle, result: "skipped" as const, reason: "paused" as const, message: "Paused, so it wasn't checked.", problem: null, first_check: false, new_posts: 0, posts_sent: 0, not_announced: 0, state: "paused" as const, state_label: "Paused" })),
         ],
         checker_running: true,
         poll_after_seconds: 0.05,
       };
       s.jobs.unshift(job);
-      return HttpResponse.json({ ...job, created: true }, { status: 202 });
+      return HttpResponse.json({ ...job, created: true } satisfies CheckJob, { status: 202 });
     }),
     http.get("*/api/check-jobs/", () => {
       if (s.offline) return HttpResponse.error();
       const job = s.jobs[0];
       if (job) advance(s, job);
-      return HttpResponse.json({ results: s.jobs.slice(0, 1) });
+      return HttpResponse.json({ results: s.jobs.slice(0, 1) } satisfies Schemas["CheckJobList"]);
     }),
     http.post("*/api/accounts/", async ({ request }) => {
       const body = await read(request);
       const refused = guard(request, body);
       if (refused) return refused;
       const handle = String(body.handle ?? "").replace(/^@/, "").trim().toLowerCase();
-      if (!handle) return HttpResponse.json({ handle: ["This field may not be blank."] }, { status: 400 });
-      if (s.accounts.some((a) => a.handle === handle)) return HttpResponse.json({ handle: [`You're already watching @${handle}.`] }, { status: 400 });
+      if (!handle) return HttpResponse.json({ handle: ["This field may not be blank."] } satisfies FieldErrors, { status: 400 });
+      if (s.accounts.some((a) => a.handle === handle)) return HttpResponse.json({ handle: [`You're already watching @${handle}.`] } satisfies FieldErrors, { status: 400 });
       const account: FakeAccount = {
         id: Math.max(0, ...s.accounts.map((a) => a.id)) + 1,
         handle,
@@ -460,7 +464,7 @@ export function handlersFor(s: FakeState): HttpHandler[] {
       const account = s.accounts.find((a) => a.id === Number(params.id))!;
       const first = !account.first_poll_done;
       if (!s.handle || !s.password) {
-        return HttpResponse.json({ new_posts_announced: 0, was_first_poll: first, error: "The bot's Bluesky login isn't set up yet.", problem: { category: "bluesky_not_configured", title: "The Bluesky login isn't set up", explanation: "Add it in Settings.", fix: "update_login" }, state: "waiting_first_check", state_label: "", state_message: "", first_check: toAccount(s, account).first_check });
+        return HttpResponse.json({ new_posts_announced: 0, was_first_poll: first, error: "The bot's Bluesky login isn't set up yet.", problem: { category: "bluesky_not_configured", title: "The Bluesky login isn't set up", explanation: "Add it in Settings.", fix: "update_login" }, state: "waiting_first_check", state_label: "", state_message: "", first_check: toAccount(s, account).first_check } satisfies PollResult);
       }
       account.first_poll_done = true;
       account.last_checked_at = now();
@@ -474,7 +478,7 @@ export function handlersFor(s: FakeState): HttpHandler[] {
         first_check: after.first_check,
         problem: null,
         check: { result: "checked", message: first ? "First check done. Noted 2 existing posts; none were sent." : "No new posts.", new_posts: 0, posts_sent: 0, not_announced: 0 },
-      });
+      } satisfies PollResult);
     }),
     http.get("*/api/activity/", ({ request }) => {
       if (s.offline) return HttpResponse.error();
@@ -487,14 +491,14 @@ export function handlersFor(s: FakeState): HttpHandler[] {
       if (group === "problems") list = list.filter((e) => e.level === "warning" || e.level === "error");
       const slice = list.slice(after, after + size);
       const next = after + size < list.length ? `http://localhost:3000/api/activity/?group=${group}&page_size=${size}&cursor=${after + size}` : null;
-      return HttpResponse.json({ next, previous: null, results: slice });
+      return HttpResponse.json({ next, previous: null, results: slice } satisfies CursorPage<ActivityEvent>);
     }),
     http.get("*/api/bluesky/profile/", ({ request }) => {
       const handle = (new URL(request.url).searchParams.get("handle") ?? "").replace(/^@/, "").trim().toLowerCase();
       const base = { query: handle, handle, already_watched: false, watched_account_id: null, problem: null, suggestion: null, retryable: false, retry_after_seconds: null, cached: false };
-      if (/\s/.test(handle)) return HttpResponse.json({ ...base, result: "invalid", exists: null, profile: null, code: "invalid_handle", message: "A handle can't contain spaces.", suggestion: handle.replace(/\s/g, "") }, { status: 400 });
+      if (/\s/.test(handle)) return HttpResponse.json({ ...base, result: "invalid", exists: null, profile: null, code: "invalid_handle", message: "A handle can't contain spaces.", suggestion: handle.replace(/\s/g, "") } satisfies ProfileLookup, { status: 400 });
       const name = PROFILES[handle];
-      if (!name) return HttpResponse.json({ ...base, result: "not_found", exists: false, profile: null, code: "handle_not_found", message: `No Bluesky account is called @${handle}. Check the spelling.` });
+      if (!name) return HttpResponse.json({ ...base, result: "not_found", exists: false, profile: null, code: "handle_not_found", message: `No Bluesky account is called @${handle}. Check the spelling.` } satisfies ProfileLookup);
       const watched = s.accounts.find((a) => a.handle === handle);
       return HttpResponse.json({
         ...base,
@@ -505,7 +509,7 @@ export function handlersFor(s: FakeState): HttpHandler[] {
         watched_account_id: watched?.id ?? null,
         message: watched ? `You're already watching @${handle}.` : `Found @${handle}.`,
         profile: { did: "did:plc:" + handle, handle, display_name: name, avatar_url: null, description: "", followers_count: 10, posts_count: 10, watch_as: handle },
-      });
+      } satisfies ProfileLookup);
     }),
   ];
 }

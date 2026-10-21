@@ -2,6 +2,8 @@
 
 Reference for the React control panel (step 9) and any other client, such as a future React Native app. Written in step 7; it describes the API as it is now.
 
+**The exact shapes are in [openapi.yaml](openapi.yaml):** an OpenAPI 3.1 contract generated from the code (`python manage.py api_contract --write`). It lists every field, type, value and error, and tests check every answer against it. This page explains the API in words. Where the two differ, the contract is right; please report it. The panel's TypeScript types are generated from the contract. How to change the API: [CONTRIBUTING.md](../CONTRIBUTING.md), section 4.
+
 Topic pages with more background:
 - [CHANNELS.md](CHANNELS.md): channels
 - [ACTIVITY_AND_STATUS.md](ACTIVITY_AND_STATUS.md): activity and status
@@ -122,7 +124,7 @@ Every error body has a stable `code` (for program logic) and a plain-language `m
 |---|---|---|
 | `GET /api/settings/` | | `{bluesky_handle, has_bluesky_password, default_channel {id, name} \| null, poll_interval_minutes (number), settings_version, updated_at, bluesky_login}` |
 | `PATCH /api/settings/` (`POST` also accepted) | Any of `bluesky_handle`, `bluesky_password` (blank = keep), `poll_interval_minutes` (1–60) | `200 {status: "saved", settings: {…as GET}}`, `400 invalid_settings`, `503 settings_not_saved`. Applies at once; no restart. Channels, including the default, are under `/api/webhooks/`. |
-| `POST /api/settings/test-login/` | Optional `bluesky_handle`, `bluesky_password` (blank = the saved one) | `{ok, result: ok\|rejected\|app_password_needed\|rate_limited\|unavailable\|error, code, message, problem, handle, account {did, handle}, matches_saved, saved: false, password_looks_like_app_password, warning, retry_after_seconds}`. Never saves anything. At most 5 tests per 5 minutes. |
+| `POST /api/settings/test-login/` | Optional `bluesky_handle`, `bluesky_password` (blank = the saved one) | `{ok, result: ok\|rejected\|app_password_needed\|rate_limited\|unavailable\|error\|invalid\|too_many_tests, code, message, problem, handle, account {did, handle}, matches_saved, saved: false, password_looks_like_app_password, warning, retry_after_seconds}`. Never saves anything. At most 5 tests per 5 minutes; the next one gets `429` with `result` and `code` both `too_many_tests`. A `400` (nothing to test, a bad handle) has `result: invalid`. |
 
 ### 4.3 Bluesky profile lookup
 

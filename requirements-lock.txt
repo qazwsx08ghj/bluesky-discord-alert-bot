@@ -1,5 +1,6 @@
 # Exact versions used for the Docker image, from the tested development environment.
-# Update with: venv\Scripts\pip freeze > requirements-lock.txt (then re-run the tests).
+# Update by hand (pip freeze also lists the developer tools from requirements-dev.txt,
+# which don't belong here), then re-run the tests.
 annotated-types==0.8.0
 anyio==4.15.1
 APScheduler==3.11.3

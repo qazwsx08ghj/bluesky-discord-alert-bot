@@ -14,7 +14,8 @@ frontend/
     App.tsx                routes and providers (data, toasts, the account drawer)
     api/client.ts          every request: same site only, JSON, CSRF token, plain-language errors
     api/queries.ts         what each screen reads, how often it refreshes, what it can change
-    api/types.ts           the API's shapes
+    api/schema.gen.ts      the API's shapes, generated from docs/openapi.yaml (npm run api:types; don't edit)
+    api/types.ts           short names for those generated types
     components/Shell.tsx   sidebar, bot status, "can't reach the bot" banner, focus on page change
     components/ui.tsx      buttons, badges, banners, native <dialog> modals, menu, toasts, skeletons
     features/              the account drawer, Check All, channels, login form, activity entries, status
@@ -87,7 +88,7 @@ npm ci                          # exact versions from package-lock.json
 npm run dev                     # http://localhost:5173, using the API of the bot on port 8000
 ```
 
-`npm run dev` passes `/api` to `ALERTBOT_API` (default `http://127.0.0.1:8000`). Without a running bot, start the demo server:
+`npm run dev` passes `/api` to `ALERTBOT_API` (default `http://127.0.0.1:8000`). Without a running bot, start the demo server, either in Docker (no Python needed; see [CONTRIBUTING.md](../CONTRIBUTING.md), section 2) or with Python:
 - a temporary database;
 - made-up accounts;
 - fake Bluesky and Discord;
@@ -110,6 +111,7 @@ The demo server already trusts `http://localhost:5173` for changes. Against a re
 |---|---|---|
 | `npm test` | 50 integration tests. The whole app in a simulated browser against a fake API that follows API.md, CSRF rules included. Covers setup, accounts, drawer, Check All, settings, channels, offline, CSRF retry, secrets, keyboard and activity. | ~15 s |
 | `npm run e2e` | Builds the panel, starts the demo server and runs 14 Chromium tests against the real Django app and checker. Covers the setup-to-first-account flow, Check now sending a post, Check All surviving a reload, problems and their fixes, keyboard-only use, tablet sizes, addresses, the CSP, and no secrets in pages or API answers. | ~1 min |
+| `npm run typecheck` / `npm run api:check` | TypeScript; and that `src/api/schema.gen.ts` matches `docs/openapi.yaml` | ~10 s |
 | `npm run screenshots` | Writes `docs/screenshots/` from the demo data | ~30 s |
 | `RUN_DOCKER_TESTS=1` with `manage.py test config.tests_docker` | Also runs the `@docker` browser tests against the real containers | ~5 min |
 
@@ -123,4 +125,4 @@ The first browser run needs `npx playwright install chromium`. Django's own test
 
 ## 6. Dependencies
 
-All versions are exact and locked (`package-lock.json`): React 19, React Router 7, TanStack Query 5, Lucide, Inter, plus Vite, TypeScript, Vitest, Testing Library, MSW and Playwright for building and testing. The image runs `npm ci --ignore-scripts`, so no package runs code while it installs. Only the built files go into the image: no Node.js, no `node_modules`.
+All versions are exact and locked (`package-lock.json`): React 19, React Router 7, TanStack Query 5, Lucide, Inter, plus Vite, TypeScript, Vitest, Testing Library, MSW, Playwright and openapi-typescript for building and testing. The image runs `npm ci --ignore-scripts`, so no package runs code while it installs. Only the built files go into the image: no Node.js, no `node_modules`.

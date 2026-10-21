@@ -188,3 +188,4 @@ Your old `db.sqlite3` and `.env` files are only read. After moving, you can keep
 - [docs/DOCKER.md](docs/DOCKER.md): how the Docker version works, updates, backups, restoring, and releases.
 - [docs/FRONTEND.md](docs/FRONTEND.md): the control panel, for developers.
 - [docs/API.md](docs/API.md): the bot's API, for developers.
+- [CONTRIBUTING.md](CONTRIBUTING.md): for developers: the project's layout, working on the panel or the backend separately, the API contract (`docs/openapi.yaml`), tests and CI.

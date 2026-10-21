@@ -1,0 +1,63 @@
+# DEVELOPMENT ONLY: a safe demo bot for working on the control panel without installing Python.
+# Never used by setup.bat, start.bat, update.bat or any other script, and not in the user download.
+#
+#   docker compose -f dev/docker-compose.yml up --build        then open http://127.0.0.1:8765/
+#   (in frontend/)  set ALERTBOT_API=http://127.0.0.1:8765  and  npm run dev   -> http://localhost:5173
+#   docker compose -f dev/docker-compose.yml down               everything is gone (nothing is kept)
+#
+# What runs: config/testing/demo_server.py, the real Django app, API and checker with made-up
+# accounts, a fake Bluesky and a fake Discord, and a temporary database that disappears on stop.
+# Why it can't reach the real Bluesky or Discord, or see your credentials:
+#   - no .env, database or folder of yours is mounted, and the image never contains them;
+#     this file is in dev/ so Compose doesn't even read the main folder's .env for its variables;
+#   - the demo server blanks every credential before Django starts and refuses to start otherwise;
+#   - it refuses any connection that leaves its container, and its container has no internet
+#     at all (an internal Docker network); the "gateway" only passes the panel's port through;
+#   - its own project name (alertbot-dev), image tag (:dev) and no volumes: it never touches
+#     the real bot's containers or data, and the two can run side by side.
+# Scenario: DEMO_SCENARIO=working (default), empty (first visit) or problem. Port: DEMO_PORT.
+
+name: alertbot-dev
+
+x-dev: &dev
+  build:
+    context: ..
+    args:
+      ALERTBOT_VERSION: dev
+  image: bluesky-alert-bot:dev
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp                     # the temporary database lives here and goes away with the container
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+services:
+  demo:
+    <<: *dev
+    entrypoint: ["python", "config/testing/demo_server.py", "--host", "0.0.0.0", "--port", "8765",
+                 "--scenario", "${DEMO_SCENARIO:-working}"]
+    environment:
+      DEMO_TRUSTED_ORIGINS: "http://localhost:5173"   # the Vite dev server (npm run dev)
+    networks: [no-internet]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/health/', timeout=5)"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  gateway:
+    <<: *dev
+    entrypoint: ["python", "config/testing/dev_relay.py"]
+    ports:
+      - "127.0.0.1:${DEMO_PORT:-8765}:8765"          # this computer only
+    networks: [no-internet, outside]
+    depends_on:
+      demo:
+        condition: service_healthy
+
+networks:
+  no-internet:
+    internal: true
+  outside: {}
