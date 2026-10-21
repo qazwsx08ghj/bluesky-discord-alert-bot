@@ -24,7 +24,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import F, Q
 from django.utils import timezone
 
-from discord_alerts import sender
+from discord_alerts import channels, sender
 from .bluesky import BlueskyLoginError, BlueskyUnavailable, SharedSession
 from .locks import acquire_account_lock, release_account_lock
 from .models import MonitoredAccount, SeenPost
@@ -50,10 +50,16 @@ def _post_url(handle: str, uri: str) -> str:
     return f"https://bsky.app/profile/{handle}/post/{rkey}"
 
 
-def _webhook_for(account: MonitoredAccount) -> str:
-    from botconfig import store
+def _channel_for(account: MonitoredAccount):
+    """The account's own channel, else the default channel, else None (see discord_alerts.channels)."""
+    from discord_alerts import channels
 
-    return account.discord_webhook_url or store.default_webhook_url()
+    return channels.route_for(account)
+
+
+def _webhook_for(account: MonitoredAccount) -> str:
+    channel = _channel_for(account)
+    return channel.url if channel else ""
 
 
 # -- reading the feed -----------------------------------------------------------
@@ -110,9 +116,10 @@ def _due_for_delivery(account: MonitoredAccount, now):
 
 def deliver_pending(account: MonitoredAccount) -> int:
     """Send every post that is due for this account. Returns how many were sent."""
-    webhook_url = _webhook_for(account)
-    if not webhook_url:
+    channel = _channel_for(account)
+    if channel is None:
         return 0
+    webhook_url = channel.url
 
     now = timezone.now()
     window_start = now - timedelta(hours=settings.SEND_RETRY_WINDOW_HOURS)
@@ -137,6 +144,7 @@ def deliver_pending(account: MonitoredAccount) -> int:
             post_url=post.post_url,
         )
         mine = SeenPost.objects.filter(pk=post.pk, claim_token=token)
+        channels.record_delivery(channel.pk, result.ok, result.error)
         if result.ok:
             mine.update(status=SeenPost.SENT, sent_at=timezone.now(), next_attempt_at=None, last_error="")
             sent += 1
@@ -167,7 +175,7 @@ def poll_account(account: MonitoredAccount, session=None) -> int:
     if token is None:
         raise AccountBusy(account.handle)
     try:
-        account.refresh_from_db(fields=["first_poll_done", "is_active", "display_name", "discord_webhook_url"])
+        account.refresh_from_db(fields=["first_poll_done", "is_active", "display_name", "channel"])
         # Bluesky trouble never blocks Discord retries of posts already claimed.
         try:
             items = fetch_new_items(session or _new_session(), account)

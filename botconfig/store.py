@@ -64,7 +64,10 @@ def credentials() -> tuple:
 
 
 def default_webhook_url() -> str:
-    return get().discord_webhook_url
+    """The default channel's URL (step 4: channels are the source; the row holds a copy)."""
+    from discord_alerts import channels
+
+    return channels.default_url()
 
 
 def poll_interval_minutes() -> int:
@@ -113,6 +116,9 @@ def _import_once() -> BotSettings:
             )
     except IntegrityError:  # another process imported at the same moment; use its row
         return BotSettings.objects.get(pk=1)
+    from discord_alerts import channels
+
+    channels.adopt_imported_default(values["discord_webhook_url"])
     if found:
         logger.info("Settings imported from .env into the database (one time): %s", _describe(values))
     else:
@@ -136,22 +142,33 @@ def import_from_environment(force: bool = False) -> tuple:
 
 # -- saving -----------------------------------------------------------------------
 @sensitive_variables("changes", "values")
-def save(changes: dict, keep_blank_password: bool = True, attempts: int = 5) -> SaveResult:
+def save(changes: dict, keep_blank_password: bool = True, attempts: int = 5, _from_channels=False) -> SaveResult:
     """Save already-validated changes. Database first; then the .env copy.
 
+    The default webhook is a channel since step 4: a new URL here goes through
+    discord_alerts.channels, which then copies it back into this row for rollback.
     Raises SettingsSaveError if the database can't be written (nothing changed then).
     """
     values = {k: v for k, v in changes.items() if k in FIELDS}
     if keep_blank_password and not values.get("bluesky_password"):
         values.pop("bluesky_password", None)
+    if "discord_webhook_url" in values and not _from_channels:
+        from discord_alerts import channels
+
+        try:
+            get()
+            channels.set_default_url(values.pop("discord_webhook_url"))
+        except DatabaseError as exc:
+            raise SettingsSaveError("The settings couldn't be saved to the database. Nothing was changed.") from exc
 
     try:
         get()  # make sure the row exists (first-time import)
         for _ in range(attempts):
             current = BotSettings.objects.get(pk=1)
             changed = [f for f, v in values.items() if getattr(current, f) != v]
-            if not changed:
-                result = SaveResult(current, [])
+            if not changed:  # (a default webhook change was already saved via channels)
+                result = SaveResult(current, [], env_file_ok=current.env_mirror_ok,
+                                    env_file_error=current.env_mirror_error)
                 break
             # Conditional on the version we read, so two saves at once can't lose either change.
             updated = BotSettings.objects.filter(pk=1, version=current.version).update(

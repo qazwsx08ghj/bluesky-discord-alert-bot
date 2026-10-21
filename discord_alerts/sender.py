@@ -2,6 +2,7 @@ import logging
 from dataclasses import dataclass
 
 import requests
+from django.views.decorators.debug import sensitive_variables
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ def build_payload(handle: str, display_name: str, text: str, post_url: str) -> d
     }
 
 
+@sensitive_variables("webhook_url")
 def deliver_alert(webhook_url: str, handle: str, display_name: str, text: str, post_url: str) -> DeliveryResult:
     """POST a Discord embed and report exactly what happened.
 
@@ -48,12 +50,13 @@ def deliver_alert(webhook_url: str, handle: str, display_name: str, text: str, p
         return DeliveryResult(True, status_code=resp.status_code)
     except requests.HTTPError as exc:
         code = getattr(exc.response, "status_code", None)
-        logger.error("Discord webhook failed for %s: %s", handle, exc)
+        # Never log `exc` itself: its text contains the webhook URL, which is a secret.
+        logger.error("Discord webhook failed for %s: HTTP %s", handle, code)
         if code in (401, 403, 404):
             return DeliveryResult(False, "Discord didn't accept the webhook. It may have been deleted.", status_code=code)
         return DeliveryResult(False, f"Discord returned an error ({code}).", status_code=code)
     except requests.RequestException as exc:
-        logger.error("Discord webhook failed for %s: %s", handle, exc)
+        logger.error("Discord webhook failed for %s: %s", handle, type(exc).__name__)
         return DeliveryResult(False, "Couldn't reach Discord.")
 
 

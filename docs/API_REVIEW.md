@@ -219,3 +219,11 @@ The old `templates/index.html` and `index` view are kept until the React app rep
   - `GET /api/settings/` keeps its fields, masks the webhook URL, and adds `has_discord_webhook_url`, `settings_version`, `updated_at`, `env_file_in_sync`. `PATCH` is accepted. Errors use `{code, message, fields}`.
   - `start.bat` / `setup.bat` back up the database before pending migrations (`backup_db --if-pending`).
   - The `.env` copy is temporary: off in Docker (step 8), removed in step 10.
+- **Step 4 (done):** see `discord_alerts/channels.py` and `docs/CHANNELS.md`.
+  - `MonitoredAccount.channel` (FK, `PROTECT`, null = follow the default); one default channel, enforced by the database.
+  - The migration reproduces the old routing exactly (account URL, else the saved default URL) and is reversible.
+  - Safe delete with `409 channel_in_use` / `channel_is_default` and `?reassign_to=`; `make_default` action; delivery health per channel.
+  - URLs are masked in every response; edits keep the saved URL unless a new one is sent; the sender no longer logs URLs, and a log filter masks any that slip through.
+  - A startup check stops private files (database, `.env`, backups) from ever being in a served folder.
+  - Old URL columns are kept as copies for rollback to step 3 until step 10.
+  - Not done here (planned): checking a new URL against Discord when it is saved.

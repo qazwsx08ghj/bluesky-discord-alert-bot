@@ -8,7 +8,7 @@ from .poller import AccountBusy, poll_account
 
 
 class MonitoredAccountViewSet(viewsets.ModelViewSet):
-    queryset = MonitoredAccount.objects.all().order_by("-created_at")
+    queryset = MonitoredAccount.objects.select_related("channel").order_by("-created_at")
     serializer_class = MonitoredAccountSerializer
 
     @action(detail=True, methods=["post"])

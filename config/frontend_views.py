@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from botconfig import store
 from botconfig.secrets import is_masked, mask_webhook_url
 from botconfig.serializers import SettingsUpdateSerializer
+from discord_alerts import channels
 from discord_alerts.sender import send_discord_alert
 
 
@@ -15,12 +16,14 @@ def index(request):
 
 def _settings_response(row):
     """Settings as the control panel sees them. Secrets are never included."""
+    default = channels.default_channel()
     return {
         "bluesky_handle": row.bluesky_handle,
-        "discord_webhook_url": mask_webhook_url(row.discord_webhook_url),
+        "discord_webhook_url": mask_webhook_url(default.url) if default else "",
+        "default_channel": {"id": default.id, "name": default.name} if default else None,
         "poll_interval_minutes": str(row.poll_interval_minutes),  # a string, as before step 3
         "has_bluesky_password": bool(row.bluesky_password),
-        "has_discord_webhook_url": bool(row.discord_webhook_url),
+        "has_discord_webhook_url": default is not None,
         "settings_version": row.version,
         "updated_at": row.updated_at,
         "env_file_in_sync": row.env_mirror_ok,
@@ -40,6 +43,7 @@ def bot_settings(request):
                          "fields": serializer.errors}, status=400)
     try:
         result = store.save(serializer.changes())
+        result.settings.refresh_from_db()
     except store.SettingsSaveError as exc:
         return Response({"code": "settings_not_saved", "message": str(exc)}, status=503)
 
