@@ -4,7 +4,10 @@ from botconfig.secrets import is_masked, mask_webhook_url
 from discord_alerts import channels
 from discord_alerts.models import DiscordWebhook
 from discord_alerts.serializers import validate_webhook_url
-from .models import MonitoredAccount, SeenPost
+from . import account_status, profiles
+from .models import POST, REPLY, REPOST, MonitoredAccount, SeenPost
+
+ANNOUNCE_FIELDS = {"announce_posts": POST, "announce_reposts": REPOST, "announce_replies": REPLY}
 
 
 class SeenPostSerializer(serializers.ModelSerializer):
@@ -21,8 +24,21 @@ class MonitoredAccountSerializer(serializers.ModelSerializer):
     - `discord_webhook_url` (kept from before step 4): a URL is matched to the channel with
       that URL or saved as a new one; "" means "follow the default"; the masked value shown
       in responses means "unchanged". Responses only ever show the masked URL.
+
+    What is announced: `announce_posts`, `announce_reposts`, `announce_replies` (defaults
+    on / on / off). Changing them affects only posts noticed afterwards.
+
+    Read-only status (step 6, see account_status.py): `state`, `state_label`, `state_message`,
+    `checking_now`, `problem`, `first_check`, `last_checked_at`, `last_check_ok`,
+    `last_success_at`, `last_error`.
+
+    `handle` accepts "@Name.bsky.social", a bsky.app profile link or a DID, and is stored
+    cleaned up. A handle that is already watched is refused with code `already_watched`.
     """
     seen_posts = SeenPostSerializer(many=True, read_only=True)
+    announce_posts = serializers.BooleanField(required=False)
+    announce_reposts = serializers.BooleanField(required=False)
+    announce_replies = serializers.BooleanField(required=False)
     channel_id = serializers.PrimaryKeyRelatedField(
         source="channel", queryset=DiscordWebhook.objects.all(), allow_null=True, required=False)
     channel = serializers.SerializerMethodField()
@@ -40,11 +56,15 @@ class MonitoredAccountSerializer(serializers.ModelSerializer):
             "channel",
             "uses_default_channel",
             "is_active",
+            "announce_posts",
+            "announce_reposts",
+            "announce_replies",
             "first_poll_done",
             "created_at",
             "seen_posts",
         ]
         read_only_fields = ["first_poll_done", "created_at"]
+        extra_kwargs = {"handle": {"validators": []}}  # uniqueness is checked after cleaning, below
 
     def get_channel(self, obj):
         if obj.channel is None:
@@ -57,7 +77,19 @@ class MonitoredAccountSerializer(serializers.ModelSerializer):
     def to_representation(self, obj):
         data = super().to_representation(obj)
         data["discord_webhook_url"] = mask_webhook_url(obj.channel.url) if obj.channel else ""
+        for field, kind in ANNOUNCE_FIELDS.items():
+            data[field] = obj.announces(kind)  # null (accounts added by older code) means the default
+        data.update(account_status.describe(obj))
         return data
+
+    def validate_handle(self, value):
+        norm = profiles.normalize_handle(value)
+        if not norm.ok:
+            raise serializers.ValidationError(norm.error, code="invalid_handle")
+        existing = profiles.watched_account(norm.actor)
+        if existing is not None and (self.instance is None or existing.pk != self.instance.pk):
+            raise serializers.ValidationError(f"You're already watching @{norm.actor}.", code="already_watched")
+        return norm.actor
 
     def validate_discord_webhook_url(self, value):
         value = value.strip()

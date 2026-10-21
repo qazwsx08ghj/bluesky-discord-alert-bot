@@ -17,8 +17,18 @@ before the "sent" update, and even then only once, after the stale timeout.
 
 Every send, retry, give-up and failed check is also written to the activity log
 (activity.log), which is separate from this queue.
+
+What is announced is set per account (announce_posts / _reposts / _replies). Items of a
+kind that is switched off are still recorded, as "skipped", so switching it on later
+never floods the channel with old items.
+
+Scheduled checks (poll_all_active_accounts) and "Check all" (check_all.py) both go through
+check_accounts(): the same per-account lock, claims and delivery, so running both at once
+can't send anything twice, and one account's failure never stops the others.
 """
 import logging
+import time
+import traceback
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import timedelta
@@ -33,7 +43,7 @@ from activity.models import ActivityEvent
 from discord_alerts import channels, sender
 from .bluesky import BlueskyLoginError, BlueskyUnavailable, SharedSession
 from .locks import acquire_account_lock, release_account_lock
-from .models import MonitoredAccount, SeenPost
+from .models import POST, REPLY, REPOST, MonitoredAccount, SeenPost
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +72,44 @@ class CycleSummary:
 
     def as_dict(self):
         return asdict(self)
+
+
+# AccountCheck.result values
+CHECKED, FAILED, SKIPPED, ALREADY_CHECKING = "checked", "failed", "skipped", "already_checking"
+
+
+@dataclass
+class AccountCheck:
+    """What one check of one account did. Returned per account by "Check all".
+
+    result: checked | failed (couldn't read the feed; see category) | skipped (see reason)
+            | already_checking (another check of this account was running)
+    reason (skipped only): paused | login_failed | not_configured | time_limit | stopped
+    """
+    account_id: int
+    handle: str
+    result: str = CHECKED
+    reason: str = ""
+    category: str = ""
+    first_check: bool = False
+    new_posts: int = 0      # posts noticed this time (on the first check: noted, never sent)
+    posts_sent: int = 0     # posts sent to Discord during this check (includes retries of older ones)
+    turned_off: int = 0     # new posts not announced because their kind is switched off
+    no_channel: int = 0     # new posts not sent because no Discord channel is chosen
+
+    def as_dict(self):
+        return asdict(self)
+
+
+def item_kind(item) -> str:
+    """post, repost or reply. Reposts carry a "reason"; replies have record.reply set."""
+    reason = getattr(item, "reason", None)
+    if reason is not None:
+        reason_type = str(getattr(reason, "py_type", "") or type(reason).__name__).lower()
+        if "pin" not in reason_type:  # a pinned post is the account's own post
+            return REPOST
+    record = getattr(getattr(item, "post", None), "record", None)
+    return REPLY if getattr(record, "reply", None) else POST
 
 
 def _new_session() -> SharedSession:
@@ -102,24 +150,28 @@ def _post_detail(post, **extra):
 
 def _check_ok(account: MonitoredAccount):
     was_failing = account.last_check_ok is False
+    now = timezone.now()
     MonitoredAccount.objects.filter(pk=account.pk).update(
-        last_checked_at=timezone.now(), last_check_ok=True, last_check_category=None)
-    account.last_check_ok = True
+        last_checked_at=now, last_check_ok=True, last_check_category=None, last_success_at=now)
+    account.last_check_ok, account.last_check_category = True, None
     if was_failing:
         activity.record(activity.CHECK_RECOVERED, ActivityEvent.SUCCESS,
                         f"Checking @{account.handle} works again.", account=account)
 
 
-def _check_failed(account: MonitoredAccount, exc: Exception):
+def _check_failed(account: MonitoredAccount, exc: Exception, technical: str = "") -> str:
+    """Record a failed check of one account. Returns the problem category."""
     category = problems.classify_bluesky_error(exc)
+    now = timezone.now()
     MonitoredAccount.objects.filter(pk=account.pk).update(
-        last_checked_at=timezone.now(), last_check_ok=False, last_check_category=category)
-    account.last_check_ok = False
-    temporary = category in ("bluesky_unavailable", "bluesky_rate_limited", "bluesky_error")
+        last_checked_at=now, last_check_ok=False, last_check_category=category,
+        last_error_at=now, last_error_category=category)
+    account.last_check_ok, account.last_check_category = False, category
     activity.problem(activity.CHECK_FAILED, category,
                      f"Couldn't check @{account.handle}: {problems.get(category).title}.",
-                     level=ActivityEvent.WARNING if temporary else ActivityEvent.ERROR,
-                     account=account, exc=exc, merge_repeats=True)
+                     level=ActivityEvent.WARNING if problems.is_temporary(category) else ActivityEvent.ERROR,
+                     account=account, exc=exc, technical=technical, merge_repeats=True)
+    return category
 
 
 # -- reading the feed -----------------------------------------------------------
@@ -145,9 +197,10 @@ def fetch_new_items(session, account: MonitoredAccount) -> list:
 
 
 # -- claiming -------------------------------------------------------------------
-def claim_post(account: MonitoredAccount, item, status: str) -> bool:
+def claim_post(account: MonitoredAccount, item, status: str, kind: str | None = None) -> bool:
     """Record a post. Returns False if it was already recorded (by any process)."""
     post = item.post
+    kind = kind or item_kind(item)
     author = getattr(getattr(post, "author", None), "handle", None) or account.handle
     try:
         with transaction.atomic():
@@ -158,6 +211,7 @@ def claim_post(account: MonitoredAccount, item, status: str) -> bool:
                 text=getattr(post.record, "text", "") or "",
                 post_url=_post_url(author, post.uri),
                 status=status,
+                kind=kind,
             )
         return True
     except IntegrityError:
@@ -201,12 +255,14 @@ def deliver_pending(account: MonitoredAccount) -> int:
                            attempts=F("attempts") + 1) != 1:
             continue  # another process claimed it between our read and our update
 
+        extra = {"kind": post.kind} if post.kind in (REPOST, REPLY) else {}  # plain posts: as before
         result = sender.deliver_alert(
             webhook_url=webhook_url,
             handle=account.handle,
             display_name=account.display_name or account.handle,
             text=post.text,
             post_url=post.post_url,
+            **extra,
         )
         mine = SeenPost.objects.filter(pk=post.pk, claim_token=token)
         channels.record_delivery(channel.pk, result.ok, result.error)
@@ -252,53 +308,154 @@ def deliver_pending(account: MonitoredAccount) -> int:
 def poll_account(account: MonitoredAccount, session=None) -> int:
     """Fetch recent posts for one account and announce any new ones. Returns count of posts sent.
 
-    Raises AccountBusy if another process is checking this account right now.
+    The details of what happened are left on `account.check_report` (an AccountCheck).
+    Raises AccountBusy if another process is checking this account right now, and
+    BlueskyLoginError if the bot's own login doesn't work (nothing can be checked).
     """
+    report = AccountCheck(account.pk, account.handle)
+    account.check_report = report
     token = acquire_account_lock(account.pk)
     if token is None:
         raise AccountBusy(account.handle)
     try:
-        account.refresh_from_db(fields=["first_poll_done", "is_active", "display_name", "channel", "last_check_ok"])
+        account.refresh_from_db(fields=["first_poll_done", "is_active", "display_name", "channel", "last_check_ok",
+                                        "announce_posts", "announce_reposts", "announce_replies"])
         # Bluesky trouble never blocks Discord retries of posts already claimed.
         try:
             items = fetch_new_items(session or _new_session(), account)
         except BlueskyLoginError:
-            deliver_pending(account)
+            report.posts_sent = deliver_pending(account)
             raise
         except (BlueskyUnavailable, Exception) as exc:
             # Only the error type here; the full (scrubbed) cause is in the activity log entry.
             logger.error("Failed to fetch feed for %s: %s", account.handle, type(exc).__name__)
-            _check_failed(account, exc)
-            return deliver_pending(account)
+            report.result, report.category = FAILED, _check_failed(account, exc)
+            report.posts_sent = deliver_pending(account)
+            return report.posts_sent
         _check_ok(account)
 
         is_first_poll = not account.first_poll_done
-        if is_first_poll:
-            status = SeenPost.SEEDED
-        elif _webhook_for(account):
-            status = SeenPost.PENDING
-        else:
-            status = SeenPost.SKIPPED  # no channel set: noted, never sent (as before)
-        claimed = sum(1 for item in items if claim_post(account, item, status))
+        has_channel = bool(_webhook_for(account))
+        for item in items:
+            kind = item_kind(item)
+            if is_first_poll:
+                status = SeenPost.SEEDED
+            elif not account.announces(kind):
+                status = SeenPost.SKIPPED  # this kind is switched off for the account: noted, never sent
+            elif has_channel:
+                status = SeenPost.PENDING
+            else:
+                status = SeenPost.SKIPPED  # no channel set: noted, never sent (as before)
+            if not claim_post(account, item, status, kind=kind):
+                continue
+            report.new_posts += 1
+            if status == SeenPost.SKIPPED:
+                if account.announces(kind):
+                    report.no_channel += 1
+                else:
+                    report.turned_off += 1
+        claimed = report.new_posts
+        report.first_check = is_first_poll
 
         if is_first_poll:
-            MonitoredAccount.objects.filter(pk=account.pk).update(first_poll_done=True)
+            MonitoredAccount.objects.filter(pk=account.pk).update(
+                first_poll_done=True, first_checked_at=timezone.now(), first_check_posts=claimed)
             account.first_poll_done = True
             logger.info("Seeded existing posts for %s - no announcements on first poll", account.handle)
             activity.record(activity.FIRST_CHECK_DONE, ActivityEvent.INFO,
                             f"First check of @{account.handle} done. Noted {_plural(claimed, 'existing post')}; "
                             "none were sent to Discord. New posts from now on will be announced.",
                             account=account, detail={"seeded_posts": claimed})
-        elif status == SeenPost.SKIPPED and claimed:
+        elif report.no_channel:
             activity.problem(activity.POST_NOT_SENT, "no_channel",
-                             f"{_plural(claimed, 'new post')} from @{account.handle} not sent: "
+                             f"{_plural(report.no_channel, 'new post')} from @{account.handle} not sent: "
                              "no Discord channel is chosen for this account.",
-                             level=ActivityEvent.WARNING, account=account, detail={"posts": claimed},
+                             level=ActivityEvent.WARNING, account=account, detail={"posts": report.no_channel},
                              merge_repeats=True)
 
-        return deliver_pending(account)
+        report.posts_sent = deliver_pending(account)
+        return report.posts_sent
     finally:
         release_account_lock(account.pk, token)
+
+
+def _unexpected_failure(account: MonitoredAccount, exc: Exception) -> AccountCheck:
+    """An error outside reading the feed (a bug, a database hiccup). Recorded on this account
+    only, so the remaining accounts are still checked."""
+    logger.error("Unexpected error while checking %s: %s", account.handle, type(exc).__name__)
+    report = AccountCheck(account.pk, account.handle, result=FAILED, category="internal")
+    try:
+        report.category = _check_failed(account, exc, technical="".join(traceback.format_exception(exc))[-1000:])
+    except Exception:  # even recording it failed; the console log has the error type
+        logger.exception("Couldn't record the failed check of %s", account.handle)
+    return report
+
+
+def check_accounts(accounts, *, should_continue=None, deadline=None, session=None):
+    """Check the given accounts one after another with one shared Bluesky session.
+
+    Each account gets its own lock, so a check that is already running elsewhere (the
+    scheduled check, or another "Check all") is reported as already_checking instead of
+    being run twice. A failure in one account never stops the others; only a login that
+    doesn't work stops the rest, because then nothing can be read.
+
+    should_continue: checked before each account (the scheduler passes "do I still hold the lease?").
+    deadline: a time.monotonic() value; accounts not reached by then are skipped (time_limit).
+    Returns (CycleSummary, [AccountCheck, ...]) in the order of `accounts`.
+    """
+    summary, reports = CycleSummary(), []
+    session = session or _new_session()
+    stopped = None  # (reason, category) once the remaining accounts can't be checked
+    for account in accounts:
+        if stopped is None and should_continue is not None and not should_continue():
+            logger.warning("Stopping this check cycle: the checker lease was lost")
+            summary.result, stopped = "interrupted", ("stopped", "")
+        if stopped is None and deadline is not None and time.monotonic() > deadline:
+            logger.warning("Stopping: the time limit for this check was reached")
+            stopped = ("time_limit", "")
+        if stopped is not None:
+            reports.append(AccountCheck(account.pk, account.handle, result=SKIPPED,
+                                        reason=stopped[0], category=stopped[1]))
+            continue
+
+        try:
+            sent = poll_account(account, session=session)
+        except AccountBusy:
+            logger.info("Skipping %s: it is already being checked", account.handle)
+            summary.accounts_busy += 1
+            reports.append(AccountCheck(account.pk, account.handle, result=ALREADY_CHECKING))
+            continue
+        except BlueskyLoginError as exc:
+            logger.error("Check cycle stopped: %s", exc)
+            summary.category = getattr(exc, "category", "bluesky_login_rejected")
+            summary.result = "not_configured" if summary.category == "bluesky_not_configured" else "failed"
+            stopped = ("not_configured" if summary.result == "not_configured" else "login_failed", summary.category)
+            reports.append(AccountCheck(account.pk, account.handle, result=SKIPPED,
+                                        reason=stopped[0], category=stopped[1]))
+            continue
+        except Exception as exc:
+            report = _unexpected_failure(account, exc)
+            summary.accounts_checked += 1
+            summary.accounts_failed += 1
+            summary.category = report.category
+            reports.append(report)
+            continue
+
+        summary.accounts_checked += 1
+        summary.posts_sent += sent if isinstance(sent, int) else 0
+        report = getattr(account, "check_report", None)
+        if not isinstance(report, AccountCheck):  # poll_account replaced (tests)
+            report = AccountCheck(account.pk, account.handle, posts_sent=sent if isinstance(sent, int) else 0)
+        health = MonitoredAccount.objects.filter(pk=account.pk).values_list(
+            "last_check_ok", "last_check_category").first()
+        if health and health[0] is False:
+            summary.accounts_failed += 1
+            summary.category = health[1] or "internal"
+            report.result, report.category = FAILED, summary.category
+        reports.append(report)
+    if summary.result == "ok" and summary.accounts_failed:
+        summary.result = "failed" if summary.accounts_failed == summary.accounts_checked else "partial"
+    return summary, reports
 
 
 def poll_all_active_accounts(should_continue=None) -> CycleSummary:
@@ -307,31 +464,6 @@ def poll_all_active_accounts(should_continue=None) -> CycleSummary:
     should_continue: optional callable checked before each account (the scheduler passes
     "do I still hold the lease?"). Returns what the check did.
     """
-    summary = CycleSummary()
-    session = _new_session()
-    for account in MonitoredAccount.objects.filter(is_active=True).order_by("id"):
-        if should_continue is not None and not should_continue():
-            logger.warning("Stopping this check cycle: the checker lease was lost")
-            summary.result = "interrupted"
-            return summary
-        try:
-            sent = poll_account(account, session=session)
-        except AccountBusy:
-            logger.info("Skipping %s: it is already being checked", account.handle)
-            summary.accounts_busy += 1
-            continue
-        except BlueskyLoginError as exc:
-            logger.error("Check cycle stopped: %s", exc)
-            summary.category = getattr(exc, "category", "bluesky_login_rejected")
-            summary.result = "not_configured" if summary.category == "bluesky_not_configured" else "failed"
-            return summary
-        summary.accounts_checked += 1
-        summary.posts_sent += sent if isinstance(sent, int) else 0
-        health = MonitoredAccount.objects.filter(pk=account.pk).values_list(
-            "last_check_ok", "last_check_category").first()
-        if health and health[0] is False:
-            summary.accounts_failed += 1
-            summary.category = health[1] or "internal"
-    if summary.accounts_failed:
-        summary.result = "failed" if summary.accounts_failed == summary.accounts_checked else "partial"
+    accounts = MonitoredAccount.objects.filter(is_active=True).order_by("id")
+    summary, _reports = check_accounts(accounts, should_continue=should_continue)
     return summary

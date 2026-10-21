@@ -1,7 +1,13 @@
 from django.db import models
 
+POST, REPOST, REPLY = "post", "repost", "reply"
+KIND_CHOICES = [(POST, "Post"), (REPOST, "Repost"), (REPLY, "Reply")]
+
 
 class MonitoredAccount(models.Model):
+    # What is announced when an announce_* field is null (accounts added by older code).
+    ANNOUNCE_DEFAULTS = {POST: True, REPOST: True, REPLY: False}
+
     handle = models.CharField(max_length=255, unique=True, help_text="e.g. user.bsky.social")
     display_name = models.CharField(max_length=255, blank=True)
     # Where this account's posts go. Null means "the default channel", so changing the
@@ -31,6 +37,23 @@ class MonitoredAccount(models.Model):
     last_check_ok = models.BooleanField(null=True, blank=True)
     last_check_category = models.CharField(max_length=32, null=True, blank=True)  # activity.problems code
 
+    # Step 6. Everything below is nullable for the same reason.
+    # What gets announced. Changing it only affects posts noticed afterwards.
+    announce_posts = models.BooleanField(null=True, default=True)
+    announce_reposts = models.BooleanField(null=True, default=True)
+    announce_replies = models.BooleanField(null=True, default=False)
+    # The first check, which notes existing posts without sending them.
+    first_checked_at = models.DateTimeField(null=True, blank=True)
+    first_check_posts = models.PositiveIntegerField(null=True, blank=True)
+    # Last check that worked, and the most recent failure (kept after recovery).
+    last_success_at = models.DateTimeField(null=True, blank=True)
+    last_error_at = models.DateTimeField(null=True, blank=True)
+    last_error_category = models.CharField(max_length=32, null=True, blank=True)
+
+    def announces(self, kind: str) -> bool:
+        value = {POST: self.announce_posts, REPOST: self.announce_reposts, REPLY: self.announce_replies}.get(kind)
+        return self.ANNOUNCE_DEFAULTS.get(kind, True) if value is None else value
+
     def __str__(self):
         return self.handle
 
@@ -49,7 +72,7 @@ class SeenPost(models.Model):
     RETRY = "retry"       # a send failed; try again at next_attempt_at
     SENT = "sent"         # Discord accepted it
     FAILED = "failed"     # gave up after the last retry or the retry window
-    SKIPPED = "skipped"   # no Discord channel was configured when it was noticed
+    SKIPPED = "skipped"   # not to be sent: no Discord channel, or the account doesn't announce this kind
     STATUS_CHOICES = [(s, s) for s in (SEEDED, PENDING, SENDING, RETRY, SENT, FAILED, SKIPPED)]
 
     account = models.ForeignKey(MonitoredAccount, on_delete=models.CASCADE, related_name="seen_posts")
@@ -66,6 +89,8 @@ class SeenPost(models.Model):
     next_attempt_at = models.DateTimeField(null=True, blank=True)
     sent_at = models.DateTimeField(null=True, blank=True)
     last_error = models.CharField(max_length=500, blank=True)
+    # post, repost or reply. Null for posts noted before step 6.
+    kind = models.CharField(max_length=10, choices=KIND_CHOICES, null=True, blank=True)
 
     class Meta:
         constraints = [

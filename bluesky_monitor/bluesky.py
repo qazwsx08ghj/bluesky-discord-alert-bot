@@ -11,6 +11,8 @@ the session in the database, and every process reuses it. Recovery rules:
 """
 import hashlib
 import logging
+import re
+from dataclasses import dataclass
 from datetime import timedelta
 
 from atproto import Client
@@ -18,6 +20,7 @@ from atproto_client import exceptions as at_exc
 from atproto_client.client.session import SessionEvent
 from django.db import IntegrityError, transaction
 from django.utils import timezone
+from django.views.decorators.debug import sensitive_variables
 
 from .models import BlueskySessionState
 
@@ -205,3 +208,89 @@ class SharedSession:
             _log_login("login_recovered")
         logger.info("Logged in to Bluesky as %s", handle)
         return client
+
+
+# -- "Test login" in Settings -------------------------------------------------------------------
+APP_PASSWORD_SHAPE = re.compile(r"^[a-z0-9]{4}(-[a-z0-9]{4}){3}$")
+UNAVAILABLE_LOGIN_ERRORS = {"AccountTakedown", "AccountDeactivated"}
+
+
+@dataclass
+class LoginTest:
+    """The result of trying a handle and password once.
+
+    result: ok | rejected | app_password_needed | rate_limited | unavailable | error
+    """
+    result: str
+    category: str = ""
+    did: str = ""
+    handle: str = ""
+    retry_after: int | None = None
+
+
+def looks_like_app_password(password: str) -> bool:
+    return bool(APP_PASSWORD_SHAPE.match((password or "").strip()))
+
+
+@sensitive_variables("password", "client")
+def try_login(handle: str, password: str) -> LoginTest:
+    """Log in once with a throwaway client and report what Bluesky said.
+
+    Nothing is saved: the client has no session-change hook, the shared session and its
+    back-off are untouched, and the client (with its tokens) is dropped on return.
+    Nothing about the password or the session ever goes into the result or the logs.
+    """
+    from bluesky_monitor.profiles import _retry_after_seconds
+
+    client = SharedSession.client_factory()
+    try:
+        client.login(handle, password, fetch_bsky_profile=False)
+    except at_exc.RateLimitExceededError as exc:
+        return LoginTest("rate_limited", "bluesky_rate_limited", retry_after=_retry_after_seconds(exc, 300))
+    except (at_exc.NetworkError, at_exc.InvokeTimeoutError) as exc:
+        logger.info("Login test couldn't reach Bluesky: %s", type(exc).__name__)
+        return LoginTest("unavailable", "bluesky_unavailable")
+    except Exception as exc:
+        name = problems_error_name(exc)
+        if name == "AuthFactorTokenRequired":
+            return LoginTest("app_password_needed", "bluesky_app_password_needed")
+        if name in UNAVAILABLE_LOGIN_ERRORS:
+            return LoginTest("rejected", "account_unavailable")
+        if is_auth_error(exc) or isinstance(exc, (at_exc.BadRequestError, at_exc.UnauthorizedError)):
+            return LoginTest("rejected", "bluesky_login_rejected")
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if isinstance(exc, at_exc.RequestException) and status and status >= 500:
+            return LoginTest("unavailable", "bluesky_unavailable")
+        logger.warning("Login test failed unexpectedly: %s", type(exc).__name__)
+        return LoginTest("error", "bluesky_error")
+    session = getattr(client, "_session", None) or getattr(client, "me", None)
+    return LoginTest("ok", did=str(getattr(session, "did", "") or ""), handle=str(getattr(session, "handle", "") or ""))
+
+
+def problems_error_name(exc) -> str:
+    from activity.problems import xrpc_error_name
+
+    return xrpc_error_name(exc)
+
+
+@sensitive_variables("password")
+def saved_login_works(handle: str, password: str) -> bool:
+    """A login test of the *saved* credentials worked: end the wait after a rejected (or
+    rate-limited) login, so the next check logs in instead of waiting up to an hour.
+
+    Only the back-off is changed; the saved session and credentials are not. Returns True
+    if the login had been failing (worth an "it works again" log entry).
+    """
+    fp = _fingerprint(handle, password)
+    state = BlueskySessionState.objects.filter(pk=1, credential_fingerprint=fp).first()
+    if state is None or (not state.login_failures and not state.login_retry_after):
+        return False
+    BlueskySessionState.objects.filter(pk=1, credential_fingerprint=fp).update(
+        login_failures=0, login_retry_after=None, last_error="")
+    if state.login_failures:
+        from activity import log
+
+        log.record(log.LOGIN_RECOVERED, "success", "The saved Bluesky login works again (tested in Settings). "
+                   "Checks resume at the next check.")
+        return True
+    return False

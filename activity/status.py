@@ -258,7 +258,7 @@ def _current_problems(now, checker, login, active, default):
     for account in active:
         if account.last_check_ok is False:
             code = account.last_check_category if problems.get(account.last_check_category) else "internal"
-            temporary = code in ("bluesky_unavailable", "bluesky_rate_limited", "bluesky_error")
+            temporary = problems.is_temporary(code)
             found.append(_problem(code, f"@{account.handle}: {problems.get(code).title}.",
                                   severity="warning" if temporary else "error",
                                   since=account.last_checked_at, account=account))
@@ -271,7 +271,7 @@ def _current_problems(now, checker, login, active, default):
     for channel in in_use:
         code = _latest_send_category(channel.pk) or "discord_error"
         found.append(_problem(code, f'"{channel.name}": {problems.get(code).title}.',
-                              severity="warning" if code in ("discord_unavailable", "discord_rate_limited") else "error",
+                              severity="warning" if problems.is_temporary(code) else "error",
                               since=channel.last_delivery_at, channel=channel))
 
     retrying = SeenPost.objects.filter(status=SeenPost.RETRY).count()

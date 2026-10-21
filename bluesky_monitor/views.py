@@ -1,8 +1,9 @@
 from rest_framework import viewsets, status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 
-from activity import log as activity
+from activity import log as activity, problems
+from . import account_status, check_all as check_all_run, profiles
 from .models import MonitoredAccount
 from .serializers import MonitoredAccountSerializer
 from .bluesky import BlueskyLoginError
@@ -12,6 +13,7 @@ from .poller import AccountBusy, poll_account
 class MonitoredAccountViewSet(viewsets.ModelViewSet):
     queryset = MonitoredAccount.objects.select_related("channel").order_by("-created_at")
     serializer_class = MonitoredAccountSerializer
+    lookup_value_regex = r"\d+"  # keeps /check_all/ apart from account ids
 
     def perform_create(self, serializer):
         account = serializer.save()
@@ -38,5 +40,32 @@ class MonitoredAccountViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_409_CONFLICT)
         except BlueskyLoginError as exc:
             # Same response as before (nothing announced), plus the reason.
-            body.update(new_posts_announced=0, error=str(exc))
+            body.update(new_posts_announced=0, error=str(exc),
+                        problem=problems.describe(getattr(exc, "category", "")))
+        # Added in step 6: the account's status after the check, and what the check did.
+        account.refresh_from_db()
+        report = getattr(account, "check_report", None)
+        info = account_status.describe(account)
+        body.update(state=info["state"], state_label=info["state_label"], state_message=info["state_message"],
+                    first_check=info["first_check"], problem=body.get("problem") or info["problem"])
+        if report is not None and hasattr(report, "as_dict"):
+            body["check"] = {"result": report.result, "message": check_all_run.account_message(report),
+                             "new_posts": report.new_posts, "posts_sent": report.posts_sent,
+                             "not_announced": report.turned_off + report.no_channel}
         return Response({"new_posts_announced": body["new_posts_announced"], **body}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"])
+    def check_all(self, request):
+        """Check every account now; per-account results. See bluesky_monitor/check_all.py."""
+        return Response(check_all_run.run())
+
+
+@api_view(["GET"])
+def profile_lookup(request):
+    """GET /api/bluesky/profile/?handle=… — see bluesky_monitor/profiles.py for the answers."""
+    http_status, body = profiles.lookup(request.query_params.get("handle", ""))
+    response = Response(body, status=http_status)
+    if body.get("retry_after_seconds"):
+        response["Retry-After"] = str(body["retry_after_seconds"])
+    response["Cache-Control"] = "no-store"
+    return response

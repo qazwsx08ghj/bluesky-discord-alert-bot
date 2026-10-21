@@ -52,6 +52,16 @@ _ALL = [
              "Bluesky couldn't find this account. Check that the handle is spelled correctly "
              "(for example name.bsky.social), or remove the account if it was deleted.",
              "check_handle"),
+    Category("account_unavailable", "Account can't be viewed right now",
+             "This Bluesky account exists but the bot can't see its posts right now: its owner deactivated it, "
+             "Bluesky suspended it, or it blocks the bot's account. The bot keeps trying; new posts are "
+             "announced if that changes.",
+             "wait"),
+    Category("bluesky_app_password_needed", "Use an App Password",
+             "This account asks for an email code when signing in, so the bot can't use its main password. "
+             "Create an App Password in Bluesky under Settings > Privacy and security > App passwords, and use "
+             "that instead.",
+             "update_login"),
     Category("bluesky_error", "Bluesky returned an error",
              "Bluesky answered with an unexpected error. The bot tries again at the next check.",
              "wait"),
@@ -103,6 +113,14 @@ _ALL = [
 
 CATEGORIES = {c.code: c for c in _ALL}
 
+# Problems that usually clear by themselves: shown as warnings, not errors.
+TEMPORARY = frozenset({"bluesky_unavailable", "bluesky_rate_limited", "bluesky_error", "account_unavailable",
+                       "discord_unavailable", "discord_rate_limited"})
+
+
+def is_temporary(code) -> bool:
+    return code in TEMPORARY
+
 
 def get(code):
     return CATEGORIES.get(code or "")
@@ -120,6 +138,17 @@ def technical(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
 
 
+# Error names Bluesky uses for accounts that exist but can't be viewed.
+UNAVAILABLE_ACCOUNT_ERRORS = {"AccountDeactivated", "AccountTakedown", "RepoDeactivated", "RepoTakendown",
+                              "RepoSuspended", "BlockedActor", "BlockedByActor"}
+
+
+def xrpc_error_name(exc: BaseException) -> str:
+    """The error name in a Bluesky (XRPC) error reply, e.g. "AccountDeactivated", or ""."""
+    content = getattr(getattr(exc, "response", None), "content", None)
+    return getattr(content, "error", None) or ""
+
+
 def classify_bluesky_error(exc: BaseException) -> str:
     """The category for an error raised while reading an account's feed."""
     code = getattr(exc, "category", None)
@@ -132,6 +161,8 @@ def classify_bluesky_error(exc: BaseException) -> str:
     if isinstance(exc, (at_exc.NetworkError, at_exc.RequestException)):
         return "bluesky_unavailable"
     if isinstance(exc, at_exc.BadRequestError):
+        if xrpc_error_name(exc) in UNAVAILABLE_ACCOUNT_ERRORS:
+            return "account_unavailable"
         # Unknown or malformed handles: {"error": "InvalidRequest", "message": "Profile not found"}
         return "account_not_found"
     if isinstance(exc, at_exc.AtProtocolError):

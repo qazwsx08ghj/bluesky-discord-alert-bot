@@ -825,7 +825,11 @@ class SecretHandlingTests(ClockMixin, APITestCase):
 class MigrationTests(TransactionTestCase):
     """The new table and columns can be removed and added again without losing data."""
     before = [("activity", None), ("bluesky_monitor", "0003_account_channel")]
-    after = [("activity", "0001_initial"), ("bluesky_monitor", "0004_check_health")]
+
+    @property
+    def after(self):
+        # Forward again to the latest migrations (later steps add their own on top).
+        return MigrationExecutor(connection).loader.graph.leaf_nodes()
 
     def migrate(self, targets):
         executor = MigrationExecutor(connection)
