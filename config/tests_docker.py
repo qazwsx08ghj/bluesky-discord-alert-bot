@@ -230,6 +230,9 @@ class DockerDeploymentTests(SimpleTestCase):
         for path in ("/assets/../manage.py", "/assets/db.sqlite3", "/frontend/package.json", "/static/x"):
             self.assertEqual(self.request("GET", path)[0], 404, path)
         self.assertEqual(self.request("GET", "/classic/")[0], 404, "the old page was removed in step 10")
+        with urllib.request.urlopen(self.url + "/third-party-notices.txt", timeout=30) as res:
+            self.assertEqual(res.headers["Content-Type"], "text/plain; charset=utf-8")
+            self.assertEqual(res.read(), (ROOT / "THIRD_PARTY_NOTICES.txt").read_bytes(), "the panel ships the notices")
 
         # The same browser checks as frontend/e2e/docker.spec.ts, in Chromium, against these containers.
         npx = shutil.which("npx")

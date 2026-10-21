@@ -27,6 +27,7 @@ class BuiltPanelMixin:
         (self.dist / "assets" / "index-abc123.css").write_text("body{}", encoding="utf-8")
         (self.dist / "assets" / "inter-latin.woff2").write_bytes(b"wOF2")
         (self.dist / "favicon.svg").write_text("<svg/>", encoding="utf-8")
+        (self.dist / "THIRD_PARTY_NOTICES.txt").write_text("THIRD-PARTY SOFTWARE NOTICES", encoding="utf-8")
         # Things that must never be served, placed where a careless file server might find them.
         (self.dist / "db.sqlite3").write_text("not served", encoding="utf-8")
         (self.dist / ".env").write_text("SECRET_KEY=never", encoding="utf-8")
@@ -99,6 +100,15 @@ class PanelFilesTests(BuiltPanelMixin, TestCase):
         self.assertEqual(res["Content-Type"], "image/svg+xml")
         res.close()
 
+    def test_the_third_party_notices_are_served_as_plain_text(self):
+        res = self.client.get("/third-party-notices.txt")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res["Content-Type"], "text/plain; charset=utf-8")
+        self.assertEqual(res["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(b"".join(res.streaming_content), b"THIRD-PARTY SOFTWARE NOTICES")
+        (self.dist / "THIRD_PARTY_NOTICES.txt").unlink()
+        self.assertEqual(self.client.get("/third-party-notices.txt").status_code, 404)
+
     def test_nothing_outside_the_assets_folder_can_be_reached(self):
         attempts = [
             "/assets/../index.html", "/assets/..%2Fdb.sqlite3", "/assets/%2e%2e%2f.env", "/assets/..\\db.sqlite3",
@@ -156,6 +166,7 @@ class SourceTreeTests(TestCase):
 
     def test_the_build_settings_match_what_django_serves(self):
         config = (self.root / "vite.config.ts").read_text(encoding="utf-8")
+        self.assertIn("thirdPartyNotices()", config, "the build ships THIRD_PARTY_NOTICES.txt")
         self.assertIn('assetsDir: "assets"', config)
         self.assertIn("assetsInlineLimit: 0", config, "no inline data: files; the CSP allows the site's own files")
 

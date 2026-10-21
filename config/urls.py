@@ -12,6 +12,7 @@ urlpatterns = [
     re_path(r"^(?:setup|accounts|activity|settings)/?$", frontend.app, name="panel"),
     path("assets/<str:name>", frontend.asset, name="panel-asset"),
     path("favicon.svg", frontend.favicon, name="favicon"),
+    path("third-party-notices.txt", frontend.third_party_notices, name="third-party-notices"),
     path("api/csrf/", csrf_token, name="csrf-token"),
     path("api/health/", health, name="health"),
     path("api/accounts/", include("bluesky_monitor.urls")),

@@ -194,4 +194,4 @@ Your old `db.sqlite3` and `.env` files are only read. After moving, you can keep
 
 The bot is free and open source under the [MIT License](LICENSE). You may use, copy, change and share it, including commercially, as long as the copyright and license notice stay with it. It comes with no warranty.
 
-It is built on other open-source software, which keeps its own licenses. This project is not affiliated with Bluesky or Discord.
+It is built on other open-source software, which keeps its own licenses: see [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt), also linked from the control panel (Settings → About this bot). This project is not affiliated with Bluesky or Discord.
