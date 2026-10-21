@@ -3,8 +3,8 @@ from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 
 from activity import log as activity, problems
-from . import account_status, check_all as check_all_run, profiles
-from .models import MonitoredAccount
+from . import account_status, check_all as check_all_run, jobs, profiles
+from .models import CheckJob, MonitoredAccount
 from .serializers import MonitoredAccountSerializer
 from .bluesky import BlueskyLoginError
 from .poller import AccountBusy, poll_account
@@ -56,8 +56,52 @@ class MonitoredAccountViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"])
     def check_all(self, request):
-        """Check every account now; per-account results. See bluesky_monitor/check_all.py."""
-        return Response(check_all_run.run())
+        """Queue a check of every account; the checker runs it in the background (jobs.py).
+
+        202 with the job. If a Check All is already queued or running, that same job is
+        returned (created: false) instead of starting another. Follow `url` for progress.
+        """
+        job, created = jobs.request_check_all()
+        body = {**jobs.describe(job), "created": created}
+        return Response(body, status=status.HTTP_202_ACCEPTED, headers={"Location": body["url"]})
+
+
+JOB_NOT_FOUND = {"code": "check_job_not_found",
+                 "message": "That check isn't known. It may be too old: only the newest checks are kept."}
+
+
+@api_view(["GET"])
+def check_job_list(request):
+    """GET /api/check-jobs/?limit=10 — the newest Check All jobs first (at most 50)."""
+    try:
+        limit = max(1, min(50, int(request.query_params.get("limit", 10))))
+    except ValueError:
+        limit = 10
+    jobs.tidy()
+    checker = jobs.checker_running()
+    rows = CheckJob.objects.order_by("-requested_at")[:limit]
+    return Response({"results": [jobs.describe(j, checker=checker) for j in rows]},
+                    headers={"Cache-Control": "no-store"})
+
+
+@api_view(["GET"])
+def check_job_latest(request):
+    """GET /api/check-jobs/latest/ — the newest job, so the panel can show it again after a refresh."""
+    jobs.tidy()
+    job = CheckJob.objects.order_by("-requested_at").first()
+    if job is None:
+        return Response({"code": "no_check_jobs", "message": "Check all hasn't been used yet."}, status=404)
+    return Response(jobs.describe(job))
+
+
+@api_view(["GET"])
+def check_job_detail(request, job_id):
+    """GET /api/check-jobs/{id}/ — progress while queued or running, then the per-account results."""
+    jobs.tidy()
+    job = CheckJob.objects.filter(pk=job_id).first()
+    if job is None:
+        return Response(JOB_NOT_FOUND, status=404)
+    return Response(jobs.describe(job))
 
 
 @api_view(["GET"])

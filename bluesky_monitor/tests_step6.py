@@ -22,7 +22,7 @@ from botconfig import store
 from discord_alerts import channels
 from discord_alerts.models import DiscordWebhook
 from discord_alerts.sender import DeliveryResult, build_payload
-from . import account_status, bluesky, check_all, locks, poller, profiles, scheduler
+from . import account_status, bluesky, check_all, jobs, locks, poller, profiles, scheduler
 from .bluesky import BlueskyLoginError, SharedSession, _fingerprint
 from .models import BlueskySessionState, MonitoredAccount, SchedulerState, SeenPost
 from .tests import FakeSession, feed_item
@@ -618,6 +618,17 @@ class CheckAllTests(CacheMixin, APITestCase):
     def rows(self, body):
         return {r["handle"]: r for r in body["accounts"]}
 
+    def check_all(self):
+        """Since step 7 Check All runs in the background: queue it, let the checker run it, read the job."""
+        res = self.client.post(self.url)
+        self.assertEqual(res.status_code, 202)
+        self.assertTrue(locks.acquire_scheduler_lease("T"))
+        jobs.run_pending("T")
+        job = self.client.get(res["Location"])
+        self.assertEqual((job.status_code, job.json()["status"]), (200, "finished"))
+        self.last_response = job
+        return job.json()
+
     def test_every_account_gets_a_result_and_one_failure_stops_nothing(self):
         real_claim = poller.claim_post
 
@@ -627,9 +638,8 @@ class CheckAllTests(CacheMixin, APITestCase):
             return real_claim(account, item, status, kind=kind)
 
         with mock.patch("bluesky_monitor.poller.claim_post", side_effect=claim):
-            res = self.client.post(self.url)
-        self.assertEqual(res.status_code, 200)
-        body = res.json()
+            body = self.check_all()
+        res = self.last_response
         rows = self.rows(body)
         self.assertEqual(list(rows), ["ok.bsky.social", "broken.bsky.social", "crashy.bsky.social",
                                       "paused.bsky.social", "new.bsky.social"], "every account, in order")
@@ -646,7 +656,7 @@ class CheckAllTests(CacheMixin, APITestCase):
         self.assertIn("none were sent", new["message"])
         self.assertEqual(body["result"], "partial")
         self.assertEqual(body["counts"], {"checked": 2, "failed": 2, "skipped": 1, "already_checking": 0,
-                                          "new_posts": 2, "posts_sent": 2})
+                                          "new_posts": 2, "posts_sent": 2, "waiting": 0})
         self.assertEqual(self.send.call_count, 2)
         self.assertNotIn(PASSWORD, res.content.decode())
         self.assertNotIn(PASSWORD, all_text(list(ActivityEvent.objects.values())))
@@ -656,7 +666,7 @@ class CheckAllTests(CacheMixin, APITestCase):
 
     def test_an_account_being_checked_elsewhere_is_reported_not_rechecked(self):
         token = locks.acquire_account_lock(self.ok.pk)
-        body = self.client.post(self.url).json()
+        body = self.check_all()
         row = self.rows(body)["ok.bsky.social"]
         self.assertEqual(row["result"], "already_checking")
         self.assertEqual(row["state"], "checking")
@@ -665,16 +675,16 @@ class CheckAllTests(CacheMixin, APITestCase):
         locks.release_account_lock(self.ok.pk, token)
 
     def test_running_twice_never_sends_twice(self):
-        self.client.post(self.url)
+        self.check_all()
         sent_first_time = self.send.call_count
         self.assertEqual(sent_first_time, 3)  # o1, o2, c1; the new account's posts are only noted
-        body = self.client.post(self.url).json()
+        body = self.check_all()
         self.assertEqual(self.send.call_count, sent_first_time)
         self.assertEqual(self.rows(body)["ok.bsky.social"]["message"], "No new posts.")
 
     def test_rejected_login_skips_everything_with_the_reason(self):
         self.session.login_error = BlueskyLoginError("no")
-        body = self.client.post(self.url).json()
+        body = self.check_all()
         self.assertEqual(body["result"], "login_failed")
         self.assertEqual(body["problem"]["category"], "bluesky_login_rejected")
         reasons = {r["handle"]: r["reason"] for r in body["accounts"]}
@@ -683,21 +693,21 @@ class CheckAllTests(CacheMixin, APITestCase):
 
     def test_missing_login_is_not_configured(self):
         self.session.login_error = bluesky.BlueskyNotConfigured()
-        body = self.client.post(self.url).json()
+        body = self.check_all()
         self.assertEqual((body["result"], body["problem"]["category"]), ("not_configured", "bluesky_not_configured"))
 
     def test_login_failing_part_way_is_partial(self):
         self.session.login_error_after = 1
         self.session.login_error = BlueskyLoginError("no")
-        body = self.client.post(self.url).json()
+        body = self.check_all()
         self.assertEqual(body["result"], "partial")
         self.assertIn("Then the check stopped", body["message"])
 
     def test_nothing_to_check(self):
         MonitoredAccount.objects.update(is_active=False)
-        self.assertEqual(self.client.post(self.url).json()["result"], "nothing_to_check")
+        self.assertEqual(self.check_all()["result"], "nothing_to_check")
         MonitoredAccount.objects.all().delete()
-        body = self.client.post(self.url).json()
+        body = self.check_all()
         self.assertEqual((body["result"], body["accounts"]), ("nothing_to_check", []))
 
     def test_time_limit_leaves_the_rest_for_the_next_check(self):

@@ -139,6 +139,24 @@ elif action == "check_all":  # check_all <log> <start_ts>: the "Check all" butto
     body = check_all.run()
     print(" ".join(f"{r['handle']}={r['result']}" for r in body["accounts"]), flush=True)
 
+elif action == "queue_job":  # the web request: POST /api/accounts/check_all/
+    from bluesky_monitor import jobs
+
+    job, created = jobs.request_check_all()
+    print(job.pk, flush=True)
+
+elif action == "run_jobs":  # run_jobs <instance> <log> <start_ts>: the checker's job thread
+    from bluesky_monitor import jobs
+    from bluesky_monitor.models import CheckJob
+
+    instance, log, start = args
+    install_fakes(log)
+    wait_until(start)
+    locks.acquire_scheduler_lease(instance)
+    ran = jobs.run_pending(instance)
+    job = CheckJob.objects.order_by("-requested_at").first()
+    print("RAN", ran, job.status, " ".join(f"{r['handle']}={r['result']}" for r in job.accounts), flush=True)
+
 elif action == "status":
     for p in SeenPost.objects.order_by("id"):
         print(p.post_uri.rsplit("/", 1)[1], p.status, p.attempts)

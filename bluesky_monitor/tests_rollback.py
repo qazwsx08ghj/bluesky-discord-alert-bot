@@ -86,6 +86,9 @@ class Step5RollbackTests(SimpleTestCase):
         with tarfile.open(fileobj=BytesIO(archive.stdout)) as tar:
             tar.extractall(self.old)
         self.env = {k: v for k, v in os.environ.items() if k not in LEGACY_KEYS and k != "RUN_MAIN"}
+        # Blank, not missing: load_dotenv() never overrides a key that is set, so the real .env's
+        # Bluesky login and webhook can't reach these processes (they would sign in for real).
+        self.env.update({k: "" for k in LEGACY_KEYS})
         self.env.update(DATABASE_PATH=str(self.dir / "bot.sqlite3"), SCHEDULER_IN_WEB="0", BOT_LOG_LEVEL="CRITICAL",
                         SETTINGS_ENV_MIRROR_PATH=str(self.dir / ".env"), PYTHONIOENCODING="utf-8")
 
@@ -107,3 +110,103 @@ class Step5RollbackTests(SimpleTestCase):
         self.assertIn("state active", out)
         self.assertIn("kind None", out, "posts noted by old code have no kind and are sent as plain posts")
         self.assertTrue(any(line.startswith("status ") for line in out))
+
+
+# -- step 7 -> step 6 -----------------------------------------------------------------------------
+STEP6_COMMIT = "9d849eb"
+
+STEP7_SCRIPT = """
+from bluesky_monitor import jobs, locks
+from bluesky_monitor.models import CheckJob, MonitoredAccount
+from botconfig import store
+store.startup_check()
+MonitoredAccount.objects.create(handle='step7.bsky.social', first_poll_done=True)
+job, created = jobs.request_check_all()
+locks.acquire_scheduler_lease('step7')
+print('ran', jobs.run_pending('step7'))
+locks.release_scheduler_lease('step7')
+print('job', CheckJob.objects.get(pk=job.pk).status)
+"""
+
+OLD_STEP6_SCRIPT = """
+from bluesky_monitor import check_all, locks, scheduler
+from bluesky_monitor.models import MonitoredAccount
+from activity import status
+print('cycle', scheduler.run_cycle('step6'))
+locks.release_scheduler_lease('step6')
+MonitoredAccount.objects.create(handle='old6.bsky.social', first_poll_done=True)
+print('check_all', check_all.run()['result'])
+status.compute()
+print('changes ok')
+"""
+
+BACK_TO_STEP7_SCRIPT = """
+from bluesky_monitor import jobs
+from bluesky_monitor.models import CheckJob, MonitoredAccount
+print('old job', jobs.describe(CheckJob.objects.get())['status'])
+job, created = jobs.request_check_all()
+print('new job', created)
+print('accounts', MonitoredAccount.objects.count())
+"""
+
+
+class Step6RollbackTests(Step5RollbackTests):
+    """The real step 6 code (with the admin still in it) on a database the step 7 code has used."""
+
+    commit = STEP6_COMMIT
+
+    @classmethod
+    def setUpClass(cls):
+        SimpleTestCase.setUpClass.__func__(cls)
+        if shutil.which("git") is None or _git("cat-file", "-e", f"{cls.commit}^{{commit}}").returncode:
+            raise cls.skipTest(cls, "Git or the step 6 commit isn't available")
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+        self.old = self.dir / "step6"
+        archive = _git("archive", "--format=tar", self.commit)
+        self.assertEqual(archive.returncode, 0, archive.stderr)
+        with tarfile.open(fileobj=BytesIO(archive.stdout)) as tar:
+            tar.extractall(self.old)
+        self.env = {k: v for k, v in os.environ.items() if k not in LEGACY_KEYS and k != "RUN_MAIN"}
+        # Blank, not missing: load_dotenv() never overrides a key that is set, so the real .env's
+        # Bluesky login and webhook can't reach these processes (they would sign in for real).
+        self.env.update({k: "" for k in LEGACY_KEYS})
+        self.env.update(DATABASE_PATH=str(self.dir / "bot.sqlite3"), SCHEDULER_IN_WEB="0", BOT_LOG_LEVEL="CRITICAL",
+                        SETTINGS_ENV_MIRROR_PATH=str(self.dir / ".env"), PYTHONIOENCODING="utf-8")
+
+    def test_step5_code_runs_on_a_step6_database_and_back(self):
+        self.skipTest("covered by Step5RollbackTests")
+
+    def test_step6_code_runs_on_a_step7_database_and_back(self):
+        self.run_manage(ROOT, "migrate")
+        out = self.run_manage(ROOT, "shell", "-c", STEP7_SCRIPT)
+        self.assertIn("ran 1", out)
+        self.assertIn("job finished", out)
+        self.run_manage(self.old, "check")
+        self.run_manage(self.old, "migrate")  # the step 6 code adds back its admin tables; nothing else changes
+        out = self.run_manage(self.old, "shell", "-c", OLD_STEP6_SCRIPT)
+        self.assertIn("cycle True", out)
+        self.assertIn("check_all not_configured", out, "no Bluesky login reaches the test processes")
+        self.assertIn("changes ok", out)
+        self.run_manage(ROOT, "migrate")
+        out = self.run_manage(ROOT, "shell", "-c", BACK_TO_STEP7_SCRIPT).splitlines()
+        self.assertIn("old job finished", out)
+        self.assertIn("new job True", out)
+        self.assertIn("accounts 2", out)
+
+
+class RealEnvIsolationTests(Step6RollbackTests):
+    """The processes these tests start must never see the owner's real Bluesky login or webhook."""
+
+    def test_step6_code_runs_on_a_step7_database_and_back(self):
+        self.skipTest("covered by Step6RollbackTests")
+
+    def test_processes_get_no_real_credentials(self):
+        self.run_manage(ROOT, "migrate")
+        out = self.run_manage(ROOT, "shell", "-c", (
+            "from botconfig import store; store.startup_check(); h, p = store.credentials(); "
+            "print('credentials', bool(h), bool(p), bool(store.default_webhook_url()))"))
+        self.assertIn("credentials False False False", out)

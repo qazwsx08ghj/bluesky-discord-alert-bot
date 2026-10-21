@@ -72,6 +72,9 @@ class Step3RollbackTests(SimpleTestCase):
         with tarfile.open(fileobj=BytesIO(archive.stdout)) as tar:
             tar.extractall(self.old)
         self.env = {k: v for k, v in os.environ.items() if k not in LEGACY_KEYS and k != "RUN_MAIN"}
+        # Blank, not missing: load_dotenv() never overrides a key that is set, so the real .env's
+        # Bluesky login and webhook can't reach these processes (they would sign in for real).
+        self.env.update({k: "" for k in LEGACY_KEYS})
         self.env.update(DATABASE_PATH=str(self.dir / "bot.sqlite3"), SCHEDULER_IN_WEB="0", BOT_LOG_LEVEL="CRITICAL",
                         SETTINGS_ENV_MIRROR_PATH=str(self.dir / ".env"), PYTHONIOENCODING="utf-8")
 

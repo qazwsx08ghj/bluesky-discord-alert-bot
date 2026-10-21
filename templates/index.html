@@ -318,10 +318,17 @@
 
 <script>
   // ── Helpers ────────────────────────────────────────────
+  // Changes need the security token from the csrftoken cookie (see docs/API.md, "Security").
+  function csrfToken() {
+    const m = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+  }
+
   async function api(method, url, body) {
     const opts = {
       method,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() },
+      credentials: 'same-origin',
     };
     if (body) opts.body = JSON.stringify(body);
     const res = await fetch(url, opts);
