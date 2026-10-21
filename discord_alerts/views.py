@@ -5,6 +5,7 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from activity import log as activity
 from . import channels
 from .models import DiscordWebhook
 from .sender import send_discord_alert
@@ -56,6 +57,12 @@ class DiscordWebhookViewSet(viewsets.ModelViewSet):
             post_url="https://bsky.app",
         )
         channels.record_delivery(webhook.pk, ok, "" if ok else "The test message wasn't accepted by Discord.")
+        if ok:
+            activity.record(activity.CHANNEL_TEST_SENT, "success", f'Test message sent to "{webhook.name}".',
+                            channel=webhook)
+        else:
+            activity.problem(activity.CHANNEL_TEST_FAILED, "discord_test_failed",
+                             f'The test message to "{webhook.name}" wasn\'t delivered.', channel=webhook)
         if ok:
             return Response({"status": "sent"})
         return Response({"status": "failed"}, status=status.HTTP_502_BAD_GATEWAY)

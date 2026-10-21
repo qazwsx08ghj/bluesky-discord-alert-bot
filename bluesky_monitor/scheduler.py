@@ -6,12 +6,17 @@ cycle. A heartbeat renews the lease every SCHEDULER_HEARTBEAT_SECONDS; a checker
 dies stops renewing, its lease expires, and a standby checker takes over.
 
 Jobs live in memory (no job store in the database), so nothing stale is reloaded on start.
+
+Health for /api/status/ (activity/status.py) comes from SchedulerState: the heartbeat,
+when the latest check started and finished, what it did (last_cycle_summary), and when
+the next one is due.
 """
 import atexit
 import logging
 import os
 import signal
 import socket
+import traceback
 import uuid
 from datetime import timedelta
 
@@ -23,6 +28,9 @@ from django.conf import settings
 from django.db import close_old_connections
 from django.utils import timezone
 
+from activity import log as activity, retention
+from activity.models import ActivityEvent
+from botconfig.secrets import scrub
 from . import locks
 from .models import SchedulerState
 
@@ -32,6 +40,19 @@ INSTANCE_ID = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
 POLL_JOB_ID = "poll_bluesky"
 
 _scheduler = None
+_active = set()  # instance ids in this process that currently hold the lease
+
+
+def _note_lease(instance_id: str, held: bool):
+    """Log when this checker becomes the active one (at start, or taking over from a stopped one)."""
+    if held and instance_id not in _active:
+        _active.add(instance_id)
+        activity.record(activity.CHECKER_STARTED, ActivityEvent.INFO,
+                        f"The checker started. It checks every {_interval_minutes()} minute(s).",
+                        detail={"instance": instance_id})
+        retention.prune_quietly()
+    elif not held:
+        _active.discard(instance_id)
 
 
 def _interval_minutes() -> int:
@@ -61,6 +82,7 @@ def heartbeat(instance_id: str = INSTANCE_ID) -> bool:
     """
     close_old_connections()
     held = locks.acquire_scheduler_lease(instance_id)
+    _note_lease(instance_id, held)
     try:
         apply_interval()
     except Exception:  # never let a settings problem stop the heartbeat
@@ -81,16 +103,24 @@ def run_cycle(instance_id: str = INSTANCE_ID) -> bool:
         logger.info("Another checker is active; this one is on standby")
         return False
 
+    from .poller import CycleSummary
+
     SchedulerState.objects.filter(pk=1).update(cycle_started_at=timezone.now(), last_cycle_error="")
     error = ""
     try:
-        poll_all_active_accounts(should_continue=lambda: locks.holds_scheduler_lease(instance_id))
+        summary = poll_all_active_accounts(should_continue=lambda: locks.holds_scheduler_lease(instance_id))
     except Exception as exc:  # keep the checker alive; record the problem
         logger.exception("Check cycle failed")
-        error = str(exc)[:500]
+        error = scrub(str(exc))[:500]
+        summary = CycleSummary(result="failed", category="internal")
+        activity.problem(activity.CYCLE_FAILED, "internal",
+                         "A check stopped because of an unexpected error. The bot tries again at the next check.",
+                         technical="".join(traceback.format_exception(exc))[-1000:], merge_repeats=True)
     SchedulerState.objects.filter(pk=1, instance_id=instance_id).update(
-        cycle_finished_at=timezone.now(), last_cycle_error=error
+        cycle_finished_at=timezone.now(), last_cycle_error=error,
+        last_cycle_summary=summary.as_dict() if isinstance(summary, CycleSummary) else None,
     )
+    retention.prune_quietly()
     return True
 
 
@@ -120,6 +150,7 @@ def _mark_started(instance_id: str):
     held = locks.acquire_scheduler_lease(instance_id)
     if held:
         SchedulerState.objects.filter(pk=1).update(started_at=timezone.now())
+    _note_lease(instance_id, held)
     logger.info(
         "Bluesky poller started (%s) - interval: %d minute(s)%s",
         instance_id, _interval_minutes(), "" if held else " - standby, another checker is active",
@@ -137,6 +168,18 @@ def start():
     atexit.register(stop)
 
 
+def _release(instance_id: str):
+    if instance_id in _active:
+        _active.discard(instance_id)
+        try:
+            activity.record(activity.CHECKER_STOPPED, ActivityEvent.INFO, "The checker stopped.",
+                            detail={"instance": instance_id})
+        except Exception:  # shutting down; the log entry is optional
+            pass
+    locks.release_scheduler_lease(instance_id)
+    logger.info("Bluesky poller stopped; lease released")
+
+
 def stop():
     global _scheduler
     if _scheduler is None:
@@ -145,8 +188,7 @@ def stop():
         _scheduler.shutdown(wait=False)
     finally:
         _scheduler = None
-        locks.release_scheduler_lease(INSTANCE_ID)
-        logger.info("Bluesky poller stopped; lease released")
+        _release(INSTANCE_ID)
 
 
 def run_forever():
@@ -165,5 +207,4 @@ def run_forever():
         _scheduler.start()
     finally:
         _scheduler = None
-        locks.release_scheduler_lease(INSTANCE_ID)
-        logger.info("Bluesky poller stopped; lease released")
+        _release(INSTANCE_ID)

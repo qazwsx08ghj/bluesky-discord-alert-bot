@@ -5,13 +5,13 @@ urllib3, Django) may put a URL in an exception or debug message. This filter is 
 to every console handler in settings.LOGGING.
 """
 import logging
-import re
 
-_WEBHOOK = re.compile(r"(/api(?:/v\d+)?/webhooks/\d+/)[A-Za-z0-9_\-]+")
+from botconfig.secrets import scrub
 
 
 def redact(text: str) -> str:
-    return _WEBHOOK.sub(r"\1****", text)
+    """Mask webhook tokens, session tokens and password-like values (see botconfig.secrets.scrub)."""
+    return scrub(text)
 
 
 class RedactWebhooks(logging.Filter):

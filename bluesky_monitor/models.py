@@ -25,6 +25,12 @@ class MonitoredAccount(models.Model):
     check_lock_token = models.CharField(max_length=64, blank=True)
     check_lock_until = models.DateTimeField(null=True, blank=True)
 
+    # Result of the latest feed check (used by /api/status/). All nullable, so older code
+    # can still insert accounts after a rollback.
+    last_checked_at = models.DateTimeField(null=True, blank=True)
+    last_check_ok = models.BooleanField(null=True, blank=True)
+    last_check_category = models.CharField(max_length=32, null=True, blank=True)  # activity.problems code
+
     def __str__(self):
         return self.handle
 
@@ -85,7 +91,10 @@ class SchedulerState(models.Model):
     cycle_started_at = models.DateTimeField(null=True, blank=True)
     cycle_finished_at = models.DateTimeField(null=True, blank=True)
     next_run_at = models.DateTimeField(null=True, blank=True)
-    last_cycle_error = models.CharField(max_length=500, blank=True)
+    last_cycle_error = models.CharField(max_length=500, blank=True)  # technical, secrets removed
+    # What the last finished check did: {"result", "category", "accounts_checked",
+    # "accounts_failed", "posts_sent"}. See poller.CycleSummary. Null until the first check.
+    last_cycle_summary = models.JSONField(null=True, blank=True)
 
 
 class BlueskySessionState(models.Model):

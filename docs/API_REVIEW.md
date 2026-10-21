@@ -227,3 +227,10 @@ The old `templates/index.html` and `index` view are kept until the React app rep
   - A startup check stops private files (database, `.env`, backups) from ever being in a served folder.
   - Old URL columns are kept as copies for rollback to step 3 until step 10.
   - Not done here (planned): checking a new URL against Discord when it is saved.
+- **Step 5 (done):** see `activity/` and `docs/ACTIVITY_AND_STATUS.md`.
+  - `GET /api/status/` decides `unavailable` / `not_configured` / `problem` / `running` from the checker's own heartbeat, check times and check results; a stopped or stuck checker is reported even though the API answers.
+  - Every failure gets a plain-language category with a fix hint; the technical cause is kept separately (single-event view only).
+  - `GET /api/activity/`: cursor-paged, newest first, filters `group`, `type`, `level`, `account`, `channel`, `since`, `before`. Sends, every retry attempt, give-ups, failed checks, first-check results, login problems and checker starts are logged; repeated problems are counted on one entry per hour.
+  - Retention: 30 days or 10,000 entries, whichever comes first; only log rows are deleted, never the delivery queue.
+  - Secrets are scrubbed before anything is stored; the console log filter uses the same patterns.
+  - Not done here (planned for step 6): per-account `state` / `first_check` in the account API, `test-login`, `check_all`. `SeenPost` retention is not implemented yet.
