@@ -19,9 +19,11 @@ __pycache__/
 .coverage
 htmlcov/
 
-# Frontend build output (added in a later step)
+# Frontend build output and test reports (step 9)
 node_modules/
 frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
 
 # Design tool runtime files and screenshots
 .impeccable/questions/

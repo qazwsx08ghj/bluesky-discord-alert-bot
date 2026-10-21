@@ -119,6 +119,8 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+# Step 9: the built React control panel (config/frontend.py). Docker builds it into the image.
+FRONTEND_DIST = Path(os.getenv("FRONTEND_DIST") or BASE_DIR / "frontend" / "dist")
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REST_FRAMEWORK = {

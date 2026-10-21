@@ -1,4 +1,5 @@
-"""Step 8: the bot in real Docker containers, driven by the real Windows scripts.
+"""Step 8: the bot in real Docker containers, driven by the real Windows scripts (and, since
+step 9, the React panel in a real browser against those containers).
 
 Opt-in, because it builds an image and starts containers (about 3-5 minutes):
 
@@ -16,6 +17,7 @@ Isolation from the real install:
 import http.cookiejar
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -213,6 +215,31 @@ class DockerDeploymentTests(SimpleTestCase):
         self.assertEqual(status, 201, body)
         self.assertEqual(self.request("GET", "/admin/")[0], 404)
         self.assertEqual(self.handles(), ["new.bsky.social", "old.bsky.social"])
+
+    def test_3b_the_react_panel_is_served_and_works_in_a_browser(self):
+        """Step 9: the image contains the built panel, served by Django with its security headers."""
+        with urllib.request.urlopen(self.url + "/accounts", timeout=30) as res:
+            html, headers = res.read().decode(), res.headers
+        self.assertEqual(headers["X-Alertbot-Panel"], "react")
+        self.assertIn("script-src 'self'", headers["Content-Security-Policy"])
+        self.assertIn("csrftoken=", headers.get("Set-Cookie", ""))
+        script = re.search(r'src="(/assets/index-[\w-]+\.js)"', html).group(1)
+        with urllib.request.urlopen(self.url + script, timeout=30) as res:
+            self.assertEqual(res.headers["Content-Type"], "text/javascript; charset=utf-8")
+            self.assertIn("immutable", res.headers["Cache-Control"])
+        for path in ("/assets/../manage.py", "/assets/db.sqlite3", "/frontend/package.json", "/static/x"):
+            self.assertEqual(self.request("GET", path)[0], 404, path)
+        self.assertEqual(self.request("GET", "/classic/")[0], 200)
+
+        # The same browser checks as frontend/e2e/docker.spec.ts, in Chromium, against these containers.
+        npx = shutil.which("npx")
+        if npx is None or not (ROOT / "frontend" / "node_modules" / "@playwright").is_dir():
+            self.skipTest("browser part skipped: run `npm ci` and `npx playwright install chromium` in frontend/")
+        env = {**os.environ, "E2E_BASE_URL": self.url, "E2E_SECRETS": f"{FAKE_PASSWORD},fake-test-token"}
+        res = subprocess.run([npx, "playwright", "test", "--project=panel", "--grep", "@docker", "--reporter=line"],
+                             cwd=ROOT / "frontend", env=env, capture_output=True, text=True, encoding="utf-8",
+                             errors="replace", timeout=600)
+        self.assertEqual(res.returncode, 0, res.stdout[-4000:] + res.stderr[-2000:])
 
     def test_4_crashed_services_come_back_by_themselves(self):
         for service in ("checker", "web"):

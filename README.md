@@ -4,7 +4,7 @@ This bot watches **any public Bluesky account** you choose — artists, news acc
 
 **No coding needed to use it** — just follow this guide from top to bottom.
 
-> **New: Docker Desktop version.** Install Docker Desktop, then double-click `setup.bat`. See [docs/DOCKER.md](docs/DOCKER.md). The Python/venv steps below still work (the scripts moved to `dev\`); this guide is rewritten for Docker in a later step.
+> **New: Docker Desktop version with a new control panel.** Install Docker Desktop, then double-click `setup.bat`; the control panel opens in your browser and walks you through the setup. See [docs/DOCKER.md](docs/DOCKER.md) and, for developers, [docs/FRONTEND.md](docs/FRONTEND.md). The Python/venv steps below still work (the scripts moved to `dev\`); this guide is rewritten for Docker in a later step.
 
 ---
 

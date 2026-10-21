@@ -1,12 +1,18 @@
-from django.urls import path, include
+from django.urls import include, path, re_path
 from activity.views import status_view
 from bluesky_monitor.views import check_job_detail, check_job_latest, check_job_list, profile_lookup
-from .frontend_views import index, bot_settings, test_discord, test_login
+from . import frontend
+from .frontend_views import bot_settings, test_discord, test_login
 from .health import health
 from .security import csrf_token
 
 urlpatterns = [
-    path("", index, name="index"),
+    # The React control panel (step 9): one page for every panel address; the browser shows the right screen.
+    path("", frontend.app, name="index"),
+    re_path(r"^(?:setup|accounts|activity|settings)/?$", frontend.app, name="panel"),
+    path("assets/<str:name>", frontend.asset, name="panel-asset"),
+    path("favicon.svg", frontend.favicon, name="favicon"),
+    path("classic/", frontend.classic, name="classic"),  # the previous page, kept as a fallback for now
     path("api/csrf/", csrf_token, name="csrf-token"),
     path("api/health/", health, name="health"),
     path("api/accounts/", include("bluesky_monitor.urls")),

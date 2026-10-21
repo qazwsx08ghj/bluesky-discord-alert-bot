@@ -3,6 +3,7 @@ and the API's error format. Settings tests use a temporary .env, never the real 
 """
 import json
 from io import StringIO
+from pathlib import Path
 from unittest import mock
 
 from django.conf import settings
@@ -141,7 +142,11 @@ class CsrfTests(SecurityTestCase):
     def test_the_control_panel_page_can_make_changes(self):
         page = self.client.get("/")
         self.assertIn("csrftoken", page.cookies, "the page sets the token cookie")
-        self.assertContains(page, "X-CSRFToken")
+        # Step 9: the React panel sends the token from frontend/src/api/client.ts; the previous
+        # page (still at /classic/) from its inline script.
+        self.assertContains(self.client.get("/classic/"), "X-CSRFToken")
+        client_code = (Path(settings.BASE_DIR) / "frontend" / "src" / "api" / "client.ts").read_text(encoding="utf-8")
+        self.assertIn('headers["X-CSRFToken"]', client_code)
         token = page.cookies["csrftoken"].value
         headers = dict(HTTP_X_CSRFTOKEN=token, HTTP_ORIGIN="http://testserver", HTTP_SEC_FETCH_SITE="same-origin")
         res = self.client.post("/api/settings/", {"poll_interval_minutes": 9}, format="json", **headers)
