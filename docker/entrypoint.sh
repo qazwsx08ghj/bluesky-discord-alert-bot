@@ -1,0 +1,39 @@
+#!/bin/sh
+# Starts one part of the bot inside its container. See docs/DOCKER.md.
+#
+#   web         prepare the data (secret key, backup before migrations, migrations), then the control panel
+#   checker     wait until the database is ready, then the Bluesky checker
+#   import-old  setup.bat: bring over the data of an earlier install mounted at /import (read-only)
+#   backup      update.bat / backup.bat: copy the database (backup_db options follow)
+#   anything else is run as a command, e.g. "python manage.py check"
+set -eu
+cd /app
+
+case "${1:-web}" in
+  web)
+    python manage.py prepare_data
+    exec gunicorn config.wsgi:application \
+      --bind 0.0.0.0:8000 \
+      --workers "${WEB_WORKERS:-2}" \
+      --threads 4 \
+      --timeout 120 \
+      --graceful-timeout 20 \
+      --access-logfile - \
+      --error-logfile -
+    ;;
+  checker)
+    python manage.py wait_for_database
+    exec python manage.py run_scheduler
+    ;;
+  import-old)
+    shift
+    exec python manage.py prepare_data --import-from /import "$@"
+    ;;
+  backup)
+    shift
+    exec python manage.py backup_db "$@"
+    ;;
+  *)
+    exec "$@"
+    ;;
+esac

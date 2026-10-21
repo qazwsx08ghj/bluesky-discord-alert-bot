@@ -248,3 +248,10 @@ The old `templates/index.html` and `index` view are kept until the React app rep
   - `/admin/`, DRF's browsable HTML pages and the `createsuperuser` setup step are removed. The admin's database tables are left in place for rollback.
   - The old page sends the CSRF token. `DEBUG` defaults to off.
   - **Test fix:** the rollback tests' processes could load the real `.env` and sign in to Bluesky with it. They now blank those keys, and a test checks it.
+- **Step 8 (done):** see `docs/DOCKER.md`.
+  - `Dockerfile` (two stages, exact versions from `requirements-lock.txt`, runs as user `bot`, no secrets inside) and `docker-compose.yml`: `web` (gunicorn) and `checker` (`run_scheduler`), both `restart: unless-stopped`, with health checks and one named volume, `alertbot_bot-data`, holding the database, backups, the generated secret key and the cache.
+  - **Changed from the plan:** no `backend/` folder move (it wasn't needed); Docker Compose files live at the root. `setup.bat` stays, now for Docker, and imports an earlier venv install. The venv scripts moved to `dev\`.
+  - Start-up: `prepare_data` (key once, backup if migrations wait, migrate, load settings) and `wait_for_database` for the checker. `GET /api/health/` for Docker and the scripts. A checker watchdog exits on a stalled heartbeat so Docker restarts it.
+  - Scripts: `setup.bat`, `start.bat`, `update.bat` (backup, then pull or build, then recreate and check), `stop.bat`, `backup.bat`, sharing `docker\scripts\common.bat`. They check Docker Desktop (installed, running, recent, Linux containers), start it if needed, detect a busy port, wait for health, open the browser, and save a problem report. They never remove volumes.
+  - Releases: `.github/workflows/release.yml` publishes multi-arch images to ghcr.io and a small download (`docker/make_release_bundle.py`) whose scripts pull instead of build.
+  - Tests: the real `.bat` files under cmd.exe with a fake docker (`config/tests_deploy.py`); opt-in real-container tests (`config/tests_docker.py`). Also checked by hand: recovery after a full Docker Desktop restart, and restoring a backup.

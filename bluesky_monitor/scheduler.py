@@ -20,6 +20,7 @@ import os
 import signal
 import socket
 import threading
+import time
 import traceback
 import uuid
 from datetime import timedelta
@@ -45,6 +46,7 @@ POLL_JOB_ID = "poll_bluesky"
 
 _scheduler = None
 _worker = None
+_last_heartbeat = time.monotonic()  # when heartbeat() last finished (for the watchdog)
 _active = set()  # instance ids in this process that currently hold the lease
 
 
@@ -138,7 +140,34 @@ def heartbeat(instance_id: str = INSTANCE_ID) -> bool:
         job = _scheduler.get_job(POLL_JOB_ID)
         if job is not None and job.next_run_time:
             SchedulerState.objects.filter(pk=1, instance_id=instance_id).update(next_run_at=job.next_run_time)
+    global _last_heartbeat
+    _last_heartbeat = time.monotonic()
     return held
+
+
+class Watchdog(threading.Thread):
+    """Stops a standalone checker whose heartbeat has stalled (a hang, or a database that
+    stopped answering), so Docker's restart policy starts a fresh one. Only used by
+    run_forever(); the checker inside `runserver` is never stopped this way."""
+
+    def __init__(self, limit_seconds: float, exit=os._exit, check_every: float = 10):
+        super().__init__(name="checker-watchdog", daemon=True)
+        self.limit, self.exit, self.check_every = limit_seconds, exit, check_every
+        self.stopping = threading.Event()
+
+    def stalled(self, now=None) -> bool:
+        return (now if now is not None else time.monotonic()) - _last_heartbeat > self.limit
+
+    def run(self):
+        while not self.stopping.wait(self.check_every):
+            if self.stalled():
+                logger.critical("The checker's heartbeat hasn't run for %d seconds; stopping so it is restarted",
+                                self.limit)
+                self.exit(70)
+                return
+
+    def stop(self):
+        self.stopping.set()
 
 
 def run_cycle(instance_id: str = INSTANCE_ID) -> bool:
@@ -253,9 +282,17 @@ def run_forever():
         signal.signal(sig, _shutdown)
     _mark_started(INSTANCE_ID)
     _start_worker(INSTANCE_ID)
+    watchdog = None
+    if settings.SCHEDULER_WATCHDOG_SECONDS > 0:
+        global _last_heartbeat
+        _last_heartbeat = time.monotonic()
+        watchdog = Watchdog(settings.SCHEDULER_WATCHDOG_SECONDS)
+        watchdog.start()
     try:
         _scheduler.start()
     finally:
+        if watchdog is not None:
+            watchdog.stop()
         _stop_worker()
         _scheduler = None
         _release(INSTANCE_ID)

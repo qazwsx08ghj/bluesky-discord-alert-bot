@@ -1,0 +1,4 @@
+# The Docker image installs these: the exact versions from requirements-lock.txt,
+# plus the production web server (gunicorn runs only on Linux, so it isn't in the Windows venv).
+-r requirements-lock.txt
+gunicorn==23.0.0

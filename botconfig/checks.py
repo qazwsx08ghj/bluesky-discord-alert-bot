@@ -5,6 +5,7 @@ Django only serves files from STATIC_ROOT, STATICFILES_DIRS and MEDIA_ROOT (and 
 .env or backups/, those files could be downloaded from the control panel. This check
 stops the server from starting in that case. Tests also request those paths directly.
 """
+import os
 from pathlib import Path
 
 from django.conf import settings
@@ -14,7 +15,11 @@ from django.core.checks import Error, register
 def private_paths():
     base = Path(settings.BASE_DIR).resolve()
     db = Path(settings.DATABASES["default"]["NAME"]).resolve()
-    paths = {base / ".env", base / "backups", db, db.parent / "backups"}
+    paths = {base / ".env", base / "backups", db, db.parent / "backups", Path(settings.BACKUP_DIR).resolve()}
+    for name in ("SECRET_KEY_FILE", "LEGACY_ENV_FILE"):  # Docker: the generated key; the imported old .env
+        value = os.getenv(name)
+        if value:
+            paths.add(Path(value).resolve())
     mirror = getattr(settings, "SETTINGS_ENV_MIRROR_PATH", "")
     if mirror:
         paths.add(Path(mirror).resolve())

@@ -1,0 +1,55 @@
+# Publish a release: the Docker image (for Intel/AMD and ARM computers) and the small download
+# for non-technical users. Runs when a version tag such as v1.2.0 is pushed.
+# Non-technical users never build anything; their update.bat downloads the :stable image.
+name: release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write   # attach the download to the GitHub release
+  packages: write   # publish the image to ghcr.io
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements-lock.txt
+      - name: Tests (fake credentials and temporary databases only)
+        run: python manage.py test
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: names
+        run: |
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: ALERTBOT_VERSION=${{ steps.names.outputs.version }}
+          tags: |
+            ${{ steps.names.outputs.image }}:${{ steps.names.outputs.version }}
+            ${{ steps.names.outputs.image }}:stable
+      - name: Download for users
+        run: python docker/make_release_bundle.py --image "${{ steps.names.outputs.image }}:stable" --out dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip

@@ -1,23 +1,34 @@
 @echo off
-echo Starting Bluesky Discord Alert Bot...
+rem Start the bot (if it isn't running) and open the control panel.
+setlocal
+title Bluesky Discord Alert Bot
+set "COMMON=%~dp0docker\scripts\common.bat"
+echo  Bluesky to Discord Alert Bot
 echo.
-call venv\Scripts\activate
-echo Updating the database (safe to run every time)...
-python manage.py backup_db --if-pending
-if errorlevel 1 (
-  echo.
-  echo The database backup failed, so the database was not changed and the bot was not started.
-  pause
-  exit /b 1
-)
-python manage.py migrate --fake-initial
-if errorlevel 1 (
-  echo.
-  echo The database update failed, so the bot was not started.
-  echo No data was deleted. Please share the error above when asking for help.
-  pause
-  exit /b 1
-)
-rem Local only: the control panel listens on this computer (127.0.0.1) and nowhere else.
-python manage.py runserver 127.0.0.1:8000
-pause
+call "%COMMON%" :init
+call "%COMMON%" :check_docker || goto :failed
+
+call "%COMMON%" :is_set_up
+if errorlevel 1 goto :first_time
+
+call "%COMMON%" :check_port || goto :failed
+echo  Starting the bot...
+call "%COMMON%" :up || goto :failed
+call "%COMMON%" :wait_ready || goto :failed
+call "%COMMON%" :open_browser
+echo.
+echo  The bot is running. You can close this window: the bot keeps running in Docker Desktop.
+call "%COMMON%" :pause_end
+exit /b 0
+
+:first_time
+echo  The bot hasn't been set up on this computer yet. Starting the setup...
+echo.
+call "%~dp0setup.bat"
+exit /b %errorlevel%
+
+:failed
+echo.
+echo  The bot couldn't be started. Nothing was deleted.
+call "%COMMON%" :pause_end
+exit /b 1

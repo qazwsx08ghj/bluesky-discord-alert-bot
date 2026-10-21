@@ -1,0 +1,67 @@
+# Bluesky -> Discord Alert Bot. Started by setup.bat / start.bat / update.bat; see docs/DOCKER.md.
+#
+# Two services from one image:
+#   web      the control panel and API, at http://127.0.0.1:8000 (this computer only)
+#   checker  checks Bluesky and sends to Discord; runs Check All jobs
+# Everything that must survive restarts, rebuilds and updates is in the bot-data volume:
+# the database (accounts, login, channels, settings, activity), backups and the secret key.
+# The scripts never remove this volume.
+#
+# Image: ALERTBOT_IMAGE (docker/compose.env). Empty = build it here from the source
+# (docker-compose.build.yml is added by the scripts); set = use a published image.
+
+name: alertbot
+
+x-bot: &bot
+  image: ${ALERTBOT_IMAGE:-${ALERTBOT_LOCAL_IMAGE:-bluesky-alert-bot:local}}
+  restart: unless-stopped        # also comes back after Docker Desktop or the computer restarts
+  init: true                     # passes stop signals on, so shutdowns are clean
+  volumes:
+    - bot-data:/data
+  environment:
+    DEBUG: "False"
+    ALLOWED_HOSTS: "localhost,127.0.0.1,[::1]"
+    DATABASE_PATH: /data/db.sqlite3
+    BACKUP_DIR: /data/backups
+    SECRET_KEY_FILE: /data/secret_key
+    CACHE_DIR: /data/cache
+    SETTINGS_ENV_MIRROR_PATH: ""  # no .env copy inside Docker; settings live in the database
+    SCHEDULER_IN_WEB: "0"         # the checker is its own service
+    TZ: UTC
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  web:
+    <<: *bot
+    command: ["web"]
+    ports:
+      # 127.0.0.1 only: the panel has no login, so nothing else on the network may reach it.
+      - "127.0.0.1:${ALERTBOT_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    stop_grace_period: 30s
+
+  checker:
+    <<: *bot
+    command: ["checker"]
+    depends_on:
+      web:
+        condition: service_started   # it waits for the database update itself (wait_for_database)
+    healthcheck:
+      test: ["CMD", "python", "manage.py", "checker_health"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 120s
+    stop_grace_period: 30s
+
+volumes:
+  bot-data:
