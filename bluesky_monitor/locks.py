@@ -38,15 +38,12 @@ def acquire_scheduler_lease(instance_id: str, seconds: int | None = None) -> boo
     seconds = seconds or settings.SCHEDULER_LEASE_SECONDS
     _state_row()
     now = timezone.now()
-    free_or_mine = (
-        Q(instance_id="") | Q(instance_id=instance_id)
-        | Q(lease_expires_at__isnull=True) | Q(lease_expires_at__lt=now)
-    )
-    taken = SchedulerState.objects.filter(pk=1).filter(free_or_mine).update(
-        instance_id=instance_id,
-        lease_expires_at=now + timedelta(seconds=seconds),
-        heartbeat_at=now,
-    )
+    lease = dict(lease_expires_at=now + timedelta(seconds=seconds), heartbeat_at=now)
+    if SchedulerState.objects.filter(pk=1, instance_id=instance_id).update(**lease) == 1:
+        return True  # renewed
+    free = Q(instance_id="") | Q(lease_expires_at__isnull=True) | Q(lease_expires_at__lt=now)
+    # Taking over: started_at marks when this checker became the active one (used by /api/status/).
+    taken = SchedulerState.objects.filter(pk=1).filter(free).update(instance_id=instance_id, started_at=now, **lease)
     return taken == 1
 
 

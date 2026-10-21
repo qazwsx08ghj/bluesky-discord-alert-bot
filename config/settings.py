@@ -23,6 +23,7 @@ INSTALLED_APPS = [
     "botconfig",
     "bluesky_monitor",
     "discord_alerts",
+    "activity",
 ]
 
 MIDDLEWARE = [
@@ -113,6 +114,13 @@ ACCOUNT_LOCK_SECONDS = int(os.getenv("ACCOUNT_LOCK_SECONDS", "300"))
 SEND_STALE_SECONDS = int(os.getenv("SEND_STALE_SECONDS", "120"))
 SEND_MAX_ATTEMPTS = int(os.getenv("SEND_MAX_ATTEMPTS", "4"))  # first try + 3 retries
 SEND_RETRY_WINDOW_HOURS = int(os.getenv("SEND_RETRY_WINDOW_HOURS", "24"))
+# Activity log (see activity/retention.py): keep 30 days, never more than 10,000 events.
+ACTIVITY_RETENTION_DAYS = int(os.getenv("ACTIVITY_RETENTION_DAYS", "30"))
+ACTIVITY_MAX_EVENTS = int(os.getenv("ACTIVITY_MAX_EVENTS", "10000"))
+# /api/status/: a check running longer than this counts as stuck; a check later than
+# this past its planned time counts as overdue.
+SCHEDULER_STALL_MINUTES = int(os.getenv("SCHEDULER_STALL_MINUTES", "10"))
+SCHEDULER_OVERDUE_GRACE_SECONDS = int(os.getenv("SCHEDULER_OVERDUE_GRACE_SECONDS", "120"))
 
 _LOG_LEVEL = os.getenv("BOT_LOG_LEVEL", "WARNING" if _RUNNING_TESTS else "INFO")
 LOGGING = {
@@ -128,5 +136,6 @@ LOGGING = {
         "bluesky_monitor": {"handlers": ["console"], "level": _LOG_LEVEL},
         "discord_alerts": {"handlers": ["console"], "level": _LOG_LEVEL},
         "botconfig": {"handlers": ["console"], "level": _LOG_LEVEL},
+        "activity": {"handlers": ["console"], "level": _LOG_LEVEL},
     },
 }

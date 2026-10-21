@@ -29,11 +29,39 @@ RATE_LIMIT_BACKOFF = timedelta(minutes=15)
 
 
 class BlueskyLoginError(Exception):
-    """The bot's own Bluesky login is missing or was rejected. Checking can't continue."""
+    """The bot's own Bluesky login is missing or was rejected. Checking can't continue.
+
+    `category` is the activity.problems code that explains it to the user.
+    """
+
+    def __init__(self, message="", category="bluesky_login_rejected"):
+        super().__init__(message)
+        self.category = category
+
+
+class BlueskyNotConfigured(BlueskyLoginError):
+    """No Bluesky handle or App Password has been saved yet."""
+
+    def __init__(self, message="The bot's Bluesky login isn't set up yet."):
+        super().__init__(message, category="bluesky_not_configured")
 
 
 class BlueskyUnavailable(Exception):
     """Bluesky couldn't be reached right now (network, timeout, rate limit). Try later."""
+
+    def __init__(self, message="", category="bluesky_unavailable"):
+        super().__init__(message)
+        self.category = category
+
+
+def _log_login(event_type, category=""):
+    from activity import log
+
+    if event_type == log.LOGIN_FAILED:
+        log.problem(log.LOGIN_FAILED, category, "Bluesky didn't accept the bot's login. Checks are paused "
+                    "until it works.", merge_repeats=True)
+    else:
+        log.record(log.LOGIN_RECOVERED, "success", "The bot's Bluesky login works again.")
 
 
 def is_auth_error(exc: Exception) -> bool:
@@ -65,7 +93,7 @@ def _credentials():
 
     handle, password = store.credentials()
     if not handle or not password:
-        raise BlueskyLoginError("The bot's Bluesky login isn't set up yet.")
+        raise BlueskyNotConfigured()
     return handle, password
 
 
@@ -93,6 +121,9 @@ class SharedSession:
                 return fn(self._client)
             except Exception as exc:
                 if not is_auth_error(exc):
+                    if isinstance(exc, at_exc.RateLimitExceededError):
+                        raise BlueskyUnavailable("Bluesky is limiting requests right now.",
+                                                 category="bluesky_rate_limited") from exc
                     if isinstance(exc, (at_exc.NetworkError, at_exc.RequestException)):
                         raise BlueskyUnavailable(f"Bluesky isn't responding properly: {exc}") from exc
                     raise
@@ -137,7 +168,9 @@ class SharedSession:
 
         now = timezone.now()
         if same_creds and state.login_retry_after and now < state.login_retry_after:
-            raise BlueskyLoginError(state.last_error or "Bluesky rejected the bot's login.")
+            # Waiting after a rejected password, or after Bluesky limited logins.
+            category = "bluesky_login_rejected" if state.login_failures else "bluesky_rate_limited"
+            raise BlueskyLoginError(state.last_error or "Bluesky rejected the bot's login.", category=category)
 
         client = self._new_client(fp, handle)
         try:
@@ -147,7 +180,7 @@ class SharedSession:
                 login_retry_after=now + RATE_LIMIT_BACKOFF,
                 last_error="Bluesky is limiting logins right now. The bot will try again shortly.",
             )
-            raise BlueskyUnavailable("Bluesky rate-limited the login.") from exc
+            raise BlueskyUnavailable("Bluesky rate-limited the login.", category="bluesky_rate_limited") from exc
         except (at_exc.NetworkError, at_exc.RequestException) as exc:
             raise BlueskyUnavailable(f"Couldn't reach Bluesky: {exc}") from exc
         except Exception as exc:
@@ -161,11 +194,14 @@ class SharedSession:
                 login_failures=failures, login_retry_after=now + wait, last_error=message,
             )
             logger.error("Bluesky login rejected for %s; next attempt after %s", handle, wait)
+            _log_login("login_failed", "bluesky_login_rejected")
             raise BlueskyLoginError(message) from exc
 
         self._password_login_done = True
         BlueskySessionState.objects.filter(pk=1).update(
             login_failures=0, login_retry_after=None, last_error=""
         )
+        if state.login_failures:  # it failed before (with these or older credentials)
+            _log_login("login_recovered")
         logger.info("Logged in to Bluesky as %s", handle)
         return client
