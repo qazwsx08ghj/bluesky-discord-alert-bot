@@ -144,19 +144,31 @@ Your data and the backups are untouched; nothing in the update deletes anything.
 
 Non-technical users should get the **release download**, so nothing is built on their computer.
 
-1. Tag a version: `git tag v1.0.0 && git push --tags`.
-2. `.github/workflows/release.yml`:
-   1. runs the tests;
-   2. builds the image for `linux/amd64` and `linux/arm64`;
-   3. pushes `ghcr.io/<owner>/<repo>:1.0.0` and `:stable`;
-   4. attaches `BlueskyDiscordAlertBot-stable.zip` to the GitHub release.
-3. **The zip** (`docker/make_release_bundle.py`) contains only:
+1. **Prepare the version:**
+   - set it in `frontend/package.json`;
+   - in `CHANGELOG.md`, move the `[Unreleased]` notes under `## [1.2.0] - YYYY-MM-DD`;
+   - make sure the links at the bottom name the real repository.
+2. **Tag it:** `git tag v1.2.0 && git push --tags`.
+3. **`.github/workflows/release.yml` runs:**
+   1. `docker/release_check.py` checks that the tag, `package.json` and `CHANGELOG.md` agree. A release needs a dated changelog entry and no `OWNER/REPOSITORY` placeholders.
+   2. Every CI job runs (`ci.yml`).
+   3. The image is built for `linux/amd64` and `linux/arm64`, and pushed as `ghcr.io/<owner>/<repo>:1.2.0` and `:stable`. **ARM (`linux/arm64`) has been tested under emulation only, not on real ARM hardware.**
+   4. `BlueskyDiscordAlertBot-stable.zip` is attached to the GitHub release. The release notes are the version's changelog section.
+4. **The zip** (`docker/make_release_bundle.py`) contains only:
    - the six scripts and `docker/scripts/common.bat`;
    - `docker-compose.yml`;
-   - `docker/compose.env` with `ALERTBOT_IMAGE=ghcr.io/<owner>/<repo>:stable`;
-   - a short `README.txt`.
+   - `docker/compose.env` with `ALERTBOT_IMAGE` set to the published image;
+   - `README.txt` and `README.zh-TW.txt`;
+   - `LICENSE` and `THIRD_PARTY_NOTICES.txt`.
 
    Its `setup.bat` and `update.bat` download the image instead of building.
-4. **Users update with `update.bat`,** which pulls the newest `:stable`. To stay on one version, set a version tag in `docker\compose.env`.
+5. **Users update with `update.bat`,** which pulls the newest `:stable`. To stay on one version, set a version tag in `docker\compose.env`.
 
-The GitHub package must be public, so users can download without signing in to the registry.
+**Pre-releases for testing:** a tag with a suffix, such as `v1.2.0-rc.1`:
+- pushes only `:1.2.0-rc.1`, never `:stable`;
+- its zip uses that exact image;
+- the GitHub release is marked as a pre-release.
+
+Its changelog entry may still say `Unreleased`. Users on `:stable` never receive a pre-release.
+
+**The GitHub package must be public,** so users can download without signing in to the registry. A new package starts private: change its visibility once, after the first release.

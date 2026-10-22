@@ -1,5 +1,7 @@
 # Bluesky → Discord Alert Bot
 
+**English** | [繁體中文](README.zh-TW.md)
+
 This bot watches **any public Bluesky accounts you choose** (artists, news accounts, creators, anyone) and posts their new posts as announcements in your Discord channels.
 
 **No coding needed.** You install one program, Docker Desktop, then double-click a file. Everything else happens in a control panel in your web browser.
@@ -34,7 +36,7 @@ Clicking the title opens the post on Bluesky.
 ## What you need
 
 - A Windows 10 or Windows 11 computer (64-bit) that stays on while you want announcements.
-- **Docker Desktop**: free for personal use and small organisations. The next section shows how to install it.
+- **Docker Desktop**. The next section shows how to install it. Docker Desktop is made by Docker, Inc. and has its own license: it is free for personal use, education, non-commercial open source projects and small businesses (fewer than 250 employees **and** less than US$10 million in annual revenue). Larger organisations and government bodies need a paid Docker subscription. See [Docker's license terms](https://docs.docker.com/subscription/desktop-license/). This bot itself is free for everyone (see [License](#license)).
 - A **Bluesky account** of your own. The bot signs in with it to read posts.
 - A **Discord server** where you can manage channels.
 
@@ -61,6 +63,8 @@ Docker Desktop is the program the bot runs inside. You install it once.
 ## Step 2: Install the bot
 
 1. Put the bot's folder somewhere permanent, for example in **Documents**. (If you downloaded a `.zip` file, right-click it and choose **Extract All** first.)
+   - **Before extracting a downloaded `.zip`:** right-click it, choose **Properties**, tick **Unblock** if it's there, and press **OK**. Windows marks downloaded files, and without this it may warn about each script.
+   - If Windows still shows **"Windows protected your PC"**, choose **More info → Run anyway**. The scripts are plain text files that you can open in Notepad to see what they do.
 2. Double-click **`setup.bat`**.
    - The first time it takes a few minutes: it prepares the bot inside Docker Desktop.
    - If you used an **earlier version** of this bot in the same folder, setup offers to bring over its accounts and settings. Answer **Y**. The old files are only read, never changed.
@@ -189,6 +193,8 @@ Your old `db.sqlite3` and `.env` files are only read. After moving, you can keep
 - [docs/FRONTEND.md](docs/FRONTEND.md): the control panel, for developers.
 - [docs/API.md](docs/API.md): the bot's API, for developers.
 - [CONTRIBUTING.md](CONTRIBUTING.md): for developers: the project's layout, working on the panel or the backend separately, the API contract (`docs/openapi.yaml`), tests and CI.
+- [CHANGELOG.md](CHANGELOG.md): what changed in each version.
+- [SECURITY.md](SECURITY.md): how to report a security problem privately.
 
 ## License
 

@@ -469,7 +469,7 @@ class ReleaseBundleTests(ScriptHarness):
     def test_bundle_has_only_what_users_need(self):
         self.assertEqual(self.names, sorted(["setup.bat", "start.bat", "update.bat", "stop.bat", "backup.bat", "restore.bat",
                                              "docker-compose.yml", "docker/compose.env", "docker/scripts/common.bat",
-                                             "README.txt", "LICENSE", "THIRD_PARTY_NOTICES.txt"]))
+                                             "README.txt", "README.zh-TW.txt", "LICENSE", "THIRD_PARTY_NOTICES.txt"]))
         env = (self.dir / "docker" / "compose.env").read_text()
         self.assertIn("ALERTBOT_IMAGE=ghcr.io/example/bluesky-discord-alert-bot:stable\n", env)
 

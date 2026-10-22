@@ -1,5 +1,7 @@
 # Contributing
 
+**English** | [繁體中文](CONTRIBUTING.zh-TW.md)
+
 This page is for people who change the bot's code. People who only use the bot need just the [README](README.md); they never install Python, Node.js or Git.
 
 The project has two halves that meet at one place, the API:
@@ -147,3 +149,10 @@ When you add a dependency:
 - **Fonts, icons and images** need a license that allows redistribution, such as the SIL Open Font License or CC0.
 - **Regenerate the notices.** `THIRD_PARTY_NOTICES.txt` holds the license and copyright notices of everything the Docker image and the panel ship, read from the installed packages. After changing `requirements-lock.txt`, `requirements-docker.txt` or the panel's dependencies, install the exact versions and run `python docker/third_party_notices.py --write`. CI, the Django tests and the Docker build fail while the file is out of date.
 - **A package that ships no license file** needs its license in `docker/notices/<name>-<version>.txt`, copied from its official source for that version (see `docker/notices/README.md`).
+
+## 9. Pull requests, changelog and translations
+
+- **Pull requests** use the template in `.github/PULL_REQUEST_TEMPLATE.md`. Keep each one to one change, and say how you tested it.
+- **Changelog.** Add a line under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) for anything a user or API client would notice. Internal clean-ups don't need one.
+- **Two languages.** `README.md` and `CONTRIBUTING.md` have Traditional Chinese versions (`*.zh-TW.md`). When you change one, change the other in the same pull request; if you can't write Chinese, say so in the pull request and a maintainer will update it. The tests check that both versions have the same sections, links and commands. Terms are listed in [docs/GLOSSARY.zh-TW.md](docs/GLOSSARY.zh-TW.md). The other documents are in English only.
+- **Security problems** are never reported in public issues: see [SECURITY.md](SECURITY.md).
