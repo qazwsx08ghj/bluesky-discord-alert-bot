@@ -168,9 +168,9 @@ class ReleaseCheckTests(SimpleTestCase):
     def test_a_release_needs_a_date_and_real_links(self):
         self.fails(f"v{self.version}", "needs its release date")
         dated = self.changelog.replace(f"## [{self.version}] - Unreleased", f"## [{self.version}] - 2026-11-01")
-        self.write(dated)
+        self.write(dated + "\n[0.0.1]: https://github.com/OWNER/REPOSITORY/releases/tag/v0.0.1\n")
         self.fails(f"v{self.version}", "OWNER/REPOSITORY")
-        self.write(dated.replace("OWNER/REPOSITORY", "someone/bluesky-discord-alert-bot"))
+        self.write(dated)
         result = self.check(f"v{self.version}")
         self.assertEqual((result["prerelease"], result["version"]), ("false", self.version))
 
