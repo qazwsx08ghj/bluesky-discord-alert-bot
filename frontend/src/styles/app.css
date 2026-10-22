@@ -236,12 +236,15 @@ tr.fresh { animation: fresh 2.4s var(--ease-out); }
 @keyframes pulse { 50% { opacity: 0.3; } }
 .hint { display: block; font-size: 12px; color: var(--text-3); margin-top: 3px; max-width: 220px; line-height: 1.35; white-space: normal; }
 
+/* Placed by Menu (components/ui.tsx) next to its button, outside any scroll area */
 .menu {
-  position: absolute; right: 0; top: 34px; z-index: 20; background: var(--surface); border: 1px solid var(--border);
+  position: fixed; z-index: 70; background: var(--surface); border: 1px solid var(--border);
   border-radius: 10px; box-shadow: var(--shadow-lg); padding: 4px; min-width: 190px;
   animation: menu-in 0.14s var(--ease-out);
 }
 @keyframes menu-in { from { opacity: 0; transform: translateY(-4px); } }
+@keyframes menu-in-above { from { opacity: 0; transform: translateY(4px); } }
+.menu[data-side="above"] { animation-name: menu-in-above; }
 .menu button, .menu a {
   display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; background: none;
   border-radius: 6px; cursor: pointer; text-align: left; color: var(--text); text-decoration: none; font-size: 14px;
