@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Check, CircleCheck, Plus, Send } from "lucide-react";
 import { useChannels, useSettings, useTestChannel } from "../api/queries";
 import { useShell, useTitle } from "../components/Shell";
-import { Banner, Button, FieldError, ICON, useToast } from "../components/ui";
+import { Banner, Button, FieldError, ICON, SkeletonLines, useToast } from "../components/ui";
 import { useAccountDrawer } from "../features/AccountDrawer";
 import { FirstChannelForm } from "../features/Channels";
 import { LoginForm } from "../features/LoginForm";
@@ -96,7 +96,13 @@ export function SetupPage() {
           <p className="why">
             The bot needs a Bluesky login to read posts, even public ones. Use an <b>App Password</b>, not your real password: it can't change your password or account settings, and you can delete it on Bluesky any time.
           </p>
-          <LoginForm key={settings.data?.settings_version ?? 0} settings={settings.data} mode="setup" onSaved={finishStep} />
+          {/* Wait for the saved settings: the form starts from them, and must not be rebuilt (losing what
+              was typed) when they arrive after the user has started typing. */}
+          {settings.isPending ? (
+            <SkeletonLines label="Loading the settings…" />
+          ) : (
+            <LoginForm key={settings.data?.settings_version ?? 0} settings={settings.data} mode="setup" onSaved={finishStep} />
+          )}
         </Step>
         <Step n={2} title="Choose a Discord channel" sub="Where announcements go" done={setup.channel} open={current === 2} onChange={() => setReopened(2)}>
           <p className="why">Discord gives each channel a webhook URL that lets the bot post there. You only need one to start; you can add more later in Settings.</p>
