@@ -283,7 +283,7 @@ class ReleaseCheckTests(SimpleTestCase):
         workflow = yaml.safe_load(text(".github/workflows/release.yml"))
         jobs = workflow["jobs"]
         self.assertEqual(jobs["publish"]["needs"], ["version", "checks"])
-        self.assertIn("docker/release_check.py", jobs["version"]["steps"][1]["run"])
+        self.assertIn("docker/release_check.py", [s for s in jobs["version"]["steps"] if s.get("id") == "check"][0]["run"])
         names = [s for s in jobs["publish"]["steps"] if s.get("id") == "names"][0]["run"]
         stable_branch, prerelease_branch = names.split("else", 1)
         self.assertIn('if [ "$PRERELEASE" = "false" ]', stable_branch)
@@ -292,3 +292,46 @@ class ReleaseCheckTests(SimpleTestCase):
         release = [s for s in jobs["publish"]["steps"] if "action-gh-release" in s.get("uses", "")][0]["with"]
         self.assertIn("prerelease", release)
         self.assertEqual(release["body_path"], "release-notes.md")
+
+    def test_the_tag_step_gives_a_prerelease_only_its_version_tag(self):
+        """Runs release.yml's own tag-naming script, as GitHub would, for an RC and for a release."""
+        import os
+        import subprocess
+
+        bash = shutil.which("bash")
+        if bash is None:
+            self.skipTest("needs bash")
+        jobs = yaml.safe_load(text(".github/workflows/release.yml"))["jobs"]
+        script = [s for s in jobs["publish"]["steps"] if s.get("id") == "names"][0]["run"]
+
+        def outputs(version, prerelease):
+            with tempfile.TemporaryDirectory() as tmp:
+                out = Path(tmp) / "out"
+                env = {**os.environ, "VERSION": version, "PRERELEASE": prerelease,
+                       "GITHUB_REPOSITORY": "Owner/Bluesky-Discord-Alert-Bot", "GITHUB_OUTPUT": str(out)}
+                subprocess.run([bash, "-c", script], env=env, check=True)
+                return dict(line.split("=", 1) for line in out.read_text(encoding="utf-8").splitlines())
+
+        image = "ghcr.io/owner/bluesky-discord-alert-bot"
+        rc = outputs("1.0.0-rc.1", "true")
+        self.assertEqual(rc["tags"], f"{image}:1.0.0-rc.1", "a pre-release never gets :stable")
+        self.assertEqual(rc["download_image"], f"{image}:1.0.0-rc.1")
+        final = outputs("1.0.0", "false")
+        self.assertEqual(final["tags"], f"{image}:1.0.0,{image}:stable")
+        self.assertEqual(final["download_image"], f"{image}:stable")
+
+    def test_the_release_workflow_pins_python_and_labels_the_image(self):
+        jobs = yaml.safe_load(text(".github/workflows/release.yml"))["jobs"]
+        for name in ("version", "publish"):
+            steps = jobs[name]["steps"]
+            setup = [i for i, s in enumerate(steps) if s.get("uses", "").startswith("actions/setup-python@")]
+            uses_python = [i for i, s in enumerate(steps) if "python " in s.get("run", "")]
+            self.assertTrue(setup and uses_python, name)
+            self.assertLess(setup[0], uses_python[0], f"{name}: Python is set up before it's used")
+            self.assertEqual(steps[setup[0]]["with"]["python-version"], "3.11", name)
+        build = [s for s in jobs["publish"]["steps"] if "build-push-action" in s.get("uses", "")][0]["with"]
+        for key in ("org.opencontainers.image.source=https://github.com/${{ github.repository }}",
+                    "org.opencontainers.image.description=", "org.opencontainers.image.licenses=MIT"):
+            self.assertIn(key, build["labels"])
+        self.assertIn("index:org.opencontainers.image.description=", build["annotations"])
+        self.assertEqual(build["platforms"], "linux/amd64,linux/arm64")
