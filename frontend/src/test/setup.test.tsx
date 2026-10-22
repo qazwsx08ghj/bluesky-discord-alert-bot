@@ -1,4 +1,5 @@
 import { screen, waitFor, within } from "@testing-library/react";
+import { http } from "msw";
 import { describe, expect, it } from "vitest";
 import { emptyState } from "./fakeApi";
 import { changes, renderApp } from "./render";
@@ -16,6 +17,24 @@ describe("first-time setup", () => {
     expect(screen.getByText(/^0 of 4 done\. About five minutes/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Setup" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("button", { name: /Bot status: Not set up yet/ })).toBeInTheDocument();
+  });
+
+  it("never loses what was typed when the saved settings arrive late", async () => {
+    // GitHub's CI machines are slower than a desktop: the settings can arrive after typing started.
+    let release!: () => void;
+    const settingsLoaded = new Promise<void>((resolve) => (release = resolve));
+    const slowSettings = http.get("*/api/settings/", async () => {
+      await settingsLoaded; // then falls through to the fake API's answer
+    });
+    const { user, state } = renderApp("/setup", emptyState(), { before: [slowSettings] });
+    expect(await screen.findByText("Loading the settings…")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Your Bluesky handle")).not.toBeInTheDocument();
+    release();
+    await user.type(await screen.findByLabelText("Your Bluesky handle"), "me.bsky.social");
+    await user.type(screen.getByLabelText("App Password"), "abcd-efgh-ijkl-mnop");
+    expect(screen.getByLabelText("Your Bluesky handle")).toHaveValue("me.bsky.social");
+    await user.click(screen.getByRole("button", { name: "Test and continue" }));
+    await waitFor(() => expect(state.password).toBe("abcd-efgh-ijkl-mnop"));
   });
 
   it("goes through all four steps, testing the login before saving it", async () => {
