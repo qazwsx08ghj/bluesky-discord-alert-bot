@@ -2,16 +2,16 @@
 
 [English](CONTRIBUTING.md) | **繁體中文**
 
-這份文件是給修改機器人程式碼的人看的。只使用機器人的人只需要看 [README](README.zh-TW.md)，他們永遠不需要安裝 Python、Node.js 或 Git。
+這份文件寫給想修改機器人程式碼的人。如果你只是要使用機器人，看 [README](README.zh-TW.md) 就夠了，完全不需要安裝 Python、Node.js 或 Git。
 
-> 本文件與英文版 [CONTRIBUTING.md](CONTRIBUTING.md) 內容相同；如有出入，以英文版為準。程式碼區塊中的註解保留英文。
+> 內容與英文版 [CONTRIBUTING.md](CONTRIBUTING.md) 相同，有出入時以英文版為準。程式碼區塊裡的註解維持英文。
 
-這個專案分成兩半，兩者只在一個地方交會：API。
+這個專案分成前後兩半，兩邊只透過 API 溝通。
 - **後端：** Django 和 Django REST Framework，加上在背景執行的檢查程式（checker）。見 [docs/BACKEND.md](docs/BACKEND.md)。
 - **前端：** `frontend/` 裡的 React 控制面板。見 [docs/FRONTEND.md](docs/FRONTEND.md)。
 - **兩者之間的規格：** [`docs/openapi.yaml`](docs/openapi.yaml)，用 OpenAPI 3.1 描述每個 API 端點，由後端程式碼自動產生。前端的 TypeScript 型別再由它產生。[docs/API.md](docs/API.md) 用文字說明 API；確切的欄位和型別以這份規格為準。
 
-您可以只開發其中一半，不需要安裝另一半的工具。
+你可以只開發其中一邊，不用安裝另一邊的工具。
 
 ## 1. 專案結構
 
@@ -44,7 +44,7 @@ dev/                 for developers only: the demo stack in Docker, and running 
 
 ## 2. 只開發前端（不需要 Python）
 
-您需要 Node.js 20.19 以上（建議 22）；如果想要一個執行中的示範機器人，還需要 Docker。
+需要 Node.js 20.19 以上（建議用 22）；想要有一個實際運作的示範機器人的話，還需要 Docker。
 
 ```
 docker compose -f dev/docker-compose.yml up --build      # the demo bot at http://127.0.0.1:8765/
@@ -54,21 +54,21 @@ set ALERTBOT_API=http://127.0.0.1:8765                   # PowerShell: $env:ALER
 npm run dev                                              # the panel at http://localhost:5173, live reload
 ```
 
-示範機器人是真正的後端，搭配虛構的帳號、假的 Bluesky 和假的 Discord。它的設計本身就是安全的：
-- 它無法存取您的 `.env`、您的資料庫或您的任何資料夾；
-- 它的容器沒有網路連線；
-- 它碰不到真正機器人的容器或資料；
-- 執行 `docker compose -f dev/docker-compose.yml down` 之後，所有東西都會消失。
+示範機器人用的是真正的後端，只是帳號都是虛構的，Bluesky 和 Discord 也是假的。它在設計上就很安全：
+- 碰不到你的 `.env`、資料庫或任何資料夾；
+- 它的容器完全連不上網路；
+- 也碰不到真正機器人的容器或資料；
+- 執行 `docker compose -f dev/docker-compose.yml down` 之後，所有東西都會清掉。
 
-`DEMO_SCENARIO=empty` 會顯示第一次使用的畫面；`problem` 會顯示應用程式密碼被拒絕的狀況。「發送」到 Discord 的訊息列在 http://127.0.0.1:8765/__demo__/discord/。
+`DEMO_SCENARIO=empty` 會顯示第一次使用的畫面，`problem` 則是應用程式密碼被拒絕的狀況。「送到」Discord 的訊息可以在 http://127.0.0.1:8765/__demo__/discord/ 看到。
 
-沒有 Docker 的話，`npm test` 仍然可以執行：它會在模擬瀏覽器中，用假的 API 測試整個控制面板。
+沒有 Docker 也能跑 `npm test`：它會在模擬的瀏覽器裡，用假的 API 測試整個控制面板。
 
-型別：絕對不要手寫 API 的資料結構。`src/api/types.ts` 只是替自動產生的 `src/api/schema.gen.ts` 取簡短的名稱。如果控制面板需要 API 沒有提供的東西，要先修改後端（第 4 節）。
+型別：API 的資料結構不要自己手寫。`src/api/types.ts` 只是幫自動產生的 `src/api/schema.gen.ts` 取比較短的名稱。如果控制面板需要 API 還沒提供的東西，要先改後端（第 4 節）。
 
 ## 3. 只開發後端（不需要 Node.js）
 
-您需要 Python 3.11。
+需要 Python 3.11。
 
 ```
 python -m venv venv
@@ -77,18 +77,18 @@ pip install -r requirements-dev.txt        # the app's exact versions plus the c
 python manage.py test                      # every backend test, about 3 minutes
 ```
 
-`dev\setup-without-docker.bat` 會做同樣的事，並建立資料庫。`requirements-dev.txt` 只多加了開發工具（drf-spectacular、jsonschema、PyYAML）；它們永遠不會進入 Docker 映像檔，機器人執行時也不會用到。
+`dev\setup-without-docker.bat` 會做一樣的事，另外再建立資料庫。`requirements-dev.txt` 只多了開發工具（drf-spectacular、jsonschema、PyYAML），它們不會放進 Docker 映像檔，機器人執行時也用不到。
 
-Django 的測試會用暫時的建置結果來檢查控制面板的提供方式，所以不需要 Node.js。如果想看到控制面板本身，請使用 Docker 安裝（`setup.bat`），或用 Node.js 建置一次（`cd frontend && npm ci && npm run build`）。
+Django 的測試會用臨時的建置結果檢查控制面板，所以不需要 Node.js。想看到控制面板本身的話，可以用 Docker 安裝（`setup.bat`），或用 Node.js 建置一次（`cd frontend && npm ci && npm run build`）。
 
-**開發時絕對不要使用您的真實資料。** 測試使用暫時的資料庫和假的登入資訊。其他情況請把 `DATABASE_PATH` 指向一個暫存檔案，或使用示範伺服器：`python config\testing\demo_server.py`。
+**開發時千萬不要用你的真實資料。** 測試用的都是臨時資料庫和假的登入資訊。其他情況請把 `DATABASE_PATH` 指到一個暫存檔，或改用示範伺服器：`python config\testing\demo_server.py`。
 
 ## 4. 修改 API
 
-規格由程式碼產生，前端的型別再由規格產生。這兩個檔案都會提交到版本控制，所以 API 的任何變更在審查時都會顯示為 `docs/openapi.yaml` 的變更。
+規格是從程式碼產生的，前端型別又是從規格產生的。這兩個檔案都會 commit，所以只要 API 有變動，review 時就會看到 `docs/openapi.yaml` 跟著改。
 
-1. 修改 view 或 serializer，並附上測試。
-2. 如果變更新增或修改了欄位、回應或錯誤，請在 `config/openapi.py` 中描述它。請求和回應的結構都記錄在那裡，緊鄰對應的 view；真正的 view 不會被修改。
+1. 修改 view 或 serializer，並加上測試。
+2. 如果新增或修改了欄位、回應或錯誤，請在 `config/openapi.py` 裡描述。請求和回應的結構都寫在那裡、對應的 view 旁邊；真正的 view 不需要動。
 3. 重新產生並檢查：
    ```
    python manage.py api_contract --write     # rewrites docs/openapi.yaml
@@ -97,15 +97,15 @@ Django 的測試會用暫時的建置結果來檢查控制面板的提供方式�
    npm run api:types                         # rewrites src/api/schema.gen.ts
    npm run typecheck                         # shows every place in the panel affected
    ```
-4. 更新 `docs/API.md`（文字說明），以及 `frontend/src/test/fakeApi.ts` 中的假 API。它的回應用 `satisfies` 搭配自動產生的型別，所以不會在不知不覺中與規格脫節。
-5. 把程式碼、`docs/openapi.yaml` 和 `schema.gen.ts` 一起提交。
+4. 更新 `docs/API.md`（文字說明）和 `frontend/src/test/fakeApi.ts` 裡的假 API。假 API 的回應用 `satisfies` 對照自動產生的型別，所以不會不知不覺跟規格對不上。
+5. 程式碼、`docs/openapi.yaml` 和 `schema.gen.ts` 要在同一個 commit 一起提交。
 
 **規則：**
-- **保留既有行為。** 不要為了讓規格比較簡單就改變 API 的回應：要描述它實際的行為。如果規格和程式碼不一致，符合性測試會失敗；請修正描述，除非是程式碼有錯。
-- **不要破壞用戶端。** 新增欄位沒問題。移除或重新命名欄位、或改變型別，會破壞用戶端（控制面板和未來的行動應用程式）；請先討論。
-- **不要手動編輯自動產生的檔案。** 檢查會重新產生它們，只要有任何差異就會失敗。
+- **維持原本的行為。** 不要為了讓規格好寫就改 API 的回應，規格要描述它實際的樣子。規格和程式碼對不上時，符合性測試會失敗；這時請修正規格的描述，除非真的是程式碼有 bug。
+- **不要弄壞用戶端。** 新增欄位沒問題；但移除、改名或改型別會讓用戶端（控制面板和未來的手機 App）壞掉，請先討論。
+- **自動產生的檔案不要手動改。** 檢查時會重新產生一次，只要有一點差異就會失敗。
 
-`python manage.py api_contract`（不加 `--write`）和 `npm run api:check` 只做檢查，檔案過期時會失敗。CI 兩個都會執行。輸出在每台電腦上都完全相同：有排序、使用 LF 換行、工具版本固定。
+`python manage.py api_contract`（不加 `--write`）和 `npm run api:check` 只做檢查，檔案沒更新就會失敗，CI 兩個都會跑。不管在哪台電腦產生，結果都一模一樣：有排序、用 LF 換行、工具版本固定。
 
 ## 5. 測試
 
@@ -125,13 +125,13 @@ Django 的測試會用暫時的建置結果來檢查控制面板的提供方式�
 - 假的登入資訊；
 - 暫時的資料庫和資料夾；
 - 不連到真正的 Bluesky 或 Discord；
-- 不讀取也不寫入您的 `.env`。
+- 不會讀取或寫入你的 `.env`。
 
-請維持這個原則：任何可能連到真正服務或真實資料的測試都是錯誤。
+請維持這個原則：只要測試有可能連到真正的服務或真實資料，就算是 bug。
 
 ## 6. 持續整合（CI）
 
-`.github/workflows/ci.yml` 會在每次推送到 `main` 和每個 pull request 時執行，分成幾個獨立的工作：
+每次 push 到 `main` 或開 pull request 時，`.github/workflows/ci.yml` 都會執行，分成幾個獨立的工作：
 
 | 工作 | 執行環境 | 檢查內容 |
 |---|---|---|
@@ -142,32 +142,32 @@ Django 的測試會用暫時的建置結果來檢查控制面板的提供方式�
 | Windows scripts（Windows 指令檔） | Windows | 在 cmd.exe 中執行真正的 `.bat` 檔，搭配假的 Docker |
 | Docker | Linux | Compose 檔案、建置映像檔（不推送）、映像檔內容、示範環境的安全性 |
 
-`release.yml` 會先執行以上全部工作，只要有任何一個失敗，就什麼都不會發行。
+`release.yml` 會先跑完上面所有工作，只要有一個失敗，就不會發行任何東西。
 
 ## 7. 基本原則
 
-- **使用者永遠不需要開發工具。** 請維持一鍵執行的 Windows 指令檔、Docker 架構，以及只能從 `127.0.0.1` 存取。
-- **絕不刪除使用者的資料。** 指令檔永遠不會移除 Docker volume。每次資料庫變更前都會先備份。兩者都有測試檢查。
-- **機密資訊必須保密。**
-  - Webhook 網址和密碼絕不會出現在 API 回應、紀錄檔或頁面中。
-  - 只會顯示遮蔽後的形式。
-  - 絕不提交 `.env`、資料庫或備份。
-- **固定版本。** Python 套件的版本在 `requirements-lock.txt`（以及 `requirements-dev.txt`）；Node.js 套件的版本在 `package-lock.json`。更新後請執行安全性稽核。
+- **使用者永遠不需要開發工具。** 請保持一鍵執行的 Windows 指令檔、Docker 架構，以及只能從 `127.0.0.1` 存取的設計。
+- **絕對不刪使用者的資料。** 指令檔不會移除 Docker volume，資料庫有變動前一定先備份，這兩點都有測試把關。
+- **機密資訊不能外流。**
+  - Webhook 網址和密碼不能出現在 API 回應、紀錄檔或頁面上。
+  - 只能顯示遮蔽過的樣子。
+  - 不要 commit `.env`、資料庫或備份。
+- **版本要固定。** Python 套件的版本寫在 `requirements-lock.txt`（和 `requirements-dev.txt`），Node.js 套件寫在 `package-lock.json`。更新套件後請跑一次安全性檢查（audit）。
 
 ## 8. 授權
 
-本專案採用 MIT 授權（[LICENSE](LICENSE)）。貢獻程式碼即表示您同意您的貢獻以相同的授權釋出。
+本專案採用 MIT 授權（[LICENSE](LICENSE)）。你貢獻的程式碼，也會以相同的授權釋出。
 
 新增相依套件時：
-- **先確認它的授權。** MIT、BSD、ISC 和 Apache-2.0 都沒問題。
-- **如果它會隨 Docker 映像檔或建置後的控制面板發給使用者，加入任何 copyleft 授權（GPL、AGPL、LGPL）或條款特殊的套件前，請先詢問。** 僅供開發使用的工具影響較小，因為它們不會被發行。
-- **字型、圖示和圖片**需要允許再散布的授權，例如 SIL Open Font License 或 CC0。
-- **重新產生授權聲明。** `THIRD_PARTY_NOTICES.txt` 收錄了 Docker 映像檔和控制面板所發行的所有軟體的授權和著作權聲明，內容讀取自已安裝的套件。修改 `requirements-lock.txt`、`requirements-docker.txt` 或控制面板的相依套件之後，請安裝確切的版本，並執行 `python docker/third_party_notices.py --write`。檔案過期時，CI、Django 測試和 Docker 建置都會失敗。
-- **沒有附授權檔案的套件**，需要把它的授權放在 `docker/notices/<name>-<version>.txt`，內容複製自該版本的官方來源（見 `docker/notices/README.md`）。
+- **先確認授權。** MIT、BSD、ISC 和 Apache-2.0 都沒問題。
+- **會跟著 Docker 映像檔或控制面板一起發給使用者的套件，如果是 copyleft 授權（GPL、AGPL、LGPL）或條款比較特殊，請先討論。** 只在開發時用的工具影響比較小，因為它們不會被發行出去。
+- **字型、圖示和圖片**要用允許再散布的授權，例如 SIL Open Font License 或 CC0。
+- **重新產生授權聲明。** `THIRD_PARTY_NOTICES.txt` 收錄了 Docker 映像檔和控制面板裡所有第三方軟體的授權和著作權聲明，內容是從已安裝的套件讀出來的。改了 `requirements-lock.txt`、`requirements-docker.txt` 或控制面板的相依套件後，請先裝好確切的版本，再執行 `python docker/third_party_notices.py --write`。檔案沒更新的話，CI、Django 測試和 Docker 建置都會失敗。
+- **沒附授權檔案的套件**，要把它的授權放到 `docker/notices/<name>-<version>.txt`，內容從該版本的官方來源複製（見 `docker/notices/README.md`）。
 
 ## 9. Pull request、變更紀錄與翻譯
 
-- **Pull request** 請使用 `.github/PULL_REQUEST_TEMPLATE.md` 中的範本。每個 pull request 只做一件事，並說明您如何測試。
-- **變更紀錄。** 任何使用者或 API 用戶端會注意到的變更，請在 [CHANGELOG.md](CHANGELOG.md) 的 `[Unreleased]` 下加一行。內部整理不需要。
-- **兩種語言。** `README.md` 和 `CONTRIBUTING.md` 有繁體中文版（`*.zh-TW.md`）。修改其中一份時，請在同一個 pull request 中修改另一份；如果您不會寫中文，請在 pull request 中說明，維護者會協助更新。測試會檢查兩個版本的章節、連結和指令是否一致。用語請參考 [docs/GLOSSARY.zh-TW.md](docs/GLOSSARY.zh-TW.md)。其他文件只有英文版。
-- **安全性問題**絕不能在公開的 issue 中回報：請見 [SECURITY.md](SECURITY.md)。
+- **Pull request** 請用 `.github/PULL_REQUEST_TEMPLATE.md` 的範本。一個 pull request 只做一件事，並說明你怎麼測試。
+- **變更紀錄。** 使用者或 API 用戶端會注意到的變更，請在 [CHANGELOG.md](CHANGELOG.md) 的 `[Unreleased]` 底下加一行。內部整理不用寫。
+- **中英兩種語言。** `README.md` 和 `CONTRIBUTING.md` 都有繁體中文版（`*.zh-TW.md`）。改了其中一份，請在同一個 pull request 裡一起改另一份；不會寫中文的話，在 pull request 裡說一聲，維護者會幫忙更新。測試會檢查兩個版本的章節、連結和指令是否一致。用語請參考 [docs/GLOSSARY.zh-TW.md](docs/GLOSSARY.zh-TW.md)。其他文件只有英文版。
+- **安全性問題**請不要在公開的 issue 回報，做法請看 [SECURITY.md](SECURITY.md)。

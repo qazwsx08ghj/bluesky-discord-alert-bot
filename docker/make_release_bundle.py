@@ -22,17 +22,15 @@ FILES = ["setup.bat", "start.bat", "update.bat", "stop.bat", "backup.bat", "rest
 README = """Bluesky to Discord Alert Bot
 (繁體中文說明：README.zh-TW.txt)
 
-Needs: Docker Desktop (https://www.docker.com/products/docker-desktop/).
-Docker Desktop has its own license: free for personal use, education, non-commercial open
-source and small businesses (under 250 employees and under US$10 million annual revenue);
-larger organisations and government bodies need a paid Docker subscription. Details:
-https://docs.docker.com/subscription/desktop-license/
+Needs: Docker Desktop (https://www.docker.com/products/docker-desktop/). It has its own
+license terms: if you use it for a business or another organisation, check that you qualify
+for free use: https://docs.docker.com/subscription/desktop-license/
 
-0. Before unzipping: right-click the downloaded .zip, choose Properties, tick "Unblock" if it's
-   there, and press OK. If Windows still says "Windows protected your PC" when you start a
-   script, choose "More info", then "Run anyway". The scripts are plain text you can read.
-1. Unzip this folder somewhere permanent, for example Documents.
+1. Keep this folder somewhere permanent, for example Documents.
 2. Double-click setup.bat. The control panel opens in your browser when it's ready.
+   If Windows says "Windows protected your PC", choose "More info", then "Run anyway"
+   (the scripts are plain text you can read). To avoid the warning next time: before
+   unzipping, right-click the .zip, choose Properties, tick "Unblock" and press OK.
 3. Later: start.bat opens the control panel, update.bat installs a new version
    (after a backup), stop.bat stops the bot, backup.bat saves a backup copy,
    restore.bat puts a backup back (after backing up the current data).
@@ -46,26 +44,24 @@ downloads) also contains other open-source software: see THIRD_PARTY_NOTICES.txt
 README_ZH_TW = """Bluesky to Discord Alert Bot（繁體中文說明）
 (English: README.txt)
 
-需要：Docker Desktop（https://www.docker.com/products/docker-desktop/）。
-Docker Desktop 有它自己的授權條款：個人使用、教育用途、非商業開源專案，以及小型企業
-（員工少於 250 人而且年營收少於 1,000 萬美元）可以免費使用；規模較大的組織和政府機關
-需要購買 Docker 的付費訂閱。詳見：
+需要先安裝 Docker Desktop（https://www.docker.com/products/docker-desktop/）。
+Docker Desktop 有自己的授權條款，公司或組織使用的話，請先確認是否符合免費使用的資格：
 https://docs.docker.com/subscription/desktop-license/
 
-0. 解壓縮之前：在下載的 .zip 檔上按右鍵，選擇「內容」，如果有「解除封鎖」就勾選它，
-   再按「確定」。如果執行指令檔時 Windows 仍然顯示「Windows 已保護您的電腦」，
-   請選擇「其他資訊」，再選「仍要執行」。這些指令檔都是可以直接閱讀的純文字檔。
-1. 把這個資料夾解壓縮到固定的位置，例如「文件」資料夾。
-2. 按兩下 setup.bat。準備好之後，控制面板會在瀏覽器中開啟（控制面板目前只有英文介面）。
-3. 之後：start.bat 開啟控制面板，update.bat 安裝新版本（會先備份），stop.bat 停止機器人，
-   backup.bat 儲存備份，restore.bat 還原備份（會先備份目前的資料）。
+1. 把這個資料夾放在不會移動的地方，例如「文件」。
+2. 點兩下 setup.bat。準備好之後，瀏覽器會打開控制面板（目前只有英文介面）。
+   如果 Windows 顯示「Windows 已保護您的電腦」，請按「其他資訊」→「仍要執行」
+   （這些指令檔都是可以直接打開來看的純文字檔）。下次想避免這個警告：解壓縮前在
+   zip 檔上按右鍵 →「內容」，勾選「解除封鎖」再按「確定」。
+3. 之後：start.bat 打開控制面板，update.bat 更新到新版本（會先備份），stop.bat 停止
+   機器人，backup.bat 備份資料，restore.bat 還原備份（會先備份目前的資料）。
 
-您的帳號、設定和紀錄都保存在 Docker Desktop 裡，這些檔案絕不會刪除它們。
-update.bat 和 backup.bat 製作的備份也會存在這裡的 backups 資料夾。
+你的帳號、設定和紀錄都存在 Docker Desktop 裡，這些指令檔絕對不會刪掉它們。
+update.bat 和 backup.bat 做的備份會放在這裡的 backups 資料夾。
 
 這是採用 MIT 授權的免費開源軟體（見 LICENSE，以英文原文為準）。機器人（這個資料夾
-所下載的 Docker 映像檔）也包含其他開源軟體：見 THIRD_PARTY_NOTICES.txt。
-完整說明：專案的 README.zh-TW.md。
+下載的 Docker 映像檔）也包含其他開源軟體，請見 THIRD_PARTY_NOTICES.txt。
+完整說明請看專案的 README.zh-TW.md。
 """
 
 

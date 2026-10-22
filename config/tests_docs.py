@@ -89,11 +89,15 @@ class TranslationTests(SimpleTestCase):
 class DockerDesktopNoticeTests(SimpleTestCase):
     def test_users_learn_about_docker_desktops_license_everywhere(self):
         bundle = load("make_release_bundle")
-        for name, content in [("README.md", text("README.md")), ("README.zh-TW.md", text("README.zh-TW.md")),
-                              ("README.txt", bundle.README), ("README.zh-TW.txt", bundle.README_ZH_TW)]:
+        for name, content, sentence in [
+            ("README.md", text("README.md"), "check that you qualify for free use"),
+            ("README.zh-TW.md", text("README.zh-TW.md"), "請先確認是否符合免費使用的資格"),
+            ("README.txt", bundle.README, "check that you qualify"),
+            ("README.zh-TW.txt", bundle.README_ZH_TW, "請先確認是否符合免費使用的資格"),
+        ]:
             with self.subTest(doc=name):
                 self.assertIn(DOCKER_TERMS, content)
-                self.assertIn("250", content)
+                self.assertIn(sentence, content)
 
     def test_downloaded_scripts_warning_is_explained(self):
         self.assertIn("Unblock", text("README.md"))

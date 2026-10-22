@@ -2,19 +2,19 @@
 
 [English](README.md) | **繁體中文**
 
-這個機器人會追蹤**您選擇的任何公開 Bluesky 帳號**（繪師、新聞帳號、創作者，任何人都可以），並把他們的新貼文以公告的形式發到您的 Discord 頻道。
+**你選的任何公開 Bluesky 帳號**（繪師、新聞帳號、創作者、朋友）只要一發新貼文，Discord 就會收到通知。
 
-**不需要寫程式。** 您只要安裝一個程式 Docker Desktop，再按兩下一個檔案。其他所有事情都在網頁瀏覽器裡的控制面板完成。
+**完全不用寫程式。** 只要安裝一個程式（Docker Desktop）、點兩下一個檔案，其他設定都在瀏覽器的控制面板裡完成。
 
-> 控制面板目前只有英文介面。本說明會在英文按鈕名稱旁附上中文說明。
+> 控制面板目前只有英文介面，下面會在英文按鈕旁邊附上中文說明。
 
 ![控制面板](docs/screenshots/02-accounts.png)
 
 ---
 
-## 功能
+## 它可以做什麼
 
-機器人每隔幾分鐘會查看您挑選的 Bluesky 帳號。當其中一個帳號發了新貼文，您的 Discord 頻道就會出現像這樣的訊息：
+機器人每隔幾分鐘會去看一次你挑選的 Bluesky 帳號。只要其中有人發了新貼文，你的 Discord 頻道就會出現像這樣的訊息：
 
 ```
 ┌──────────────────────────────────────────┐
@@ -26,89 +26,89 @@
 └──────────────────────────────────────────┘
 ```
 
-點一下標題就會在 Bluesky 開啟那篇貼文。
+點標題就會在 Bluesky 打開那篇貼文。
 
-- **任何公開帳號都可以。** 不一定要是您自己的帳號。
-- **可以使用多個 Discord 頻道：** 每個追蹤的帳號可以發到自己的頻道，或發到您的預設頻道。
-- **不會公告舊貼文。** 新增帳號時，機器人只會記下它現有的貼文而不發送，所以您的頻道不會被洗版。
-- **在您自己的電腦上執行。** 您的密碼和設定都不會離開這台電腦，只有公告會送到 Discord。
+- **任何公開帳號都可以**，不一定要是你自己的。
+- **可以用好幾個 Discord 頻道：** 每個帳號可以通知到自己的頻道，也可以用你的預設頻道。
+- **不會一次洗出一堆舊貼文。** 新增帳號時會略過它原本的貼文，之後只通知新貼文。
+- **在你自己的電腦上執行。** 密碼和設定都留在你的電腦裡，只有通知會送到 Discord。
 
 ---
 
-## 需要準備的東西
+## 開始前要準備
 
-- 一台 Windows 10 或 Windows 11（64 位元）電腦，在您想收到公告的期間保持開機。
-- **Docker Desktop**。下一節會說明如何安裝。Docker Desktop 是 Docker, Inc. 的產品，有它自己的授權條款：個人使用、教育用途、非商業開源專案，以及小型企業（員工少於 250 人**而且**年營收少於 1,000 萬美元）可以免費使用。規模較大的組織和政府機關需要購買 Docker 的付費訂閱。詳見 [Docker 的授權條款](https://docs.docker.com/subscription/desktop-license/)。這個機器人本身則是所有人都可以免費使用（見[授權](#授權)）。
-- 一個您自己的 **Bluesky 帳號**。機器人會用它登入來讀取貼文。
-- 一個您可以管理頻道的 **Discord 伺服器**。
+- 一台 Windows 10 或 11（64 位元）電腦，想收通知的時候要保持開機。
+- **Docker Desktop。** 安裝方式請看下一節。Docker Desktop 有自己的授權條款，公司或組織使用的話，請先確認是否符合免費使用的資格（[Docker 授權條款](https://docs.docker.com/subscription/desktop-license/)）。
+- 你自己的 **Bluesky 帳號**。機器人會用它登入來讀取貼文。
+- 一個你能管理頻道的 **Discord 伺服器**。
 
-您不需要 Python、Node.js、Git 或任何其他工具，也完全不需要輸入指令。
+不需要 Python、Git 或其他任何工具，也完全不用打指令。
 
 ---
 
 ## 第 1 步：安裝 Docker Desktop
 
-Docker Desktop 是機器人在裡面執行的程式。只需要安裝一次。
+Docker Desktop 是讓機器人執行的程式，只要裝一次。
 
-1. 前往 **https://www.docker.com/products/docker-desktop/**，下載 **Docker Desktop for Windows**。
-2. 開啟下載的檔案，依照安裝程式的步驟進行。請保持勾選 **"Use WSL 2"**（使用 WSL 2）。
+1. 到 **https://www.docker.com/products/docker-desktop/** 下載 **Docker Desktop for Windows**。
+2. 執行安裝程式，**"Use WSL 2"** 保持勾選。
 3. 安裝程式要求時，**重新開機**。
-4. 從「開始」功能表開啟 **Docker Desktop**。詢問時請接受條款。可以跳過登入，不需要登入。
-5. 等到左下角顯示 **"Engine running"**（引擎執行中）。
-6. 開啟 Docker Desktop 的 **Settings**（齒輪圖示），確認已勾選 **"Start Docker Desktop when you sign in to your computer"**（登入電腦時啟動 Docker Desktop）。這樣電腦重新開機後，機器人會自動恢復執行。
+4. 從「開始」功能表打開 **Docker Desktop**，同意使用條款。登入可以跳過。
+5. 等左下角出現 **"Engine running"**（引擎執行中）。
+6. 打開 Docker Desktop 的 **Settings**（齒輪圖示），勾選 **"Start Docker Desktop when you sign in to your computer"**（登入電腦時自動啟動）。這樣電腦重開後，機器人會自己恢復運作。
 
-> **如果 Docker Desktop 說需要安裝或更新 "WSL"，** 請讓它自動處理，或依照它顯示的連結操作，然後重新開機。
-> **如果它說虛擬化（virtualization）已關閉，** 需要到電腦的 BIOS/UEFI 設定裡開啟。可以用您的電腦型號加上「開啟虛擬化」上網搜尋，或請熟悉您電腦的人幫忙。
-
----
-
-## 第 2 步：安裝機器人
-
-1. 把機器人的資料夾放在固定的位置，例如**文件**資料夾。（如果您下載的是 `.zip` 檔，請先在檔案上按右鍵，選擇**全部解壓縮**。）
-   - **解壓縮下載的 `.zip` 之前：** 在檔案上按右鍵，選擇**內容**，如果有**解除封鎖**的選項就勾選它，再按**確定**。Windows 會標記從網路下載的檔案，不這樣做的話，執行每個指令檔時都可能跳出警告。
-   - 如果 Windows 仍然顯示 **「Windows 已保護您的電腦」**，請選擇**其他資訊 → 仍要執行**。這些指令檔都是純文字檔，您可以用記事本開啟，看看它們做了什麼。
-2. 按兩下 **`setup.bat`**。
-   - 第一次會花幾分鐘：它會在 Docker Desktop 裡準備好機器人。
-   - 如果您在同一個資料夾用過這個機器人的**舊版本**，安裝程式會詢問是否要把帳號和設定搬過來。請回答 **Y**。舊檔案只會被讀取，不會被修改。
-   - 準備好之後，控制面板會在瀏覽器中開啟，網址是 **http://127.0.0.1:8000**。
-
-之後可以關閉黑色視窗。機器人會在 Docker Desktop 裡繼續執行。
+> **Docker Desktop 要求安裝或更新「WSL」：** 照著做就好，完成後重新開機。
+> **出現虛擬化（virtualization）沒有開啟的訊息：** 要到電腦的 BIOS/UEFI 設定裡開啟。可以用「電腦型號 + 開啟虛擬化」上網搜尋，或請熟悉電腦的人幫忙。
 
 ---
 
-## 第 3 步：在控制面板中設定
+## 第 2 步：下載並安裝機器人
 
-第一次使用時，控制面板會帶您完成四個步驟。
+1. 到[最新版本頁面](https://github.com/qazwsx08ghj/bluesky-discord-alert-bot/releases/latest)下載 **`BlueskyDiscordAlertBot-stable.zip`**。
+2. **解壓縮之前：** 在 zip 檔上按右鍵 →「內容」，如果看到「解除封鎖」就勾選，再按「確定」。不然執行每個指令檔時，Windows 都可能跳出警告。
+3. 在 zip 檔上按右鍵 →「全部解壓縮」，把資料夾放在不會移動的地方，例如「文件」。
+4. 點兩下 **`setup.bat`**。
+   - 如果 Windows 顯示 **「Windows 已保護您的電腦」**，請按「其他資訊」→「仍要執行」。這些指令檔都是純文字檔，可以用記事本打開來看。
+   - 第一次會花幾分鐘。
+   - 準備好之後，瀏覽器會自動打開控制面板：**http://127.0.0.1:8000**。
 
-![設定](docs/screenshots/01-setup.png)
+之後黑色視窗可以直接關掉，機器人會在 Docker Desktop 裡繼續運作。
 
-### 1. 連結您的 Bluesky 登入資訊（應用程式密碼）
+---
 
-> **這是您自己的 Bluesky 登入資訊，不是您想追蹤的帳號。** Bluesky 只允許已登入的應用程式讀取貼文，即使是公開貼文也一樣。可以把它想成借書證：借書證是您的，但您可以讀任何一本書。
+## 第 3 步：在控制面板完成設定
 
-請使用**應用程式密碼（App Password）**，不要用您真正的密碼。這樣比較安全，而且您隨時可以刪除它來切斷機器人的存取。
+第一次使用時，控制面板會帶你完成四個步驟。
 
-1. 在 **bsky.app** 登入。
-2. 開啟**設定 → 隱私與安全 → 應用程式密碼**。
-3. 選擇**新增應用程式密碼**，命名為 `discord-bot`，然後複製它顯示的密碼（格式類似 `xxxx-xxxx-xxxx-xxxx`）。之後就看不到這組密碼了。
-4. 在控制面板輸入您的 Bluesky 帳號名稱（例如 `yourname.bsky.social`），貼上應用程式密碼，然後按 **Test and continue**（測試並繼續）。機器人會先確認能登入才儲存。
+![設定步驟](docs/screenshots/01-setup.png)
+
+### 1. 連結你的 Bluesky 登入（應用程式密碼）
+
+> **這裡要填的是你自己的 Bluesky 帳號，不是你想追蹤的帳號。** Bluesky 規定程式要登入才能讀取貼文，就算是公開貼文也一樣。可以想成借書證：證是你的，但什麼書都能借。
+
+請使用**應用程式密碼（App Password）**，不要用你真正的密碼。這樣比較安全，而且隨時刪掉它就能停止機器人的存取。
+
+1. 到 **bsky.app** 登入。
+2. 打開「設定」→「隱私與安全」→「應用程式密碼」（Settings → Privacy and Security → App Passwords）。
+3. 選「新增應用程式密碼」，名稱取 `discord-bot`，然後複製畫面上的密碼（格式像 `xxxx-xxxx-xxxx-xxxx`）。這組密碼之後不會再顯示。
+4. 在控制面板輸入你的 Bluesky 帳號名稱（例如 `yourname.bsky.social`），貼上應用程式密碼，按 **Test and continue**（測試並繼續）。
 
 ### 2. 選擇 Discord 頻道（Webhook 網址）
 
-Webhook 網址是 Discord 提供的特殊連結，讓機器人可以在某一個頻道發文。
+Webhook 網址是 Discord 提供的連結，機器人可以透過它在某個頻道發訊息。
 
-1. 在 Discord 中，把滑鼠移到要發公告的頻道上，點它的**齒輪圖示**（編輯頻道）。
-2. 開啟**整合 → Webhook → 新 Webhook**。
-3. 命名為 `Bluesky Bot`（這是在 Discord 顯示的發送者名稱），然後選擇**複製 Webhook 網址**。
-4. 在控制面板為這個頻道取個名字，並貼上網址。請保密這個網址：任何拿到它的人都能在那個頻道發文。
+1. 在 Discord 把滑鼠移到要收通知的頻道上，點**齒輪圖示**（編輯頻道）。
+2. 打開「整合」→「Webhook」→「新 Webhook」。
+3. 名稱取 `Bluesky Bot`（這會是 Discord 上顯示的發送者名稱），然後選「複製 Webhook 網址」。
+4. 在控制面板幫這個頻道取個名字，再貼上網址。**網址請不要外流：** 拿到網址的人都能在那個頻道發訊息。
 
 ### 3. 發送測試訊息
 
-按 **Send test message**（發送測試訊息），然後查看您的 Discord 頻道。如果沒有收到，控制面板會告訴您該檢查什麼。
+按 **Send test message**（發送測試訊息），然後到 Discord 頻道看看有沒有收到。沒收到的話，控制面板會告訴你要檢查哪裡。
 
 ### 4. 新增第一個帳號
 
-輸入任何公開 Bluesky 帳號的名稱。控制面板會先查詢並顯示個人檔案，讓您確認後再新增。第一次檢查會立刻執行，但只會記下現有的貼文，所以**在那個帳號發新貼文之前，Discord 不會出現任何訊息。**
+輸入任一公開 Bluesky 帳號的名稱，控制面板會先顯示對方的個人檔案讓你確認。**在那個帳號發新貼文之前，Discord 不會收到任何通知。**
 
 ---
 
@@ -116,94 +116,94 @@ Webhook 網址是 Discord 提供的特殊連結，讓機器人可以在某一個
 
 所有操作都在控制面板 **http://127.0.0.1:8000** 進行（建議加入書籤）。
 
-| 頁面 | 可以做的事 |
+| 頁面 | 可以做什麼 |
 |---|---|
-| **Accounts**（帳號） | 查看機器人是否在執行、新增帳號、**Check now**（立即檢查）、**Pause / Resume**（暫停／繼續）、編輯或移除帳號、**Check all now**（全部立即檢查） |
-| **Activity**（活動） | 機器人發送的所有內容，以及遇到的問題和處理方法 |
-| **Settings**（設定） | 您的 Bluesky 登入資訊、Discord 頻道（新增、測試、變更預設頻道）、檢查頻率、淺色或深色外觀 |
+| **Accounts**（帳號） | 看機器人有沒有在運作；新增、編輯、暫停或移除帳號；**Check now**（立即檢查）或 **Check all now**（全部立即檢查） |
+| **Activity**（活動紀錄） | 機器人送出的所有通知，以及遇到的問題和處理方法 |
+| **Settings**（設定） | Bluesky 登入、Discord 頻道、檢查頻率、淺色或深色外觀 |
 
-側邊欄底部的狀態會顯示機器人是否在執行，點一下可以看詳細資訊。如果有需要您處理的事情，會出現一條彩色橫幅說明狀況並提供解決方法。
+側邊欄最下面會顯示機器人有沒有在運作。如果有事情需要你處理，畫面上會出現一條彩色提示，說明狀況並提供解決方法。
 
 ### 機器人資料夾裡的檔案
 
-| 按兩下 | 用途 |
+| 點兩下 | 用途 |
 |---|---|
-| `start.bat` | 啟動機器人（如果還沒在執行），並開啟控制面板 |
-| `stop.bat` | 停止機器人，不會刪除任何東西。在執行 `start.bat` 之前會保持停止。 |
-| `update.bat` | 安裝新版本。會先備份，您的帳號和設定都會保留。 |
-| `backup.bat` | 把備份存到 `backups` 資料夾 |
-| `restore.bat` | 還原備份。它會列出備份（最新的在最前面），並在還原前先備份目前的資料。 |
-| `setup.bat` | 第一次安裝（重複執行也是安全的） |
+| `start.bat` | 啟動機器人（如果還沒啟動），並打開控制面板 |
+| `stop.bat` | 停止機器人，直到你再執行 `start.bat`。不會刪除任何東西。 |
+| `update.bat` | 更新到最新版本。會先備份，帳號和設定都會保留。 |
+| `backup.bat` | 備份到 `backups` 資料夾 |
+| `restore.bat` | 還原備份（會先把目前的資料備份起來） |
+| `setup.bat` | 第一次安裝（重複執行也沒關係） |
 
-**Docker Desktop 執行時，機器人才會執行。** 關閉 Docker Desktop 或關機會暫停公告；Docker Desktop 恢復後會自動重新開始。期間發的貼文會在下一次檢查時公告。
+**Docker Desktop 有在執行，機器人才會運作。** Docker Desktop 關掉或電腦關機時，通知會暫停；等 Docker Desktop 再次啟動，就會自動恢復。
 
 ---
 
-## 備份與您的資料
+## 備份與資料
 
-- 您的帳號、設定和紀錄都儲存在這台電腦的 **Docker Desktop 裡**。更新、重新啟動或重新執行安裝都不會刪除它們。
-- 每次更新和每次資料庫變更之前，都會**自動備份**。
-- **`backup.bat`** 可以隨時手動備份。備份會存在指令檔旁邊的 **`backups`** 資料夾。
-- **備份裡含有您的應用程式密碼和 Webhook 網址。** 請保密這個資料夾，不要分享給別人。
-- **要還原備份，** 請按兩下 `restore.bat`，然後輸入備份的編號。
+- 帳號、設定和紀錄都存在這台電腦的 **Docker Desktop 裡**。更新、重開或重新執行安裝都不會刪掉它們。
+- 每次更新前都會**自動備份**。
+- 想手動備份時，點兩下 **`backup.bat`**，備份會存在指令檔旁邊的 **`backups`** 資料夾。
+- **備份裡有你的應用程式密碼和 Webhook 網址**，請不要分享這個資料夾。
+- **要還原備份**，點兩下 `restore.bat`，輸入備份的編號即可。
 
 ---
 
 ## 疑難排解
 
-每個指令檔都會用淺白的文字說明問題，而且絕不會刪除您的資料。（指令檔的訊息是英文。）
+指令檔會用簡單的文字說明問題（訊息是英文），而且絕對不會刪除你的資料。
 
-**"Docker Desktop isn't installed" 或 "isn't running yet"（尚未安裝或尚未執行）**
-→ 安裝或開啟 Docker Desktop（第 1 步），等到顯示 "Engine running"。指令檔會嘗試幫您啟動它。
+**"Docker Desktop isn't installed" 或 "isn't running yet"（沒有安裝或還沒啟動）**
+→ 安裝或打開 Docker Desktop（第 1 步），等到出現 "Engine running"。指令檔也會試著幫你啟動。
 
-**"Docker Desktop is open, but it isn't responding"（已開啟但沒有回應）**
-→ 回答 **Y**，指令檔會幫您重新啟動 Docker Desktop。如果一直發生，請重新開機，並安裝 Docker Desktop 的更新。
+**"Docker Desktop is open, but it isn't responding"（已打開但沒有回應）**
+→ 回答 **Y**，指令檔會幫你重新啟動 Docker Desktop。如果一直發生，請重新開機，並安裝 Docker Desktop 的更新。
 
-**"Another program is already using port 8000"（8000 連接埠已被其他程式使用）**
-→ 如果有舊版機器人在黑色視窗中執行，請關閉它（同時執行兩份會讓每篇貼文都公告兩次）。否則，用記事本開啟 `docker\compose.env`，把 `ALERTBOT_PORT=8000` 改成其他數字，例如 `8080`，然後改用 `http://127.0.0.1:8080`。
+**"Another program is already using port 8000"（8000 連接埠被其他程式占用）**
+→ 如果舊版機器人還開在黑色視窗裡，請把它關掉（兩個同時執行，每篇貼文都會通知兩次）。如果不是，用記事本打開 `docker\compose.env`，把 `ALERTBOT_PORT=8000` 改成別的數字，例如 `8080`，之後改用 `http://127.0.0.1:8080`。
 
-**控制面板顯示 "Can't reach the bot"（無法連線到機器人）**
-→ 開啟 Docker Desktop，然後按兩下 `start.bat`。頁面會自動重新連線。
+**控制面板顯示 "Can't reach the bot"（連不到機器人）**
+→ 打開 Docker Desktop，再點兩下 `start.bat`，頁面會自己重新連線。
 
-**新增帳號後 Discord 沒有出現任何訊息**
-→ 這是正常的：第一次檢查只會記下現有的貼文。那個帳號的下一篇新貼文就會被公告。
+**新增帳號後，Discord 沒有收到任何通知**
+→ 這是正常的：原本的貼文會被略過，等那個帳號發下一篇新貼文就會通知。
 
 **"Bluesky didn't accept the login"（Bluesky 不接受登入）**
-→ 應用程式密碼已被刪除或輸入錯誤。請建立一組新的（第 3 步之 1），並貼到 **Settings → Bluesky login**（設定 → Bluesky 登入）。
+→ 應用程式密碼被刪掉或打錯了。請重新建立一組（第 3 步的 1），貼到 **Settings → Bluesky login**（設定 → Bluesky 登入）。
 
-**Discord 沒有收到測試訊息**
-→ Webhook 可能已在 Discord 中被刪除。請建立新的 Webhook（第 3 步之 2），並把網址貼到 **Settings → Discord channels → Edit**（設定 → Discord 頻道 → 編輯）。
+**Discord 沒收到測試訊息**
+→ 這個 Webhook 可能已經在 Discord 被刪除。請重新建立一個（第 3 步的 2），把網址貼到 **Settings → Discord channels → Edit**（設定 → Discord 頻道 → 編輯）。
 
 **其他問題**
-→ 指令檔會把報告存在 `logs\problem-report.txt`（密碼和 Webhook 連結會被隱藏）。尋求協助時請分享這個檔案。
+→ 指令檔會把報告存在 `logs\problem-report.txt`（密碼和 Webhook 連結都已隱藏），尋求協助時可以附上這個檔案。各版本的變更請看 [CHANGELOG.md](CHANGELOG.md)（英文）。
 
 ---
 
-## 從舊版本（黑色視窗版）升級
+## 從舊版（黑色視窗版）升級
 
-1. 關閉舊版機器人的黑色視窗。
+1. 關掉舊版機器人的黑色視窗。
 2. 安裝 Docker Desktop（第 1 步）。
-3. 在同一個資料夾按兩下 `setup.bat`，當它詢問是否要把帳號和設定搬過來時，回答 **Y**。
+3. 把新版檔案放進**同一個資料夾**，點兩下 `setup.bat`，詢問要不要搬移帳號和設定時回答 **Y**。
 
-您舊的 `db.sqlite3` 和 `.env` 檔案只會被讀取。搬移之後，可以把它們留作備用，但請不要再啟動舊版本，否則每篇貼文都會被公告兩次。舊的指令檔在 `dev` 資料夾中，供開發者使用。
+舊的檔案只會被讀取，不會被修改。之後請不要再啟動舊版，不然每篇貼文都會通知兩次。
 
 ---
 
-## 更多資訊
+## 給開發者
 
-以下文件目前只有英文版：
+想修改機器人、執行測試或參與開發，請先看 [CONTRIBUTING.zh-TW.md](CONTRIBUTING.zh-TW.md)。裡面說明了專案結構、如何分開開發控制面板或後端，也有技術文件的連結（以下文件只有英文版）：
 
-- [docs/DOCKER.md](docs/DOCKER.md)：Docker 版本的運作方式、更新、備份、還原和發行。
-- [docs/FRONTEND.md](docs/FRONTEND.md)：控制面板（開發者用）。
-- [docs/API.md](docs/API.md)：機器人的 API（開發者用）。
-- [CONTRIBUTING.zh-TW.md](CONTRIBUTING.zh-TW.md)：開發者指南（繁體中文）：專案結構、分開開發控制面板或後端、API 規格（`docs/openapi.yaml`）、測試和 CI。
-- [CHANGELOG.md](CHANGELOG.md)：每個版本的變更內容。
-- [SECURITY.md](SECURITY.md)：如何私下回報安全問題。
+- [docs/BACKEND.md](docs/BACKEND.md)：Django 後端與檢查程式
+- [docs/FRONTEND.md](docs/FRONTEND.md)：React 控制面板
+- [docs/API.md](docs/API.md) 和 [docs/openapi.yaml](docs/openapi.yaml)：API
+- [docs/DOCKER.md](docs/DOCKER.md)：Docker 版本的運作方式，以及如何發行新版本
+
+發現安全性問題時，請依照 [SECURITY.md](SECURITY.md) 私下回報，不要開公開的 issue。
 
 ## 授權
 
-這個機器人是採用 [MIT 授權](LICENSE)的免費開源軟體。您可以使用、複製、修改和分享它，包括商業用途，只要保留著作權聲明和授權聲明即可。本軟體不提供任何擔保。
+這個機器人是採用 [MIT 授權](LICENSE)的免費開源軟體。它也包含其他開源軟體，這些軟體各有自己的授權：請看 [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt)，控制面板裡也有連結（Settings → About this bot）。
 
-它使用了其他開源軟體，這些軟體保有各自的授權：請見 [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt)，控制面板中也有連結（Settings → About this bot）。本專案與 Bluesky 和 Discord 沒有任何關係。
+Docker Desktop 是 Docker, Inc. 的另一項產品，有[自己的授權條款](https://docs.docker.com/subscription/desktop-license/)。本專案與 Bluesky、Discord 及 Docker 都沒有關係。
 
-> 授權的正式文字以英文的 [LICENSE](LICENSE) 檔案為準；中文說明僅供參考。
+> 授權以英文的 [LICENSE](LICENSE) 原文為準，中文說明僅供參考。
