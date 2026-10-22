@@ -45,5 +45,5 @@ The first public release. Compared with the earlier "black-window" version, the 
 - App Passwords and webhook URLs are never shown in full in the panel, its API, logs or problem reports.
 - Django 5.2 LTS. No known vulnerabilities in the shipped Python and npm packages at release.
 
-[Unreleased]: https://github.com/OWNER/REPOSITORY/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/OWNER/REPOSITORY/releases/tag/v1.0.0
+[Unreleased]: https://github.com/qazwsx08ghj/bluesky-discord-alert-bot/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/qazwsx08ghj/bluesky-discord-alert-bot/releases/tag/v1.0.0
