@@ -7,7 +7,7 @@ from .health import health
 from .security import csrf_token
 
 urlpatterns = [
-    # The React control panel (step 9): one page for every panel address; the browser shows the right screen.
+    # The React control panel: one page for every panel address; the browser shows the right screen.
     path("", frontend.app, name="index"),
     re_path(r"^(?:setup|accounts|activity|settings)/?$", frontend.app, name="panel"),
     path("assets/<str:name>", frontend.asset, name="panel-asset"),

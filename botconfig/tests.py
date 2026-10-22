@@ -1,7 +1,7 @@
 """Settings in the database: the one-time import from an earlier install's .env, saving,
 the management commands, backups and secret handling.
 
-Since step 10 nothing writes .env any more (it was copied there for rollbacks before).
+Nothing writes .env (older versions copied settings there for rollbacks).
 """
 import logging
 import tempfile
@@ -137,7 +137,7 @@ class SaveTests(LogCapture, TestCase):
         self.assert_no_secrets(logs.getvalue())
 
     def test_saving_never_writes_any_file(self):
-        """Step 10: no .env copy. Saving and starting touch only the database."""
+        """No .env copy. Saving and starting touch only the database."""
         store.get()
         with mock.patch("builtins.open", side_effect=AssertionError("a file was opened")), \
                 mock.patch("pathlib.Path.write_text", side_effect=AssertionError("a file was written")), \

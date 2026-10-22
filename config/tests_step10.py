@@ -1,4 +1,4 @@
-"""Step 10: the legacy copies are removed without losing any destination or setting.
+"""Removing the legacy copies loses no destination or setting.
 
 - The two migrations that drop the rollback columns keep every route, also for data that
   older code wrote after a rollback, and can be undone.
@@ -47,9 +47,9 @@ class LegacyColumnMigrationTests(TransactionTestCase):
         Account = old.get_model("bluesky_monitor", "MonitoredAccount")
         Settings = old.get_model("botconfig", "BotSettings")
         art = Webhook.objects.create(name="art", url=B)
-        # Normal step 9 data: the account has a channel, and the column mirrors it.
+        # Normal data from the previous version: the account has a channel, and the column mirrors it.
         Account.objects.create(handle="normal.bsky.social", channel=art, discord_webhook_url=B)
-        # Written by step 3 code after a rollback: only the URL, no channel.
+        # Written by much older code after a rollback: only the URL, no channel.
         Account.objects.create(handle="old-own.bsky.social", discord_webhook_url=C)
         Account.objects.create(handle="old-shared.bsky.social", discord_webhook_url=B)
         Account.objects.create(handle="follower.bsky.social", discord_webhook_url="")

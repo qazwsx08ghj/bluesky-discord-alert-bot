@@ -14,7 +14,7 @@ The same code runs as two processes. In Docker, they are the two services in `do
 They share one SQLite database (WAL mode, `bluesky_monitor/db.py`). Coordination goes through the database:
 - **the scheduler lease** (`SchedulerState`): one checker at a time;
 - **per-account locks** (`bluesky_monitor/locks.py`): a scheduled check and Check now never check the same account at once;
-- **post claims:** every post is recorded once per account in `SeenPost`, unique on (account, post), before it is sent. A post is never announced twice, even across processes and restarts.
+- **post claims:** every post is recorded once per account in `SeenPost`, unique on (account, post), before it is sent. A post is never sent twice, even across processes and restarts.
 
 Without Docker (`dev\start-without-docker.bat`), `manage.py runserver` starts the checker inside the web process (`bluesky_monitor/apps.py`). Docker sets `SCHEDULER_IN_WEB=0`, so the web service never starts one.
 

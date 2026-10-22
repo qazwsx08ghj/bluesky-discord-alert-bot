@@ -1,4 +1,4 @@
-"""Step 5: activity log and status.
+"""Activity log and status.
 
 Covers status accuracy (every state, from the checker's own records), scheduler failures,
 events written by checks and deliveries, pagination and filters, retention (and that it

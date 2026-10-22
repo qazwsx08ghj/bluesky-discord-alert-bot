@@ -33,7 +33,7 @@ class MonitoredAccount(models.Model):
     last_check_ok = models.BooleanField(null=True, blank=True)
     last_check_category = models.CharField(max_length=32, null=True, blank=True)  # activity.problems code
 
-    # Step 6. Everything below is nullable for the same reason.
+    # Everything below is nullable for the same reason (rows from older versions).
     # What gets announced. Changing it only affects posts noticed afterwards.
     announce_posts = models.BooleanField(null=True, default=True)
     announce_reposts = models.BooleanField(null=True, default=True)
@@ -85,7 +85,7 @@ class SeenPost(models.Model):
     next_attempt_at = models.DateTimeField(null=True, blank=True)
     sent_at = models.DateTimeField(null=True, blank=True)
     last_error = models.CharField(max_length=500, blank=True)
-    # post, repost or reply. Null for posts noted before step 6.
+    # post, repost or reply. Null for posts noted by older versions.
     kind = models.CharField(max_length=10, choices=KIND_CHOICES, null=True, blank=True)
 
     class Meta:

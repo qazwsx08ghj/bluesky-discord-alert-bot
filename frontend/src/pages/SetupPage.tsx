@@ -104,13 +104,13 @@ export function SetupPage() {
             <LoginForm key={settings.data?.settings_version ?? 0} settings={settings.data} mode="setup" onSaved={finishStep} />
           )}
         </Step>
-        <Step n={2} title="Choose a Discord channel" sub="Where announcements go" done={setup.channel} open={current === 2} onChange={() => setReopened(2)}>
+        <Step n={2} title="Choose a Discord channel" sub="Where notifications go" done={setup.channel} open={current === 2} onChange={() => setReopened(2)}>
           <p className="why">Discord gives each channel a webhook URL that lets the bot post there. You only need one to start; you can add more later in Settings.</p>
           <FirstChannelForm existing={defaultChannel} onSaved={finishStep} />
         </Step>
         <Step n={3} title="Send a test message" sub="Check that Discord receives it" done={setup.tested} open={current === 3} onChange={() => setReopened(3)}>
           <p className="why">
-            This posts a sample announcement to {defaultChannel ? <b>#{defaultChannel.name}</b> : "your channel"} so you can see what alerts look like.
+            This posts a sample notification to {defaultChannel ? <b>#{defaultChannel.name}</b> : "your channel"} so you can see what they look like.
           </p>
           <div aria-live="polite" style={{ marginBottom: testError ? 12 : 0 }}>
             <FieldError>{testError}</FieldError>
@@ -154,7 +154,7 @@ export function SetupPage() {
             )}
           </div>
         </Step>
-        <Step n={4} title="Add your first account" sub="Pick whose posts to announce" done={setup.account} open={current === 4} onChange={() => setReopened(4)}>
+        <Step n={4} title="Add your first account" sub="Choose whose posts to follow" done={setup.account} open={current === 4} onChange={() => setReopened(4)}>
           <p className="why">Any public Bluesky account works: artists, news, creators. It doesn't have to be yours.</p>
           <div className="actions">
             <Button variant="primary" icon={Plus} onClick={drawer.openAdd}>

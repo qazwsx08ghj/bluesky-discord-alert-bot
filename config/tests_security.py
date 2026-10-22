@@ -1,4 +1,4 @@
-"""Step 7: security (cross-site requests, local-only hosts, JSON only, headers, no admin)
+"""Security (cross-site requests, local-only hosts, JSON only, headers, no admin)
 and the API's error format. Settings tests use a temporary .env, never the real one.
 """
 import json
@@ -244,7 +244,7 @@ class LocalOnlyTests(TestCase):
             self.assertEqual(check_local_only(), [])
 
     def test_start_scripts_listen_on_this_computer_only(self):
-        # Docker (step 8): published on 127.0.0.1 only; without Docker: runserver on 127.0.0.1.
+        # Docker: published on 127.0.0.1 only; without Docker: runserver on 127.0.0.1.
         compose = (settings.BASE_DIR / "docker-compose.yml").read_text(encoding="utf-8")
         self.assertIn('"127.0.0.1:${ALERTBOT_PORT:-8000}:8000"', compose)
         script = (settings.BASE_DIR / "dev" / "start-without-docker.bat").read_text(encoding="utf-8")
@@ -283,7 +283,7 @@ class AdminRemovedTests(TestCase):
         call_command("makemigrations", check=True, dry_run=True, stdout=StringIO())  # exits if changes are missing
 
     def test_old_admin_tables_are_left_alone(self):
-        # Databases from before step 7 still have the admin's log table; it stays and does no harm.
+        # Databases from older versions still have the admin's log table; it stays and does no harm.
         with connection.cursor() as cursor:
             cursor.execute("CREATE TABLE IF NOT EXISTS django_admin_log (id integer PRIMARY KEY, note text)")
             cursor.execute("INSERT INTO django_admin_log (note) VALUES ('kept')")

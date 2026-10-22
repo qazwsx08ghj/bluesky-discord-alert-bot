@@ -1,4 +1,4 @@
-"""Step 9: Django serves the built React control panel (config/frontend.py).
+"""Django serves the built React control panel (config/frontend.py).
 
 Every test uses its own temporary build folder, so the results don't depend on whether
 `npm run build` was run on this machine. The real build is covered by the browser tests

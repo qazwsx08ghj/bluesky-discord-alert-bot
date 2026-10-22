@@ -1,7 +1,7 @@
 # Bluesky -> Discord Alert Bot: one image for both services (web and checker).
 # See docs/DOCKER.md. Built by setup.bat / update.bat, or published as a prebuilt image.
 
-# -- 1. Build the control panel (step 9) ---------------------------------------------------------
+# -- 1. Build the control panel ----------------------------------------------------------------
 # Node.js is used only in this stage; the finished image contains just the built files.
 # The output is the same on every platform, so it is built on the build machine's own one.
 FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS panel

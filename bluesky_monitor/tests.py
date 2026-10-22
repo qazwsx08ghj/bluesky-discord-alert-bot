@@ -190,7 +190,7 @@ class AccountApiTests(APITestCase):
         with mock.patch("bluesky_monitor.views.poll_account", return_value=0) as poll:
             res = self.client.post(f"{self.url}{acc.id}/poll_now/")
         self.assertEqual(res.status_code, 200)
-        # The original fields keep their values; step 6 only adds fields (state, first_check, ...).
+        # The original fields keep their values; the status fields are only added (state, first_check, ...).
         self.assertEqual({k: res.data[k] for k in ("new_posts_announced", "was_first_poll")},
                          {"new_posts_announced": 0, "was_first_poll": True})
         self.assertEqual(res.data["state"], "waiting_first_check")

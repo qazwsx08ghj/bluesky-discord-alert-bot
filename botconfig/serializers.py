@@ -7,7 +7,7 @@ class SettingsUpdateSerializer(serializers.Serializer):
     """Validates a settings change. Every field is optional; omitted fields stay as they are.
 
     A blank password keeps the saved one. Discord channels (also the default one) are
-    managed under /api/webhooks/; the old `discord_webhook_url` field was removed in step 10
+    managed under /api/webhooks/; the old `discord_webhook_url` field no longer exists
     and is refused with a pointer there, instead of being silently ignored.
     """
     bluesky_handle = serializers.CharField(max_length=255, required=False, allow_blank=True, trim_whitespace=True)

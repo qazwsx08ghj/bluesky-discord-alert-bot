@@ -1,6 +1,6 @@
 """"Check all": check every account now, and say what happened to each.
 
-Since step 7 this runs in the background: POST /api/accounts/check_all/ queues a CheckJob
+This runs in the background: POST /api/accounts/check_all/ queues a CheckJob
 and the checker runs it (see jobs.py), which calls run() below.
 
 run() uses poller.check_accounts(), exactly like the scheduled check: the same per-account
@@ -47,14 +47,14 @@ def account_message(report: AccountCheck) -> str:
         return f"Couldn't check: {title}.{sent}"
     if report.first_check:
         return (f"First check done. Noted {_plural(report.new_posts, 'existing post')}; none were sent. "
-                "New posts from now on will be announced.")
+                "You'll get a notification for each new post from now on.")
     if not report.new_posts and not report.posts_sent:
         return "No new posts."
     parts = [f"Found {_plural(report.new_posts, 'new post')}." if report.new_posts else "No new posts."]
     if report.posts_sent:
         parts.append(f"Sent {report.posts_sent} to Discord.")
     if report.turned_off:
-        parts.append(f"{report.turned_off} not announced (that kind of post is switched off for this account).")
+        parts.append(f"{report.turned_off} not sent (notifications for that kind of post are off for this account).")
     if report.no_channel:
         parts.append(f"{report.no_channel} not sent: no Discord channel is chosen.")
     waiting = report.new_posts - report.turned_off - report.no_channel - report.posts_sent

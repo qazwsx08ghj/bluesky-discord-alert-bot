@@ -1,5 +1,5 @@
-"""Step 8: the bot in real Docker containers, driven by the real Windows scripts (and, since
-step 9, the React panel in a real browser against those containers).
+"""The bot in real Docker containers, driven by the real Windows scripts, and the React panel
+in a real browser against those containers.
 
 Opt-in, because it builds an image and starts containers (about 3-5 minutes):
 
@@ -217,7 +217,7 @@ class DockerDeploymentTests(SimpleTestCase):
         self.assertEqual(self.handles(), ["new.bsky.social", "old.bsky.social"])
 
     def test_3b_the_react_panel_is_served_and_works_in_a_browser(self):
-        """Step 9: the image contains the built panel, served by Django with its security headers."""
+        """The image contains the built panel, served by Django with its security headers."""
         with urllib.request.urlopen(self.url + "/accounts", timeout=30) as res:
             html, headers = res.read().decode(), res.headers
         self.assertEqual(headers["X-Alertbot-Panel"], "react")
@@ -229,7 +229,7 @@ class DockerDeploymentTests(SimpleTestCase):
             self.assertIn("immutable", res.headers["Cache-Control"])
         for path in ("/assets/../manage.py", "/assets/db.sqlite3", "/frontend/package.json", "/static/x"):
             self.assertEqual(self.request("GET", path)[0], 404, path)
-        self.assertEqual(self.request("GET", "/classic/")[0], 404, "the old page was removed in step 10")
+        self.assertEqual(self.request("GET", "/classic/")[0], 404, "the old page is gone")
         with urllib.request.urlopen(self.url + "/third-party-notices.txt", timeout=30) as res:
             self.assertEqual(res.headers["Content-Type"], "text/plain; charset=utf-8")
             self.assertEqual(res.read(), (ROOT / "THIRD_PARTY_NOTICES.txt").read_bytes(), "the panel ships the notices")

@@ -1,6 +1,6 @@
 """Named Discord channels: routing, the default channel, and safe deletion.
 
-Routing rule (step 4):
+Routing rule:
     account.channel  if the account has its own channel
     default channel  otherwise (account.channel is null)
 Changing the default therefore moves only accounts that follow the default.

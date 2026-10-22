@@ -37,7 +37,7 @@ export function AccountsPage() {
       <div className="head">
         <div>
           <h1>Accounts</h1>
-          <p>Bluesky accounts the bot watches. Their new posts are announced in Discord.</p>
+          <p>Bluesky accounts the bot watches. You get a Discord notification when they post something new.</p>
         </div>
         <div className="actions">
           {hasAccounts ? <CheckAllButton check={check} /> : null}
@@ -232,7 +232,7 @@ function AccountsTable({ accounts, channels, now, interval }: { accounts: Accoun
     update.mutate(
       { id: account.id, is_active: !account.is_active },
       {
-        onSuccess: () => toast(account.is_active ? `${name} paused. New posts won't be announced until you resume it.` : `${name} resumed.`),
+        onSuccess: () => toast(account.is_active ? `${name} paused. You won't get notifications for its new posts until you resume it.` : `${name} resumed.`),
         onError: (error) => toast(errorMessage(error), "bad"),
       },
     );

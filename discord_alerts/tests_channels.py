@@ -1,4 +1,4 @@
-"""Step 4: named channels.
+"""Named channels.
 
 Migration of existing setups, routing, default changes, safe deletion, editing without
 re-entering URLs, secret handling, and private files never being served.
@@ -221,11 +221,11 @@ class AccountChannelApiTests(NoTokens, APITestCase):
         res = self.client.post(self.url, {"handle": "a.bsky.social"}, format="json")
         self.assertTrue(res.data["uses_default_channel"])
         self.assertIsNone(res.data["channel"])
-        self.assertNotIn("discord_webhook_url", res.data, "removed in step 10")
-        self.assertNotIn("seen_posts", res.data, "removed in step 10; see /posts/")
+        self.assertNotIn("discord_webhook_url", res.data, "no longer part of the API")
+        self.assertNotIn("seen_posts", res.data, "no longer in the list; see /posts/")
 
     def test_the_removed_url_field_is_refused_with_a_pointer(self):
-        """Step 10: accounts pick a channel by channel_id; a webhook URL isn't silently ignored."""
+        """Accounts pick a channel by channel_id; a webhook URL isn't silently ignored."""
         res = self.client.post(self.url, {"handle": "a.bsky.social", "discord_webhook_url": B}, format="json")
         self.assertEqual(res.status_code, 400)
         self.assertIn("channel_id", res.data["discord_webhook_url"][0])

@@ -10,7 +10,7 @@ ANNOUNCE_FIELDS = {"announce_posts": POST, "announce_reposts": REPOST, "announce
 class SeenPostSerializer(serializers.ModelSerializer):
     """A post the bot has noticed (GET /api/accounts/{id}/posts/). `status`: seeded (noted on
     the first check, never sent), pending, sending, retry, sent, failed (gave up), skipped
-    (no channel, or that kind of post isn't announced)."""
+    (no channel, or notifications for that kind of post are off)."""
 
     class Meta:
         model = SeenPost
@@ -31,7 +31,7 @@ class MonitoredAccountSerializer(serializers.ModelSerializer):
     `handle` accepts "@Name.bsky.social", a bsky.app profile link or a DID, and is stored
     cleaned up. A handle that is already watched is refused with code `already_watched`.
 
-    Step 10 removed `discord_webhook_url` (use `channel_id` / `channel`) and the nested
+    Older versions had `discord_webhook_url` (now `channel_id` / `channel`) and the nested
     `seen_posts` list (use GET /api/accounts/{id}/posts/, which is paged).
     """
     announce_posts = serializers.BooleanField(required=False)

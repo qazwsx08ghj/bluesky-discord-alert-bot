@@ -3,7 +3,7 @@ from django.db.models import Q
 
 
 class DiscordWebhook(models.Model):
-    """A named Discord channel (one webhook). Since step 4, the only place announcements go.
+    """A named Discord channel (one webhook). The only place notifications go.
 
     One channel may be the default. Watched accounts either name a channel explicitly or
     follow the default (MonitoredAccount.channel is null). The URL is a secret: it is never

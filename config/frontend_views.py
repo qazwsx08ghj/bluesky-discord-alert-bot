@@ -28,7 +28,7 @@ def _settings_response(row):
         "poll_interval_minutes": row.poll_interval_minutes,
         "settings_version": row.version,
         "updated_at": row.updated_at,
-        # Step 6: whether the saved login works, as the checker last saw it
+        # Whether the saved login works, as the checker last saw it
         # (ok, failed, rate_limited, not_configured, or unknown = not tried yet). Same as /api/status/.
         "bluesky_login": bot_status.bluesky_login(timezone.now()),
     }

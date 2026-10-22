@@ -25,7 +25,7 @@ The first public release. Compared with the earlier "black-window" version, the 
   - light and dark themes.
 - **Several named Discord channels,** a default channel, and a test message for each.
 - **Bluesky profile lookup** when adding an account, and a login test before the login is saved.
-- **Per-account choice** of announcing posts, reposts and replies.
+- **Per-account choice** of notifications for posts, reposts and replies.
 - **Plain-language status and problems,** each with what to do about it.
 - **Automatic backups** before every update and every database change; `restore.bat` to go back, which backs up the current data first.
 - **Moving from the earlier version:** `setup.bat` brings over its accounts and settings, and only reads the old files.

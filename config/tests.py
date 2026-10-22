@@ -32,7 +32,7 @@ class SettingsApiTests(APITestCase):
         self.assertNotIn("secret", str(res.data))
         self.assertNotIn("token", str(res.data))
         for removed in ("discord_webhook_url", "has_discord_webhook_url", "env_file_in_sync"):
-            self.assertNotIn(removed, res.data, "removed in step 10")
+            self.assertNotIn(removed, res.data, "removed: no longer part of the API")
 
     def test_post_saves_every_field(self):
         res = self.client.post(self.url, {"bluesky_handle": "new.bsky.social", "bluesky_password": "pw",
@@ -61,7 +61,7 @@ class SettingsApiTests(APITestCase):
 
 class RemovedRoutesTests(APITestCase):
     def test_the_old_test_message_route_is_gone(self):
-        """Step 10: use POST /api/webhooks/{id}/test/ instead."""
+        """Removed: use POST /api/webhooks/{id}/test/ instead."""
         res = self.client.post("/api/settings/test-discord/", {}, format="json")
         self.assertEqual(res.status_code, 404)
         self.assertEqual(res.json()["code"], "not_found")

@@ -75,7 +75,7 @@ export interface paths {
         /**
          * Posts noticed for an account, newest first
          * @description GET /api/accounts/{id}/posts/ — the posts noticed for this account, newest first,
-         *     20 per page (?page=2). Replaces the nested `seen_posts` list removed in step 10.
+         *     20 per page (?page=2). Replaces the nested `seen_posts` list that older versions returned.
          */
         get: operations["accounts_posts_list"];
         put?: never;
@@ -343,7 +343,7 @@ export interface paths {
         };
         /**
          * Discord channels
-         * @description Named Discord channels. Routes are unchanged from before step 4.
+         * @description Named Discord channels (webhooks).
          *
          *     DELETE refuses (409) while accounts use the channel or it is the default, unless
          *     `?reassign_to=<channel id>` or `?reassign_to=default` says where they should go.
@@ -352,7 +352,7 @@ export interface paths {
         put?: never;
         /**
          * Add a channel
-         * @description Named Discord channels. Routes are unchanged from before step 4.
+         * @description Named Discord channels (webhooks).
          *
          *     DELETE refuses (409) while accounts use the channel or it is the default, unless
          *     `?reassign_to=<channel id>` or `?reassign_to=default` says where they should go.
@@ -373,7 +373,7 @@ export interface paths {
         };
         /**
          * One channel
-         * @description Named Discord channels. Routes are unchanged from before step 4.
+         * @description Named Discord channels (webhooks).
          *
          *     DELETE refuses (409) while accounts use the channel or it is the default, unless
          *     `?reassign_to=<channel id>` or `?reassign_to=default` says where they should go.
@@ -387,7 +387,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a channel
-         * @description Named Discord channels. Routes are unchanged from before step 4.
+         * @description Named Discord channels (webhooks).
          *
          *     DELETE refuses (409) while accounts use the channel or it is the default, unless
          *     `?reassign_to=<channel id>` or `?reassign_to=default` says where they should go.
@@ -970,7 +970,7 @@ export interface components {
         /**
          * @description A post the bot has noticed (GET /api/accounts/{id}/posts/). `status`: seeded (noted on
          *     the first check, never sent), pending, sending, retry, sent, failed (gave up), skipped
-         *     (no channel, or that kind of post isn't announced).
+         *     (no channel, or notifications for that kind of post are off).
          */
         Post: {
             /** Format: int64 */

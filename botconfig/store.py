@@ -13,7 +13,7 @@ Rules:
    either change.
 4. Secret values (password, webhook URL) are never logged or returned. Logs name keys only.
 
-Until step 10 the saved settings were also copied back into .env, and the default webhook
+Older versions also copied the saved settings back into .env, and the default webhook
 URL into this row, so older versions could run after a rollback. Both copies are gone; a
 rollback now means restoring a backup (docs/DOCKER.md).
 """
