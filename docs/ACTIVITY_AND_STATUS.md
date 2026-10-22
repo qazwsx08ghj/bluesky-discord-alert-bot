@@ -38,7 +38,7 @@ Every failure has one category code with a plain-language `title`, an `explanati
 | Area | Categories |
 |---|---|
 | Bluesky | `bluesky_not_configured`, `bluesky_login_rejected`, `bluesky_rate_limited`, `bluesky_unavailable`, `account_not_found`, `bluesky_error` |
-| Discord | `discord_webhook_invalid` (HTTP 401/403/404), `discord_rate_limited` (429), `discord_unavailable` (network errors, 5xx), `discord_error`, `discord_test_failed`, `send_expired`, `no_channel` |
+| Discord | `discord_webhook_invalid` (HTTP 401/403/404), `discord_rate_limited` (429), `discord_unavailable` (network errors, 5xx), `discord_error`, `discord_test_failed`, `send_expired`, `no_channel`, `mention_refused` (sent without the role mention: the Role ID is the server's own ID, or the server couldn't be confirmed) |
 | Checker | `scheduler_not_started`, `scheduler_stopped`, `scheduler_stalled`, `internal` |
 
 The technical cause (exception type and message, HTTP status, Discord's reply) is stored separately in `technical`. It is shown only by `GET /api/activity/{id}/`, for troubleshooting.
@@ -61,7 +61,7 @@ The technical cause (exception type and message, HTTP status, Discord's reply) i
 - **The log is read-only.**
 
 Event types:
-- **Sending:** `post_sent`, `send_failed` (will retry), `send_gave_up`, `post_not_sent` (no channel).
+- **Sending** (one entry per channel): `post_sent`, `send_failed` (will retry), `send_gave_up`, `post_not_sent` (no channel), `mention_not_sent` (sent, but without the role mention).
 - **Checking:** `check_failed`, `check_recovered`, `first_check_done` (with the number of posts noted).
 - **Login and checker:** `login_failed`, `login_recovered`, `cycle_failed`, `checker_started`, `checker_stopped`.
 - **Changes from the panel:** `account_added`, `account_removed`, `channel_test_sent`, `channel_test_failed`.

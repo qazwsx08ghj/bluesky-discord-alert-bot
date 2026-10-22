@@ -51,7 +51,8 @@ test.describe("every day", () => {
     await expect(page.getByText(/Checked Mira Draws\./)).toBeVisible();
     await expect.poll(async () => (await discordMessages(request)).map((m) => m.text)).toContain("New print shop is open");
     await page.getByRole("link", { name: "View all" }).click();
-    await expect(page.getByText("“New print shop is open”")).toBeVisible();
+    // Mira Draws sends to two channels (#art-drops with a role, and the default): one entry for each.
+    await expect(page.getByText("“New print shop is open”")).toHaveCount(2);
     await w.expectClean();
   });
 
@@ -116,8 +117,49 @@ test.describe("every day", () => {
     await page.getByRole("menuitem", { name: "Delete" }).click();
     await page.getByRole("alertdialog").getByRole("button", { name: "Delete channel" }).click();
     await expect(page.getByText("Deleted #art-drops.")).toBeVisible();
-    const accounts = (await (await request.get("/api/accounts/")).json()).results;
-    expect(accounts.every((a: { channel_id: number | null }) => a.channel_id === null)).toBe(true);
+    const accounts: { destinations: { channel_id: number | null }[] }[] = (await (await request.get("/api/accounts/")).json()).results;
+    expect(accounts.every((a) => a.destinations.every((d) => d.channel_id === null))).toBe(true);
+  });
+
+  test("one account, two channels, and a role mentioned in one of them", async ({ page, request }) => {
+    const ROLE = "1189000000000000123"; // a made-up role (config/testing/demo_server.py)
+    const w = watch(page);
+    await page.goto("/accounts");
+    await page.getByRole("button", { name: "More actions for Pixel Forge Games" }).click();
+    await page.getByRole("menuitem", { name: "Edit" }).click();
+    const edit = page.getByRole("dialog", { name: "Edit Pixel Forge Games" });
+    await edit.getByRole("button", { name: "Add another channel" }).click();
+    await expect(edit.getByLabel("Channel 2", { exact: true })).toHaveValue(/\d+/);
+    const role = edit.getByLabel("Role to mention in channel 2 (optional)");
+    await role.fill("@here");
+    await role.blur();
+    await expect(edit.getByText(/@everyone and @here can't be mentioned/)).toBeVisible();
+    await role.fill(`<@&${ROLE}>`);
+    await edit.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByText("Saved the changes to Pixel Forge Games.")).toBeVisible();
+    await expect(page.getByRole("row", { name: /Pixel Forge Games/ }).getByText("+1")).toBeVisible();
+
+    const before = (await discordMessages(request)).length;
+    await request.get("/__demo__/post/pixelforge.games/?text=Patch%20notes%20are%20up");
+    await page.getByRole("button", { name: "Check Pixel Forge Games now" }).click();
+    await expect(page.getByText(/Checked Pixel Forge Games\./)).toBeVisible();
+    await expect.poll(async () => (await discordMessages(request)).length).toBe(before + 2);
+    const sent = (await discordMessages(request)).slice(before);
+    expect(sent.find((m) => m.channel_token === "demo-token-announcements")).toMatchObject({
+      text: "Patch notes are up",
+      content: "",
+      allowed_mentions: { parse: [] },
+    });
+    expect(sent.find((m) => m.channel_token === "demo-token-art-drops")).toMatchObject({
+      text: "Patch notes are up",
+      content: `<@&${ROLE}>`,
+      allowed_mentions: { parse: [], roles: [ROLE] },
+    });
+
+    await page.getByRole("button", { name: "Check Pixel Forge Games now" }).click();
+    await expect(page.getByText(/Checked Pixel Forge Games\. No new posts/)).toBeVisible();
+    expect(await discordMessages(request)).toHaveLength(before + 2);
+    await w.expectClean();
   });
 });
 

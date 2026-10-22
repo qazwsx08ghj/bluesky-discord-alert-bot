@@ -82,7 +82,7 @@ Every error body has a stable `code` (for program logic) and a plain-language `m
 - **`detail`:** DRF's own text; kept for compatibility.
 - **`retry_after_seconds`,** with a `Retry-After` header.
 
-**Exception:** validation errors on the account and channel forms keep DRF's original shape, `{"field": ["message"]}`, with no `code`. This keeps older clients working.
+**Exception:** validation errors on the account and channel forms keep DRF's original shape, `{"field": ["message"]}`, with no `code`. This keeps older clients working. A list field has one object per item, empty when that item is fine: `{"destinations": [{}, {"role_id": ["…"]}]}`.
 
 | HTTP | `code` | When |
 |---|---|---|
@@ -142,17 +142,17 @@ Every error body has a stable `code` (for program logic) and a plain-language `m
 | Request | Body | Response |
 |---|---|---|
 | `GET /api/accounts/` | | Paged list of accounts (fields below), newest first |
-| `POST /api/accounts/` | `handle` (required; `@`, links and DIDs accepted), `display_name`, `channel_id` (null = follow the default), `is_active`, `announce_posts`, `announce_reposts`, `announce_replies` | `201` account; `400 {handle: [...]}` |
+| `POST /api/accounts/` | `handle` (required; `@`, links and DIDs accepted), `display_name`, `destinations` (1 to 10 of `{channel_id, role_id}`; `channel_id` null = follow the default, `role_id` `""` = no mention; default: follow the default), `is_active`, `announce_posts`, `announce_reposts`, `announce_replies` | `201` account; `400 {handle: [...]}` |
 | `GET /api/accounts/{id}/` | | The account |
 | `PATCH /api/accounts/{id}/` (or `PUT`) | Any of the fields above | The account |
 | `DELETE /api/accounts/{id}/` | | `204` |
-| `GET /api/accounts/{id}/posts/` | | The posts noticed for this account, newest first, paged (`?page=2`): `{id, post_uri, post_url, text, kind, status, attempts, seen_at, sent_at}`. `status`: `seeded` (noted on the first check, never sent), `pending`, `sending`, `retry`, `sent`, `failed`, `skipped`. |
+| `GET /api/accounts/{id}/posts/` | | The posts noticed for this account, newest first, paged (`?page=2`): `{id, post_uri, post_url, text, kind, status, seen_at, sent_at, deliveries}`. `status`: `seeded` (noted on the first check, never sent), `pending`, `sent`, `partly_sent`, `failed`, `skipped`. `deliveries`: one per channel, `{channel {id, name, is_default}, role_id, status, attempts, next_attempt_at, sent_at}`, with `status` `pending`, `sending`, `retry`, `sent`, `failed` or `cancelled`. |
 | `POST /api/accounts/{id}/poll_now/` | | Checks this one account now, inside the request (a few seconds). `{new_posts_announced, was_first_poll, state, state_label, state_message, first_check, problem, check {result, message, new_posts, posts_sent, not_announced}, error?}`; `409 already_checking` |
 | `POST /api/accounts/check_all/` | | `202`, a check job (section 4.6) |
 
 **Account fields:**
 - `id`, `handle`, `display_name`, `is_active`
-- `channel_id`, `channel {id, name, is_default}`, `uses_default_channel`
+- `destinations`: `[{channel_id, role_id, channel {id, name, is_default} | null, follows_default}]` (docs/CHANNELS.md)
 - `announce_posts`, `announce_reposts`, `announce_replies`
 - `first_poll_done`, `created_at`
 - Status: `state` (`checking`, `paused`, `error`, `waiting_first_check`, `active`), `state_label`, `state_message`, `checking_now`, `problem`, `first_check {done, at, seeded_posts}`, `last_checked_at`, `last_check_ok`, `last_success_at`, `last_error {at, ongoing, category, title, explanation, fix}`
@@ -249,6 +249,6 @@ Django also serves the built control panel (see [FRONTEND.md](FRONTEND.md)):
   - `/api/status/` every 10 s, or 3 s while a check runs;
   - the accounts every 15 s, or 3 s while one is being checked;
   - a running job every `poll_after_seconds`.
-- **Removed fields are refused:** sending `discord_webhook_url` to the settings or account API gets `400`, with a message naming the replacement (`channel_id`, or `POST /api/webhooks/{id}/make_default/`). It isn't silently ignored.
+- **Removed fields are refused:** sending `discord_webhook_url` to the settings or account API gets `400`, with a message naming the replacement (`destinations`, or `POST /api/webhooks/{id}/make_default/`). So is the account's former `channel_id`. Neither is silently ignored.
 - **`poll_interval_minutes`** is a number in `GET /api/settings/`. Requests accept a number or a numeric string.
 - **Post history** keeps the newest 1,000 finished posts per account (`SEEN_POSTS_KEPT_PER_ACCOUNT`). Posts still waiting to be sent are never removed.

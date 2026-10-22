@@ -5,8 +5,8 @@ from django.db.models import Q
 class DiscordWebhook(models.Model):
     """A named Discord channel (one webhook). The only place notifications go.
 
-    One channel may be the default. Watched accounts either name a channel explicitly or
-    follow the default (MonitoredAccount.channel is null). The URL is a secret: it is never
+    One channel may be the default. Each of a watched account's destinations either names a
+    channel or follows the default (AccountDestination.channel is null). The URL is a secret: it is never
     returned by the API or written to logs.
     """
     name = models.CharField(max_length=255, unique=True, help_text="Friendly label, e.g. #announcements")
@@ -20,6 +20,10 @@ class DiscordWebhook(models.Model):
     last_delivery_ok = models.BooleanField(null=True)
     # null=True so older code (which doesn't know this column) can still add channels after a rollback.
     last_delivery_error = models.CharField(max_length=300, blank=True, null=True, default="")
+    # The Discord server (guild) the webhook posts to, learned from Discord before the first
+    # role mention. The server's own ID is also its @everyone role's ID, so a Role ID equal
+    # to it is refused. "" = not known yet; cleared when the URL changes.
+    guild_id = models.CharField(max_length=20, blank=True, null=True, default="")
 
     class Meta:
         constraints = [

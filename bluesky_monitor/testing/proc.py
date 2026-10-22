@@ -31,8 +31,8 @@ django.setup()
 from django.core.management import call_command  # noqa: E402
 
 from bluesky_monitor import locks, poller, scheduler  # noqa: E402
-from bluesky_monitor.models import MonitoredAccount, SeenPost  # noqa: E402
-from discord_alerts import sender  # noqa: E402
+from bluesky_monitor.models import MonitoredAccount, PostDelivery, SeenPost  # noqa: E402
+from discord_alerts import channels, sender  # noqa: E402
 
 N_POSTS = 5
 
@@ -49,12 +49,12 @@ class FakeSession:
 
 
 def fake_sender(log_path, crash=False):
-    def deliver(webhook_url, handle, display_name, text, post_url):
+    def deliver(webhook_url, handle, display_name, text, post_url, **kwargs):
         if crash:
             os._exit(3)  # killed after claiming, before Discord answered
         time.sleep(0.15)  # a slow Discord widens any race window
         with open(log_path, "a", encoding="utf-8") as f:
-            f.write(post_url + "\n")
+            f.write(f"{webhook_url.rsplit('/', 1)[-1]}|{post_url}\n")  # one line per channel and post
         return sender.DeliveryResult(True)
     return deliver
 
@@ -71,7 +71,10 @@ def install_fakes(log_path, crash=False):
 
 if action == "migrate":
     call_command("migrate", verbosity=0)
-    MonitoredAccount.objects.create(handle="artist.bsky.social", first_poll_done=True)
+    account = MonitoredAccount.objects.create(handle="artist.bsky.social", first_poll_done=True)
+    if os.environ.get("PROC_SECOND_CHANNEL"):  # the default channel and a second one
+        second = channels.channel_for_url(os.environ["PROC_SECOND_CHANNEL"], "#second")
+        channels.set_destinations(account, [{"channel": None, "role_id": ""}, {"channel": second, "role_id": ""}])
 
 elif action == "lease":  # lease <instance> <hold seconds> <release|crash>
     instance, hold, mode = args
@@ -157,5 +160,5 @@ elif action == "run_jobs":  # run_jobs <instance> <log> <start_ts>: the checker'
     print("RAN", ran, job.status, " ".join(f"{r['handle']}={r['result']}" for r in job.accounts), flush=True)
 
 elif action == "status":
-    for p in SeenPost.objects.order_by("id"):
-        print(p.post_uri.rsplit("/", 1)[1], p.status, p.attempts)
+    for d in PostDelivery.objects.select_related("post").order_by("id"):
+        print(d.post.post_uri.rsplit("/", 1)[1], d.channel_id, d.post.status, d.status, d.attempts)

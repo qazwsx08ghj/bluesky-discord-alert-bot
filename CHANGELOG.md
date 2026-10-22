@@ -24,6 +24,9 @@ The first public release. Compared with the earlier "black-window" version, the 
   - settings;
   - light and dark themes.
 - **Several named Discord channels,** a default channel, and a test message for each.
+- **Several channels per account** (up to 10), each delivered and retried on its own: a channel that fails never holds up or repeats the others.
+- **An older version never runs on newer data:** if the data was updated by a newer version, the scripts stop with a warning before replacing the running bot, and the bot itself shows a warning page instead of using the data. 1.0.0-rc.1 doesn't have this check. `update.bat` also names the folder the bot was run from before, if it was another one.
+- **Optional role mention per channel:** paste a Discord Role ID to ping that role. Only that role can be pinged (`allowed_mentions`); @everyone and @here are refused, also when typed as a server ID.
 - **Bluesky profile lookup** when adding an account, and a login test before the login is saved.
 - **Per-account choice** of notifications for posts, reposts and replies.
 - **Plain-language status and problems,** each with what to do about it.
@@ -38,6 +41,7 @@ The first public release. Compared with the earlier "black-window" version, the 
 - **Licensing:** the MIT License, third-party license notices (`THIRD_PARTY_NOTICES.txt`, also linked in the panel), and a security policy.
 
 ### Changed
+- **Since 1.0.0-rc.1:** an account's channel is now a list, `destinations`, in the API (`channel_id`, `channel` and `uses_default_channel` were removed; sending `channel_id` is refused with a pointer). Posts gain per-channel `deliveries`, and the post status `partly_sent`. The upgrade keeps every route and every waiting post. Going back to rc.1 needs the backup `update.bat` makes first: reversing the database change keeps only each account's first channel.
 - **Settings are stored in the database** and apply at once. `.env` is only read, once, to import an earlier install.
 - **The panel only accepts connections from this computer,** with protection against requests from other websites.
 

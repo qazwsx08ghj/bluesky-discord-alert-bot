@@ -101,7 +101,7 @@ def run(time_limit_seconds=None, *, should_continue=None, progress=None) -> dict
     """
     started = timezone.now()
     limit = settings.CHECK_ALL_TIME_LIMIT_SECONDS if time_limit_seconds is None else time_limit_seconds
-    accounts = list(MonitoredAccount.objects.select_related("channel").order_by("id"))
+    accounts = list(MonitoredAccount.objects.order_by("id"))
     active = [a for a in accounts if a.is_active]
 
     on_progress = _Progress(accounts, active, progress) if progress is not None else None

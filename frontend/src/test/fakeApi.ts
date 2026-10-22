@@ -20,11 +20,16 @@ const PROFILES: Record<string, string> = {
   "greenhouse.bsky.social": "Greenhouse Weekly",
 };
 
+interface FakeDestination {
+  channel_id: number | null;
+  role_id: string;
+}
+
 interface FakeAccount {
   id: number;
   handle: string;
   display_name: string;
-  channel_id: number | null;
+  destinations: FakeDestination[];
   is_active: boolean;
   first_poll_done: boolean;
   announce_posts: boolean;
@@ -99,9 +104,9 @@ export function workingState(): FakeState {
   ];
   const base = { announce_posts: true, announce_reposts: true, announce_replies: false, created_at: minutesAgo(600) };
   s.accounts = [
-    { id: 1, handle: "mira-draws.bsky.social", display_name: "Mira Draws", channel_id: 2, is_active: true, first_poll_done: true, last_checked_at: minutesAgo(1), ...base },
-    { id: 2, handle: "pixelforge.games", display_name: "Pixel Forge Games", channel_id: null, is_active: true, first_poll_done: true, last_checked_at: minutesAgo(2), ...base },
-    { id: 3, handle: "tamsin.bsky.social", display_name: "Tamsin Okoro", channel_id: null, is_active: false, first_poll_done: true, last_checked_at: minutesAgo(4000), ...base },
+    { id: 1, handle: "mira-draws.bsky.social", display_name: "Mira Draws", destinations: [{ channel_id: 2, role_id: "" }], is_active: true, first_poll_done: true, last_checked_at: minutesAgo(1), ...base },
+    { id: 2, handle: "pixelforge.games", display_name: "Pixel Forge Games", destinations: [{ channel_id: null, role_id: "" }], is_active: true, first_poll_done: true, last_checked_at: minutesAgo(2), ...base },
+    { id: 3, handle: "tamsin.bsky.social", display_name: "Tamsin Okoro", destinations: [{ channel_id: null, role_id: "" }], is_active: false, first_poll_done: true, last_checked_at: minutesAgo(4000), ...base },
   ];
   s.events = [
     event(3, "post_sent", "success", "Sent a post from @mira-draws.bsky.social.", { account: s.accounts[0], channel: s.channels[1], detail: { post_url: "https://bsky.app/profile/mira-draws.bsky.social/post/1", post_text: "Commissions open for March!" } }),
@@ -138,13 +143,37 @@ function toChannel(s: FakeState, c: FakeChannel): Channel {
     is_default: c.is_default,
     created_at: minutesAgo(1000),
     updated_at: minutesAgo(10),
-    account_count: s.accounts.filter((a) => a.channel_id === c.id).length,
+    account_count: s.accounts.filter((a) => a.destinations.some((d) => d.channel_id === c.id)).length,
     last_delivery: c.last_delivery,
   };
 }
 
+/** The bot's checks of a destinations list (bluesky_monitor/serializers.py), with its messages. */
+function checkDestinations(s: FakeState, list: unknown): { value?: FakeDestination[]; errors?: FieldErrors | Record<string, unknown> } {
+  if (!Array.isArray(list) || list.length === 0) return { errors: { destinations: ["Choose at least one channel to send to."] } };
+  if (list.length > 10) return { errors: { destinations: ["An account can send to at most 10 channels."] } };
+  const rows: Record<string, string[]>[] = [];
+  const value: FakeDestination[] = [];
+  const seen = new Set<number | null>();
+  for (const item of list as { channel_id?: number | null; role_id?: string }[]) {
+    const row: Record<string, string[]> = {};
+    const channelId = item.channel_id ?? null;
+    if (channelId !== null && !s.channels.some((c) => c.id === channelId)) row.channel_id = [`Invalid pk "${channelId}" - object does not exist.`];
+    else if (seen.has(channelId)) row.channel_id = ["This channel is already in the list."];
+    seen.add(channelId);
+    let role = String(item.role_id ?? "").trim();
+    const pasted = /^<@&([0-9]+)>$/.exec(role);
+    if (pasted) role = pasted[1];
+    if (["everyone", "here"].includes(role.toLowerCase().replace(/^@/, ""))) row.role_id = ["@everyone and @here can't be mentioned. Enter the ID of a role instead, or leave this empty to send without a mention."];
+    else if (role === "1100000000000000000") row.role_id = ["This is the Discord server's ID, which Discord also uses for @everyone. Enter the ID of a role instead."];
+    else if (role && !/^[0-9]{17,20}$/.test(role)) row.role_id = ["A Role ID is a long number, like 123456789012345678. In Discord, turn on Developer Mode (User Settings > Advanced), then open Server Settings > Roles, click … next to the role and choose Copy Role ID."];
+    rows.push(row);
+    value.push({ channel_id: channelId, role_id: role });
+  }
+  return rows.some((r) => Object.keys(r).length) ? { errors: { destinations: rows } } : { value };
+}
+
 function toAccount(s: FakeState, a: FakeAccount): Account {
-  const channel = s.channels.find((c) => c.id === a.channel_id) ?? null;
   const state = !a.is_active ? "paused" : !a.first_poll_done ? "waiting_first_check" : "active";
   const labels = { paused: "Paused", waiting_first_check: "Waiting for first check", active: "Active" } as const;
   return {
@@ -152,9 +181,15 @@ function toAccount(s: FakeState, a: FakeAccount): Account {
     handle: a.handle,
     display_name: a.display_name,
     is_active: a.is_active,
-    channel_id: a.channel_id,
-    channel: channel ? { id: channel.id, name: channel.name, is_default: channel.is_default } : null,
-    uses_default_channel: a.channel_id === null,
+    destinations: a.destinations.map((d) => {
+      const channel = s.channels.find((c) => c.id === d.channel_id) ?? null;
+      return {
+        channel_id: d.channel_id,
+        role_id: d.role_id,
+        follows_default: d.channel_id === null,
+        channel: channel ? { id: channel.id, name: channel.name, is_default: channel.is_default } : null,
+      };
+    }),
     announce_posts: a.announce_posts,
     announce_reposts: a.announce_reposts,
     announce_replies: a.announce_replies,
@@ -375,9 +410,14 @@ export function handlersFor(s: FakeState): HttpHandler[] {
       const channel = s.channels.find((c) => c.id === Number(params.id))!;
       const reassign = new URL(request.url).searchParams.get("reassign_to");
       if (channel.is_default) return HttpResponse.json({ code: "channel_is_default", message: "This is the default channel." } satisfies Schemas["Error"], { status: 409 });
-      const users = s.accounts.filter((a) => a.channel_id === channel.id);
+      const users = s.accounts.filter((a) => a.destinations.some((d) => d.channel_id === channel.id));
       if (users.length && !reassign) return HttpResponse.json({ code: "channel_in_use", message: "Accounts post here.", accounts: users.map((a) => ({ id: a.id, handle: a.handle })) } satisfies Schemas["Error"], { status: 409 });
-      users.forEach((a) => (a.channel_id = reassign === "default" ? null : Number(reassign)));
+      const target = reassign === "default" ? null : Number(reassign);
+      // Moved to the new place, unless the account already sends there (that destination stays).
+      users.forEach((a) => {
+        const already = a.destinations.some((d) => d.channel_id === target);
+        a.destinations = a.destinations.flatMap((d) => (d.channel_id !== channel.id ? [d] : already ? [] : [{ ...d, channel_id: target }]));
+      });
       s.channels = s.channels.filter((c) => c !== channel);
       return new HttpResponse(null, { status: 204 });
     }),
@@ -427,11 +467,13 @@ export function handlersFor(s: FakeState): HttpHandler[] {
       const handle = String(body.handle ?? "").replace(/^@/, "").trim().toLowerCase();
       if (!handle) return HttpResponse.json({ handle: ["This field may not be blank."] } satisfies FieldErrors, { status: 400 });
       if (s.accounts.some((a) => a.handle === handle)) return HttpResponse.json({ handle: [`You're already watching @${handle}.`] } satisfies FieldErrors, { status: 400 });
+      const destinations = checkDestinations(s, body.destinations ?? [{ channel_id: null, role_id: "" }]);
+      if (destinations.errors) return HttpResponse.json(destinations.errors, { status: 400 });
       const account: FakeAccount = {
         id: Math.max(0, ...s.accounts.map((a) => a.id)) + 1,
         handle,
         display_name: body.display_name ?? "",
-        channel_id: body.channel_id ?? null,
+        destinations: destinations.value!,
         is_active: body.is_active ?? true,
         first_poll_done: false,
         announce_posts: body.announce_posts ?? true,
@@ -449,7 +491,13 @@ export function handlersFor(s: FakeState): HttpHandler[] {
       const refused = guard(request, body);
       if (refused) return refused;
       const account = s.accounts.find((a) => a.id === Number(params.id))!;
-      Object.assign(account, body);
+      const { destinations, ...rest } = body;
+      if (destinations !== undefined) {
+        const checked = checkDestinations(s, destinations);
+        if (checked.errors) return HttpResponse.json(checked.errors, { status: 400 });
+        account.destinations = checked.value!;
+      }
+      Object.assign(account, rest);
       return HttpResponse.json(toAccount(s, account));
     }),
     http.delete("*/api/accounts/:id/", ({ request, params }) => {

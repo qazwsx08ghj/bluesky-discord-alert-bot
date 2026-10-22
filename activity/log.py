@@ -25,6 +25,7 @@ POST_SENT = "post_sent"                  # success; attempt > 1 means it was a r
 SEND_FAILED = "send_failed"              # warning; will be retried
 SEND_GAVE_UP = "send_gave_up"            # error; no more retries
 POST_NOT_SENT = "post_not_sent"          # warning; no channel for the account
+MENTION_NOT_SENT = "mention_not_sent"    # warning; sent, but the role mention was left out for safety
 CHECK_FAILED = "check_failed"            # an account's feed couldn't be read
 CHECK_RECOVERED = "check_recovered"      # it works again
 FIRST_CHECK_DONE = "first_check_done"

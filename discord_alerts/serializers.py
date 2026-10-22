@@ -43,7 +43,7 @@ class DiscordWebhookSerializer(serializers.ModelSerializer):
 
     def get_account_count(self, obj):
         count = getattr(obj, "account_count", None)
-        return obj.accounts.count() if count is None else count
+        return obj.destinations.values("account").distinct().count() if count is None else count
 
     def get_last_delivery(self, obj):
         if obj.last_delivery_at is None:
@@ -83,6 +83,8 @@ class DiscordWebhookSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         make_default = validated_data.pop("is_default", None)
+        if "url" in validated_data and validated_data["url"] != instance.url:
+            validated_data["guild_id"] = ""  # a new webhook may be in another server; ask Discord again
         for key, value in validated_data.items():
             setattr(instance, key, value)
         instance.save(update_fields=[*validated_data.keys(), "updated_at"])

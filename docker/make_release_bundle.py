@@ -34,6 +34,13 @@ for free use: https://docs.docker.com/subscription/desktop-license/
 3. Later: start.bat opens the control panel, update.bat installs a new version
    (after a backup), stop.bat stops the bot, backup.bat saves a backup copy,
    restore.bat puts a backup back (after backing up the current data).
+4. Already using the bot, and this is a newer download (for example a test version, "rc")?
+   Unzip it into a new folder and double-click update.bat in the new folder. It backs up
+   your data first and keeps your accounts, settings and history. From then on use only the
+   new folder, and delete the old one once you're happy: its files belong to the older
+   version. (1.0.0-rc.1's start.bat would replace the bot with the older version, which
+   can't use the updated data; if that happens, run start.bat in the new folder.)
+   Your backups stay available to restore.bat in the new folder.
 
 Your accounts, settings and history are kept inside Docker Desktop and are never deleted
 by these files. Backups made by update.bat and backup.bat also go into the backups folder here.
@@ -55,6 +62,11 @@ https://docs.docker.com/subscription/desktop-license/
    zip 檔上按右鍵 →「內容」，勾選「解除封鎖」再按「確定」。
 3. 之後：start.bat 打開控制面板，update.bat 更新到新版本（會先備份），stop.bat 停止
    機器人，backup.bat 備份資料，restore.bat 還原備份（會先備份目前的資料）。
+4. 已經在用這個機器人，而這是較新的下載（例如測試版「rc」）？請把它解壓縮到新的資料夾，
+   然後點兩下新資料夾裡的 update.bat。它會先備份，你的帳號、設定和紀錄都會保留。
+   之後只用新的資料夾，確認沒問題後刪除舊的資料夾：那些檔案屬於舊版本。
+   （1.0.0-rc.1 的 start.bat 會把機器人換回無法使用新資料的舊版本；
+   如果發生了，請在新資料夾執行 start.bat。）之前的備份仍可用新資料夾裡的 restore.bat 還原。
 
 你的帳號、設定和紀錄都存在 Docker Desktop 裡，這些指令檔絕對不會刪掉它們。
 update.bat 和 backup.bat 做的備份會放在這裡的 backups 資料夾。

@@ -61,13 +61,45 @@ The only thing a Windows user installs is **Docker Desktop**. Everything else is
 
 If nothing changed since the last update, Docker rebuilds or downloads the same image and leaves the running bot as it is.
 
+### Where backups are
+- **Inside Docker,** in the data volume (`/data/backups`): `db-before-update-*` (`update.bat`), `db-manual-*` (`backup.bat`), `db-before-restore-*` (`restore.bat`), and `db-auto-*` (made by the web start whenever migrations are waiting, so an update makes two backups). The newest 5 of each kind are kept.
+- **In the `backups` folder** next to the script that made it: a copy of each script-made backup. These copies are never removed by the bot.
+- `restore.bat` first copies every backup from the volume into its own `backups` folder, so a new download's folder lists the backups made from an older folder too.
+
 ### If an update goes wrong
-Your data and the backups are untouched; nothing in the update deletes anything.
-- **Go back to the previous version:**
-  - Release download: set `ALERTBOT_IMAGE` in `docker\compose.env` to the previous version tag (e.g. `…:1.1.0`) and run `start.bat`.
-  - Source folder: `git checkout <previous tag>`, then `update.bat`.
-  - An older version can't run on a database that a newer one has already updated. Restore the backup made before the update first (below).
-- **Restore a backup** with `restore.bat`.
+Your data and the backups are untouched; nothing in the update deletes anything, and nothing is undone automatically. What `update.bat` does when a step fails:
+- **The backup fails:** it stops; nothing else is done.
+- **The new version can't be downloaded:** the current version keeps running.
+- **The data is from a newer version than this folder's** (1.0.0-rc.2 and later): it stops before starting anything; see "Older versions and newer data" below.
+- **The new version doesn't start, or the panel doesn't answer:** it says so, keeps the backup, and saves `logs\problem-report.txt`.
+
+Then:
+1. Run `update.bat` again (a download that broke off is a common cause), or ask for help with `logs\problem-report.txt`.
+2. **To go back to the version you had, restore first:** use that version's `restore.bat` and choose the newest `db-before-update-*` backup. It backs up the current data, puts the backup back, and starts that version.
+   - A test version's download: the old folder's `restore.bat`.
+   - A stable download: set `ALERTBOT_IMAGE` in `docker\compose.env` to the previous version tag (e.g. `…:1.1.0`), then `restore.bat`.
+   - Source folder: `git checkout <previous tag>`, then `restore.bat`.
+
+   Just starting the older version doesn't work: it can't use data that the newer version has updated (see below).
+
+### Older versions and newer data
+An older version must never run on data a newer version has updated: it can't read it correctly, and must not back it up over, migrate or change it. A newer version leaves migrations in the database that the older one doesn't know; versions from **1.0.0-rc.2** check for them (`botconfig/compat.py`):
+
+| Where | What happens with newer data |
+|---|---|
+| `start.bat`, `update.bat`, `setup.bat` (from 1.0.0-rc.2) | Before they replace the running bot, they run `manage.py check_compat` with this folder's version. Exit code 3: they stop with a message saying what to do, and the running bot is left alone. `restore.bat` isn't blocked: it is the way back. |
+| The web service's start (`prepare_data`) | Stops before the backup and the migrations (exit code 3). `entrypoint.sh` then serves a warning page instead of the panel; `/api/health/` answers `503 newer_data`, which the scripts recognise. Nothing reads or changes the data. |
+| The checker | `wait_for_database` never goes on (it checks again every minute, without restarting), and every scheduled check checks again, so nothing is checked, sent or written. |
+
+`update.bat` and `setup.bat` also read which folder the bot was run from before (Docker keeps it on the containers). If it was another folder, they name it at the end and say not to use it any more.
+
+**Limit: 1.0.0-rc.1 has none of this, and nothing in a newer version can change that.** Its scripts and image start it on newer data, and its health check says "ok". Tested on 1.0.0-rc.2 data, with active accounts and a login (and no network for the checker):
+- its checker fails on the changed tables and sends nothing;
+- its panel can't list, add, change or delete accounts, or delete channels (errors);
+- unchanged: accounts, destinations, posts, deliveries and the migration records;
+- what does get through: settings saved in its panel, a "Check all" request, a channel added in its panel (saved, although the panel reports an error), the activity log and the checker's status row. The newer version uses these normally afterwards.
+
+The bot stops working until the newer folder's `start.bat` is used again. The user instructions say to delete the old folder after an update, and `update.bat` names it.
 
 ### Restoring a backup (`restore.bat`)
 1. Copies every backup inside Docker into the `backups` folder (existing files are kept), and lists them all, newest first.

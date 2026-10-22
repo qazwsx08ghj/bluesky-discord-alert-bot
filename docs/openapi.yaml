@@ -36,7 +36,8 @@ paths:
     post:
       operationId: accounts_create
       description: '`handle` accepts @handle, a bsky.app link or a DID. Sending the
-        removed `discord_webhook_url` field is refused; use `channel_id`.'
+        removed `discord_webhook_url` and `channel_id` fields are refused; use `destinations`
+        (without it, the account follows the default channel).'
       summary: Watch an account
       tags:
       - accounts
@@ -64,12 +65,20 @@ paths:
                   additionalProperties:
                     type: array
                     items:
-                      type: string
+                      oneOf:
+                      - type: string
+                      - type: object
+                        additionalProperties:
+                          type: array
+                          items:
+                            type: string
                 - $ref: '#/components/schemas/Error'
           description: 'Form errors per field, e.g. {"handle": ["You''re already watching
-            @a.bsky.social."]}. No `code`: this shape is kept from the first API version.
-            Or the standard error with code `invalid_json` when the body isn''t valid
-            JSON.'
+            @a.bsky.social."]}. A list field has one object per item (empty when that
+            item is fine), e.g. {"destinations": [{}, {"role_id": ["A Role ID is a
+            long number, …"]}]}. No `code`: this shape is kept from the first API
+            version. Or the standard error with code `invalid_json` when the body
+            isn''t valid JSON.'
         '403':
           description: 'Refused: missing or wrong CSRF token (code `csrf_failed`),
             or sent from another website (code `cross_site_request`).'
@@ -147,12 +156,20 @@ paths:
                   additionalProperties:
                     type: array
                     items:
-                      type: string
+                      oneOf:
+                      - type: string
+                      - type: object
+                        additionalProperties:
+                          type: array
+                          items:
+                            type: string
                 - $ref: '#/components/schemas/Error'
           description: 'Form errors per field, e.g. {"handle": ["You''re already watching
-            @a.bsky.social."]}. No `code`: this shape is kept from the first API version.
-            Or the standard error with code `invalid_json` when the body isn''t valid
-            JSON.'
+            @a.bsky.social."]}. A list field has one object per item (empty when that
+            item is fine), e.g. {"destinations": [{}, {"role_id": ["A Role ID is a
+            long number, …"]}]}. No `code`: this shape is kept from the first API
+            version. Or the standard error with code `invalid_json` when the body
+            isn''t valid JSON.'
         '404':
           content:
             application/json:
@@ -174,7 +191,7 @@ paths:
                 $ref: '#/components/schemas/Error'
     patch:
       operationId: accounts_partial_update
-      summary: Change an account (pause, channel, name, …)
+      summary: Change an account (pause, channels, name, …)
       parameters:
       - in: path
         name: id
@@ -207,12 +224,20 @@ paths:
                   additionalProperties:
                     type: array
                     items:
-                      type: string
+                      oneOf:
+                      - type: string
+                      - type: object
+                        additionalProperties:
+                          type: array
+                          items:
+                            type: string
                 - $ref: '#/components/schemas/Error'
           description: 'Form errors per field, e.g. {"handle": ["You''re already watching
-            @a.bsky.social."]}. No `code`: this shape is kept from the first API version.
-            Or the standard error with code `invalid_json` when the body isn''t valid
-            JSON.'
+            @a.bsky.social."]}. A list field has one object per item (empty when that
+            item is fine), e.g. {"destinations": [{}, {"role_id": ["A Role ID is a
+            long number, …"]}]}. No `code`: this shape is kept from the first API
+            version. Or the standard error with code `invalid_json` when the body
+            isn''t valid JSON.'
         '404':
           content:
             application/json:
@@ -902,12 +927,20 @@ paths:
                   additionalProperties:
                     type: array
                     items:
-                      type: string
+                      oneOf:
+                      - type: string
+                      - type: object
+                        additionalProperties:
+                          type: array
+                          items:
+                            type: string
                 - $ref: '#/components/schemas/Error'
           description: 'Form errors per field, e.g. {"handle": ["You''re already watching
-            @a.bsky.social."]}. No `code`: this shape is kept from the first API version.
-            Or the standard error with code `invalid_json` when the body isn''t valid
-            JSON.'
+            @a.bsky.social."]}. A list field has one object per item (empty when that
+            item is fine), e.g. {"destinations": [{}, {"role_id": ["A Role ID is a
+            long number, …"]}]}. No `code`: this shape is kept from the first API
+            version. Or the standard error with code `invalid_json` when the body
+            isn''t valid JSON.'
         '403':
           description: 'Refused: missing or wrong CSRF token (code `csrf_failed`),
             or sent from another website (code `cross_site_request`).'
@@ -992,12 +1025,20 @@ paths:
                   additionalProperties:
                     type: array
                     items:
-                      type: string
+                      oneOf:
+                      - type: string
+                      - type: object
+                        additionalProperties:
+                          type: array
+                          items:
+                            type: string
                 - $ref: '#/components/schemas/Error'
           description: 'Form errors per field, e.g. {"handle": ["You''re already watching
-            @a.bsky.social."]}. No `code`: this shape is kept from the first API version.
-            Or the standard error with code `invalid_json` when the body isn''t valid
-            JSON.'
+            @a.bsky.social."]}. A list field has one object per item (empty when that
+            item is fine), e.g. {"destinations": [{}, {"role_id": ["A Role ID is a
+            long number, …"]}]}. No `code`: this shape is kept from the first API
+            version. Or the standard error with code `invalid_json` when the body
+            isn''t valid JSON.'
         '404':
           content:
             application/json:
@@ -1053,12 +1094,20 @@ paths:
                   additionalProperties:
                     type: array
                     items:
-                      type: string
+                      oneOf:
+                      - type: string
+                      - type: object
+                        additionalProperties:
+                          type: array
+                          items:
+                            type: string
                 - $ref: '#/components/schemas/Error'
           description: 'Form errors per field, e.g. {"handle": ["You''re already watching
-            @a.bsky.social."]}. No `code`: this shape is kept from the first API version.
-            Or the standard error with code `invalid_json` when the body isn''t valid
-            JSON.'
+            @a.bsky.social."]}. A list field has one object per item (empty when that
+            item is fine), e.g. {"destinations": [{}, {"role_id": ["A Role ID is a
+            long number, …"]}]}. No `code`: this shape is kept from the first API
+            version. Or the standard error with code `invalid_json` when the body
+            isn''t valid JSON.'
         '404':
           content:
             application/json:
@@ -1244,18 +1293,10 @@ components:
         display_name:
           type: string
           maxLength: 255
-        channel_id:
-          type:
-          - integer
-          - 'null'
-        channel:
-          oneOf:
-          - $ref: '#/components/schemas/AccountChannel'
-          - type: 'null'
-          readOnly: true
-        uses_default_channel:
-          type: boolean
-          readOnly: true
+        destinations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Destination'
         is_active:
           type: boolean
         announce_posts:
@@ -1319,10 +1360,9 @@ components:
       - announce_posts
       - announce_replies
       - announce_reposts
-      - channel
-      - channel_id
       - checking_now
       - created_at
+      - destinations
       - display_name
       - first_check
       - first_poll_done
@@ -1337,14 +1377,16 @@ components:
       - state
       - state_label
       - state_message
-      - uses_default_channel
     AccountChannel:
       type: object
       properties:
         id:
           type: integer
+          readOnly: true
         name:
           type: string
+          description: 'Friendly label, e.g. #announcements'
+          maxLength: 255
         is_default:
           type: boolean
       required:
@@ -1409,10 +1451,10 @@ components:
         display_name:
           type: string
           maxLength: 255
-        channel_id:
-          type:
-          - integer
-          - 'null'
+        destinations:
+          type: array
+          items:
+            $ref: '#/components/schemas/DestinationRequest'
         is_active:
           type: boolean
         announce_posts:
@@ -1967,6 +2009,70 @@ components:
       - severity
       - since
       - title
+    DeliveryStatus:
+      enum:
+      - pending
+      - sending
+      - retry
+      - sent
+      - failed
+      - cancelled
+      type: string
+    Destination:
+      type: object
+      description: |-
+        One place an account's notifications go.
+
+        `channel_id`: a channel id, or null for "the default channel" (it follows the default,
+        also when the default changes later). `role_id`: the ID of a Discord role to mention in
+        that channel, or "" for no mention. Read-only: `channel` (null when following the
+        default) and `follows_default`.
+      properties:
+        channel_id:
+          type:
+          - integer
+          - 'null'
+        role_id:
+          type: string
+          default: ''
+          description: A Discord Role ID (17 to 20 digits) or the <@&ID> form; ""
+            for no mention. @everyone and @here are refused.
+          maxLength: 64
+        channel:
+          oneOf:
+          - $ref: '#/components/schemas/AccountChannel'
+          - type: 'null'
+          readOnly: true
+        follows_default:
+          type: boolean
+          readOnly: true
+      required:
+      - channel
+      - channel_id
+      - follows_default
+      - role_id
+    DestinationRequest:
+      type: object
+      description: |-
+        One place an account's notifications go.
+
+        `channel_id`: a channel id, or null for "the default channel" (it follows the default,
+        also when the default changes later). `role_id`: the ID of a Discord role to mention in
+        that channel, or "" for no mention. Read-only: `channel` (null when following the
+        default) and `follows_default`.
+      properties:
+        channel_id:
+          type:
+          - integer
+          - 'null'
+        role_id:
+          type: string
+          default: ''
+          description: A Discord Role ID (17 to 20 digits) or the <@&ID> form; ""
+            for no mention. @everyone and @here are refused.
+          maxLength: 64
+      required:
+      - channel_id
     Error:
       type: object
       description: |-
@@ -2531,10 +2637,10 @@ components:
         display_name:
           type: string
           maxLength: 255
-        channel_id:
-          type:
-          - integer
-          - 'null'
+        destinations:
+          type: array
+          items:
+            $ref: '#/components/schemas/DestinationRequest'
         is_active:
           type: boolean
         announce_posts:
@@ -2612,9 +2718,13 @@ components:
     Post:
       type: object
       description: |-
-        A post the bot has noticed (GET /api/accounts/{id}/posts/). `status`: seeded (noted on
-        the first check, never sent), pending, sending, retry, sent, failed (gave up), skipped
-        (no channel, or notifications for that kind of post are off).
+        A post the bot has noticed (GET /api/accounts/{id}/posts/).
+
+        `status` sums up its `deliveries` (one per channel): seeded (noted on the first check,
+        never sent), pending (a channel hasn't got it yet), sent (every channel got it),
+        partly_sent (some channels got it, some gave up), failed (no channel got it), skipped (no
+        channel, notifications for that kind of post are off, or every delivery was cancelled).
+        Posts sent before an upgrade to several channels have no `deliveries`.
       properties:
         id:
           type: integer
@@ -2638,11 +2748,6 @@ components:
           - $ref: '#/components/schemas/NullEnum'
         status:
           $ref: '#/components/schemas/PostStatus'
-        attempts:
-          type: integer
-          maximum: 9223372036854775807
-          minimum: 0
-          format: int64
         seen_at:
           type: string
           format: date-time
@@ -2652,8 +2757,13 @@ components:
           - string
           - 'null'
           format: date-time
+        deliveries:
+          type: array
+          items:
+            $ref: '#/components/schemas/PostDelivery'
+          readOnly: true
       required:
-      - attempts
+      - deliveries
       - id
       - kind
       - post_uri
@@ -2662,6 +2772,44 @@ components:
       - sent_at
       - status
       - text
+    PostDelivery:
+      type: object
+      description: |-
+        A post's notification to one channel. `status`: pending, sending, retry (waiting to try
+        again at `next_attempt_at`), sent, failed (gave up), cancelled (the channel was removed
+        from the account before it was sent). `role_id`: the role mentioned, or "" for none.
+      properties:
+        channel:
+          allOf:
+          - $ref: '#/components/schemas/AccountChannel'
+          readOnly: true
+        role_id:
+          type: string
+          maxLength: 20
+        status:
+          $ref: '#/components/schemas/DeliveryStatus'
+        attempts:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        next_attempt_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        sent_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+      required:
+      - attempts
+      - channel
+      - next_attempt_at
+      - role_id
+      - sent_at
+      - status
     PostKind:
       enum:
       - post
@@ -2672,9 +2820,8 @@ components:
       enum:
       - seeded
       - pending
-      - sending
-      - retry
       - sent
+      - partly_sent
       - failed
       - skipped
       type: string

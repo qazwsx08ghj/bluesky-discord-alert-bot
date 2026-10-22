@@ -102,6 +102,11 @@ class DockerFilesTests(SimpleTestCase):
         text = entry.decode()
         web = text[text.index("  web)"):text.index("  checker)")]
         self.assertLess(web.index("prepare_data"), web.index("exec gunicorn"))
+        # Newer data (exit code 3): the warning page instead of the panel; any other failure stops.
+        self.assertIn('python manage.py prepare_data || status=$?', web)
+        self.assertIn('if [ "$status" -eq 3 ]; then\n      export ALERTBOT_BLOCKED=newer_data', web)
+        self.assertIn('exit "$status"', web)
+        self.assertLess(web.index("ALERTBOT_BLOCKED"), web.index("exec gunicorn"))
         checker = text[text.index("  checker)"):text.index("  import-old)")]
         self.assertLess(checker.index("wait_for_database"), checker.index("run_scheduler"))
         self.assertIn("eol=lf", (ROOT / ".gitattributes").read_text(encoding="utf-8"))
@@ -227,6 +232,93 @@ class ScriptHarness(SimpleTestCase):
                 for c in calls if c.startswith("docker compose -p")]
 
 
+CHECK_COMPAT = "run --rm --no-deps web python manage.py check_compat"
+NEWER = "This folder has an OLDER version of the bot than the one that last used your data"
+
+
+@unittest.skipUnless(sys.platform == "win32", "the .bat scripts run on Windows")
+class OlderVersionScriptTests(ScriptHarness):
+    """A folder with an older version than the data (botconfig/compat.py): the scripts stop
+    before they replace the running bot, and say what to do. Only 1.0.0-rc.2 and later do this."""
+
+    def assert_stopped_before_starting(self, out, calls):
+        self.assertIn("STOP: " + NEWER[0].lower() + NEWER[1:], out)
+        self.assertIn("start.bat in the folder", out)
+        self.assertIn("restore.bat in this folder", out)
+        self.assertIn("db-before-update", out)
+        self.assertNotIn("up -d", self.compose_calls(calls), "the running bot is not replaced")
+
+    def test_start_with_newer_data_leaves_the_running_bot_alone(self):
+        code, out, calls = self.run_script("start.bat", FAKE_COMPAT="newer")
+        self.assertEqual(code, 1)
+        self.assert_stopped_before_starting(out, calls)
+        self.assertEqual(self.compose_calls(calls), ["ps -q web", CHECK_COMPAT])
+
+    def test_update_to_an_older_version_starts_nothing(self):
+        code, out, calls = self.run_script("update.bat", FAKE_COMPAT="newer")
+        self.assertEqual(code, 1)
+        self.assert_stopped_before_starting(out, calls)
+        self.assertIn("The update didn't finish. Nothing was deleted.", out)
+        self.assertFalse(any("prune" in c for c in calls))
+
+    def test_setup_over_newer_data_starts_nothing(self):
+        code, out, calls = self.run_script("setup.bat", FAKE_COMPAT="newer")
+        self.assertEqual(code, 1)
+        self.assert_stopped_before_starting(out, calls)
+
+    def test_a_first_install_is_not_checked(self):
+        code, out, calls = self.run_script("setup.bat", FAKE_VOLUME="missing", FAKE_COMPAT="newer")
+        self.assertEqual(code, 0, out)
+        self.assertNotIn(CHECK_COMPAT, self.compose_calls(calls), "nothing to check, and no volume is made early")
+
+    def test_restore_is_the_way_back_and_is_not_blocked(self):
+        (self.dir / "backups").mkdir()
+        (self.dir / "backups" / "db-before-update-20261022-120000-000000.sqlite3").write_bytes(b"x")
+        code, out, calls = self.run_script("restore.bat", ALERTBOT_RESTORE_CHOICE="1", FAKE_COMPAT="newer")
+        self.assertEqual(code, 0, out)
+        self.assertNotIn(CHECK_COMPAT, self.compose_calls(calls))
+        self.assertEqual(self.compose_calls(calls)[-1], "up -d")
+
+    def test_a_check_that_cant_run_doesnt_block(self):
+        """An image without check_compat (older than rc.2) answers 1: the bot's own start decides."""
+        code, out, calls = self.run_script("start.bat", FAKE_FAIL_ON="check_compat")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.compose_calls(calls)[-1], "up -d")
+
+    def test_a_running_warning_page_is_recognised(self):
+        """Started some other way (Docker Desktop, an older script): the panel answers newer_data."""
+        code, out, _ = self.run_script("start.bat", FAKE_CURL_EXIT=22,
+                                       FAKE_CURL_BODY='{"code":"newer_data","status":"newer_data"}')
+        self.assertEqual(code, 1)
+        self.assertIn("is OLDER than your data, so it shows a warning page", out)
+        self.assertIn("start.bat in the folder of your newest download", out)
+
+    def test_update_from_a_new_folder_names_the_old_one(self):
+        old = r"C:\Users\someone\Downloads\BlueskyDiscordAlertBot-1.0.0-rc.1"
+        labels = (f"com.docker.compose.oneoff=False,com.docker.compose.project=alertbot,"
+                  f"com.docker.compose.project.working_dir={old},com.docker.compose.service=web,"
+                  f"org.opencontainers.image.title=Bluesky Discord Alert Bot")
+        code, out, calls = self.run_script("update.bat", FAKE_LABELS=labels)
+        self.assertEqual(code, 0, out)
+        self.assertIn("IMPORTANT: until now the bot was run from another folder:", out)
+        self.assertIn(f"    {old}\n", out.replace("\r\n", "\n"))
+        self.assertIn("delete that folder", out)
+        self.assertIn(f"    {self.dir}", out)
+        self.assertTrue(any(c.startswith("docker ps -a --filter") for c in calls))
+
+    def test_update_from_the_same_folder_says_nothing_about_folders(self):
+        labels = f"com.docker.compose.project.working_dir={self.dir},com.docker.compose.service=web"
+        code, out, _ = self.run_script("update.bat", FAKE_LABELS=labels)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("another folder", out)
+
+    def test_the_old_folder_is_found_with_spaces_in_its_path(self):
+        old = r"C:\Users\some one\My Documents\Bluesky Bot (old)"
+        code, out, _ = self.run_script("setup.bat", FAKE_LABELS=f"com.docker.compose.project.working_dir={old},x=y")
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"    {old}", out)
+
+
 @unittest.skipUnless(sys.platform == "win32", "the .bat scripts run on Windows")
 class WindowsScriptTests(ScriptHarness):
 
@@ -335,7 +427,7 @@ class WindowsScriptTests(ScriptHarness):
     def test_start_starts_and_opens_when_ready(self):
         code, out, calls = self.run_script("start.bat")
         self.assertEqual(code, 0, out)
-        self.assertEqual(self.compose_calls(calls), ["ps -q web", "up -d"])
+        self.assertEqual(self.compose_calls(calls), ["ps -q web", CHECK_COMPAT, "up -d"])
         self.assertIn(f"The control panel is ready: http://127.0.0.1:{self.port}/", out)
 
     def test_start_before_setup_runs_the_setup(self):
@@ -351,6 +443,7 @@ class WindowsScriptTests(ScriptHarness):
         self.assertEqual(self.compose_calls(calls), [
             f'run --rm --no-deps -v "{self.dir}\\backups:/export" web backup --label before-update --export /export',
             "build --pull",
+            CHECK_COMPAT,
             "up -d",
         ])
         self.assertTrue((self.dir / "backups").is_dir())
@@ -481,7 +574,7 @@ class ReleaseBundleTests(ScriptHarness):
         self.assertEqual(code, 0, out)
         steps = self.compose_calls(calls)
         self.assertTrue(steps[0].startswith("run --rm --no-deps"))
-        self.assertEqual(steps[1:], ["pull", "up -d"])
+        self.assertEqual(steps[1:], ["pull", CHECK_COMPAT, "up -d"])
         self.assertFalse(any("build" in c for c in calls))
 
     def test_bad_image_names_are_refused(self):

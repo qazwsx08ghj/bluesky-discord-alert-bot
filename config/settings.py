@@ -24,6 +24,9 @@ def _secret_key():
 SECRET_KEY = _secret_key()
 # Shown by /api/health/; set when the Docker image is built (ALERTBOT_VERSION).
 APP_VERSION = os.getenv("ALERTBOT_VERSION", "dev")
+# Set by docker/entrypoint.sh when this version must not use the data ("newer_data": a newer
+# version updated it). The web service then only shows a warning page (config/compat_middleware.py).
+ALERTBOT_BLOCKED = os.getenv("ALERTBOT_BLOCKED", "")
 DEBUG = os.getenv("DEBUG", "False") == "True"
 # Local only: the panel has no login, so it answers only to this computer's own names.
 # This also blocks DNS-rebinding attacks. See config/security.py and docs/API.md.
@@ -45,6 +48,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    "config.compat_middleware.BlockedMiddleware",  # first: a blocked install answers nothing else
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",

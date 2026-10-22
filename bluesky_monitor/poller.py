@@ -1,19 +1,23 @@
 """Check Bluesky accounts and deliver new posts to Discord.
 
-How a post moves (see SeenPost for the states):
+How a post moves (see SeenPost and PostDelivery for the states):
 
-1. Claim: a SeenPost row is inserted before anything is sent. The unique
-   (account, post_uri) constraint lets exactly one process claim a post.
-2. Deliver: a claimed post is switched to "sending" with a conditional UPDATE that
-   carries a fresh claim token. Only the process whose UPDATE matched may send it.
+1. Claim: a SeenPost row is inserted before anything is sent, together with one
+   PostDelivery per channel the account sends to (one transaction). The unique
+   (account, post_uri) constraint lets exactly one process claim a post, and the unique
+   (post, channel) constraint means each channel gets it at most once.
+2. Deliver: each delivery is switched to "sending" with a conditional UPDATE that carries
+   a fresh claim token. Only the process whose UPDATE matched may send it.
 3. Result: "sent" on success. On failure it becomes "retry" with a next attempt time,
    up to SEND_MAX_ATTEMPTS tries within SEND_RETRY_WINDOW_HOURS, then "failed".
-4. Interrupted sends: a post left in "sending" longer than SEND_STALE_SECONDS (the
+   Every delivery has its own attempts: a failing channel never holds up or repeats another.
+4. Interrupted sends: a delivery left in "sending" longer than SEND_STALE_SECONDS (the
    process died mid-send) is picked up again by the next delivery.
 
-Nothing is lost: every unsent post stays in the database until it is sent or gives up.
-Duplicates can only happen if a process dies after Discord stored the message but
-before the "sent" update, and even then only once, after the stale timeout.
+Nothing is lost: every unsent delivery stays in the database until it is sent, gives up or
+is cancelled (its channel was removed from the account). Duplicates can only happen if a
+process dies after Discord stored the message but before the "sent" update, and even then
+only once per channel, after the stale timeout.
 
 Every send, retry, give-up and failed check is also written to the activity log
 (activity.log), which is separate from this queue.
@@ -35,15 +39,15 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
-from django.db.models import F, Q
+from django.db.models import Case, Exists, F, OuterRef, Q, Subquery, Value, When
 from django.utils import timezone
 
 from activity import log as activity, problems
 from activity.models import ActivityEvent
-from discord_alerts import channels, sender
+from discord_alerts import channels, mentions, sender
 from .bluesky import BlueskyLoginError, BlueskyUnavailable, SharedSession
 from .locks import acquire_account_lock, release_account_lock
-from .models import POST, REPLY, REPOST, MonitoredAccount, SeenPost
+from .models import POST, REPLY, REPOST, MonitoredAccount, PostDelivery, SeenPost
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +97,7 @@ class AccountCheck:
     category: str = ""
     first_check: bool = False
     new_posts: int = 0      # posts noticed this time (on the first check: noted, never sent)
-    posts_sent: int = 0     # posts sent to Discord during this check (includes retries of older ones)
+    posts_sent: int = 0     # posts sent to Discord during this check, to at least one channel (includes retries)
     turned_off: int = 0     # new posts not sent because their kind is switched off
     no_channel: int = 0     # new posts not sent because no Discord channel is chosen
 
@@ -120,18 +124,6 @@ def _post_url(handle: str, uri: str) -> str:
     # uri format: at://did:plc:xxx/app.bsky.feed.post/rkey
     rkey = uri.split("/")[-1]
     return f"https://bsky.app/profile/{handle}/post/{rkey}"
-
-
-def _channel_for(account: MonitoredAccount):
-    """The account's own channel, else the default channel, else None (see discord_alerts.channels)."""
-    from discord_alerts import channels
-
-    return channels.route_for(account)
-
-
-def _webhook_for(account: MonitoredAccount) -> str:
-    channel = _channel_for(account)
-    return channel.url if channel else ""
 
 
 # -- activity log helpers -------------------------------------------------------
@@ -197,14 +189,23 @@ def fetch_new_items(session, account: MonitoredAccount) -> list:
 
 
 # -- claiming -------------------------------------------------------------------
-def claim_post(account: MonitoredAccount, item, status: str, kind: str | None = None) -> bool:
-    """Record a post. Returns False if it was already recorded (by any process)."""
+def claim_post(account: MonitoredAccount, item, status: str, kind: str | None = None, targets=None) -> bool:
+    """Record a post and, if it is to be sent, one delivery per channel (one transaction).
+
+    Returns False if it was already recorded (by any process). `targets` (channels.targets_for)
+    may be passed when already known. A post to be sent with nowhere to send it is recorded
+    as skipped.
+    """
     post = item.post
     kind = kind or item_kind(item)
     author = getattr(getattr(post, "author", None), "handle", None) or account.handle
+    if status == SeenPost.PENDING:
+        targets = channels.targets_for(account) if targets is None else targets
+        if not targets:
+            status = SeenPost.SKIPPED
     try:
         with transaction.atomic():
-            SeenPost.objects.create(
+            seen = SeenPost.objects.create(
                 account=account,
                 post_uri=post.uri,
                 post_cid=post.cid,
@@ -213,6 +214,9 @@ def claim_post(account: MonitoredAccount, item, status: str, kind: str | None = 
                 status=status,
                 kind=kind,
             )
+            if status == SeenPost.PENDING:
+                PostDelivery.objects.bulk_create(
+                    PostDelivery(post=seen, channel=t.channel, role_id=t.role_id) for t in targets)
         return True
     except IntegrityError:
         return False
@@ -221,67 +225,133 @@ def claim_post(account: MonitoredAccount, item, status: str, kind: str | None = 
 # -- delivering -----------------------------------------------------------------
 def _due_for_delivery(account: MonitoredAccount, now):
     stale_before = now - timedelta(seconds=settings.SEND_STALE_SECONDS)
-    return SeenPost.objects.filter(account=account).filter(
-        Q(status=SeenPost.PENDING)
-        | Q(status=SeenPost.RETRY, next_attempt_at__lte=now)
-        | Q(status=SeenPost.SENDING, claimed_at__lt=stale_before)
-    ).order_by("id")
+    return PostDelivery.objects.filter(post__account=account).filter(
+        Q(status=PostDelivery.PENDING)
+        | Q(status=PostDelivery.RETRY, next_attempt_at__lte=now)
+        | Q(status=PostDelivery.SENDING, claimed_at__lt=stale_before)
+    ).select_related("post", "channel").order_by("post_id", "id")
+
+
+def refresh_post_status(post_id):
+    """Sum up a post's deliveries on the post: pending while any is unsent, then sent,
+    partly_sent, failed, or skipped (every delivery was cancelled). One UPDATE, so two
+    processes finishing deliveries of the same post can't leave it out of date."""
+    deliveries = PostDelivery.objects.filter(post=OuterRef("pk"))
+    unsent = Exists(deliveries.filter(status__in=PostDelivery.UNFINISHED))
+    sent = Exists(deliveries.filter(status=PostDelivery.SENT))
+    failed = Exists(deliveries.filter(status=PostDelivery.FAILED))
+    SeenPost.objects.filter(pk=post_id).exclude(status=SeenPost.SEEDED).filter(Exists(deliveries)).update(
+        status=Case(
+            When(unsent, then=Value(SeenPost.PENDING)),
+            When(Q(sent) & Q(failed), then=Value(SeenPost.PARTLY_SENT)),
+            When(sent, then=Value(SeenPost.SENT)),
+            When(failed, then=Value(SeenPost.FAILED)),
+            default=Value(SeenPost.SKIPPED)),
+        sent_at=Subquery(deliveries.filter(status=PostDelivery.SENT).order_by("-sent_at").values("sent_at")[:1]),
+    )
+
+
+def _mention_for(delivery: PostDelivery, account: MonitoredAccount, post: SeenPost):
+    """The role to mention for this delivery: (role_id, None), or ("", failure).
+
+    Before a channel's first mention the bot asks Discord which server the webhook posts to
+    (reading a webhook posts nothing). A Role ID equal to the server's ID would be @everyone,
+    so that notification is sent without the mention, as is one whose server Discord didn't
+    name. If Discord can't be asked, the delivery fails and is retried like a failed send.
+    """
+    role, channel = delivery.role_id, delivery.channel
+    if not role:
+        return "", None
+    guild = channel.guild_id or ""
+    if not guild:
+        info = sender.lookup_webhook(channel.url, account.handle)
+        if not info.ok:
+            return "", info.failure
+        guild = info.guild_id
+        if guild:
+            channels.remember_guild(channel.pk, guild)
+            channel.guild_id = guild
+    if not guild or mentions.is_server_id(role, guild):
+        reason = ("it is the Discord server's own ID, which would mean @everyone" if guild
+                  else "Discord didn't say which server the channel is in, so it couldn't be checked")
+        activity.problem(activity.MENTION_NOT_SENT, "mention_refused",
+                         f'A post from @{account.handle} was sent to "{channel.name}" without the role mention: '
+                         f"{reason}.", level=ActivityEvent.WARNING, account=account, channel=channel,
+                         detail=_post_detail(post, role_id=role), merge_repeats=True)
+        return "", None
+    return role, None
 
 
 def deliver_pending(account: MonitoredAccount) -> int:
-    """Send every post that is due for this account. Returns how many were sent."""
-    channel = _channel_for(account)
-    if channel is None:
-        return 0
-    webhook_url = channel.url
+    """Send every notification that is due for this account.
 
+    Returns how many posts were sent to at least one channel. Each channel goes on its own:
+    when a send to one channel fails, that channel's later posts wait for the next delivery
+    (so they keep their order) and the other channels carry on.
+    """
     now = timezone.now()
     window_start = now - timedelta(hours=settings.SEND_RETRY_WINDOW_HOURS)
-    sent = 0
-    for post in list(_due_for_delivery(account, now)):
-        snapshot = SeenPost.objects.filter(pk=post.pk, status=post.status, claim_token=post.claim_token)
+    failing, sent_posts, touched = set(), set(), set()
+    for delivery in list(_due_for_delivery(account, now)):
+        if delivery.channel_id in failing:
+            continue
+        post, channel = delivery.post, delivery.channel
+        # The channel is part of the condition: a delivery moved to another channel (channel
+        # deleted with "move accounts") is left to the next delivery instead of being sent here.
+        snapshot = PostDelivery.objects.filter(pk=delivery.pk, status=delivery.status, channel_id=delivery.channel_id,
+                                               claim_token=delivery.claim_token)
 
         if post.seen_at < window_start:
-            if snapshot.update(status=SeenPost.FAILED, last_error=post.last_error or "Not sent within 24 hours.") == 1:
+            if snapshot.update(status=PostDelivery.FAILED, next_attempt_at=None,
+                               last_error=delivery.last_error or "Not sent within 24 hours.") == 1:
+                touched.add(post.pk)
                 activity.problem(activity.SEND_GAVE_UP, "send_expired",
                                  f'A post from @{account.handle} was never sent to "{channel.name}": '
                                  f"it couldn't be sent within {settings.SEND_RETRY_WINDOW_HOURS} hours.",
-                                 account=account, channel=channel, attempt=post.attempts or None,
-                                 detail=_post_detail(post), technical=post.last_error)
+                                 account=account, channel=channel, attempt=delivery.attempts or None,
+                                 detail=_post_detail(post), technical=delivery.last_error)
             continue
 
         token = uuid.uuid4().hex
-        if snapshot.update(status=SeenPost.SENDING, claim_token=token, claimed_at=timezone.now(),
+        if snapshot.update(status=PostDelivery.SENDING, claim_token=token, claimed_at=timezone.now(),
                            attempts=F("attempts") + 1) != 1:
             continue  # another process claimed it between our read and our update
+        touched.add(post.pk)
 
-        extra = {"kind": post.kind} if post.kind in (REPOST, REPLY) else {}  # plain posts: as before
-        result = sender.deliver_alert(
-            webhook_url=webhook_url,
-            handle=account.handle,
-            display_name=account.display_name or account.handle,
-            text=post.text,
-            post_url=post.post_url,
-            **extra,
-        )
-        mine = SeenPost.objects.filter(pk=post.pk, claim_token=token)
+        role, result = _mention_for(delivery, account, post)
+        if result is None:
+            extra = {"kind": post.kind} if post.kind in (REPOST, REPLY) else {}  # plain posts: as before
+            if role:
+                extra["role_id"] = role
+            result = sender.deliver_alert(
+                webhook_url=channel.url,
+                handle=account.handle,
+                display_name=account.display_name or account.handle,
+                text=post.text,
+                post_url=post.post_url,
+                **extra,
+            )
+        mine = PostDelivery.objects.filter(pk=delivery.pk, claim_token=token)
         channels.record_delivery(channel.pk, result.ok, result.error)
-        attempts = post.attempts + 1
+        attempts = delivery.attempts + 1
         max_attempts = settings.SEND_MAX_ATTEMPTS
         where = f'@{account.handle} to "{channel.name}"'
         if result.ok:
-            mine.update(status=SeenPost.SENT, sent_at=timezone.now(), next_attempt_at=None, last_error="")
-            sent += 1
-            logger.info("Sent post from %s: %s", account.handle, post.post_uri)
+            mine.update(status=PostDelivery.SENT, sent_at=timezone.now(), next_attempt_at=None, last_error="")
+            sent_posts.add(post.pk)
+            logger.info("Sent post from %s to channel %s: %s", account.handle, channel.pk, post.post_uri)
+            mention = " with the role mention" if role else ""
             retry_note = f" It worked on try {attempts} of {max_attempts}." if attempts > 1 else ""
-            activity.record(activity.POST_SENT, ActivityEvent.SUCCESS, f"Sent a post from {where}.{retry_note}",
-                            account=account, channel=channel, attempt=attempts, detail=_post_detail(post))
+            activity.record(activity.POST_SENT, ActivityEvent.SUCCESS, f"Sent a post from {where}{mention}.{retry_note}",
+                            account=account, channel=channel, attempt=attempts,
+                            detail=_post_detail(post, **({"role_id": role} if role else {})))
             continue
 
+        failing.add(channel.pk)  # this channel's later posts wait, to keep their order
         category = result.category or "discord_error"
         if attempts >= max_attempts:
-            mine.update(status=SeenPost.FAILED, last_error=result.error[:500])
-            logger.error("Gave up sending %s after %d attempts", post.post_uri, attempts)
+            mine.update(status=PostDelivery.FAILED, next_attempt_at=None, last_error=result.error[:500])
+            logger.error("Gave up sending %s to channel %s after %d attempts", post.post_uri, channel.pk, attempts)
             activity.problem(activity.SEND_GAVE_UP, category,
                              f"Gave up sending a post from {where} after {attempts} tries. {result.error}",
                              account=account, channel=channel, attempt=attempts,
@@ -291,7 +361,7 @@ def deliver_pending(account: MonitoredAccount) -> int:
             if result.retry_after:
                 delay = max(delay, timedelta(seconds=result.retry_after))
             next_at = timezone.now() + delay
-            mine.update(status=SeenPost.RETRY, next_attempt_at=next_at, last_error=result.error[:500])
+            mine.update(status=PostDelivery.RETRY, next_attempt_at=next_at, last_error=result.error[:500])
             activity.problem(activity.SEND_FAILED, category,
                              f"Couldn't send a post from {where} (try {attempts} of {max_attempts}). "
                              f"{result.error} The bot will try again in about {_wait_text(delay)}.",
@@ -299,9 +369,9 @@ def deliver_pending(account: MonitoredAccount) -> int:
                              detail=_post_detail(post, http_status=result.status_code,
                                                  next_attempt_at=next_at.isoformat()),
                              technical=result.technical)
-        # The channel is failing; leave this account's other posts for the next delivery.
-        break
-    return sent
+    for post_id in touched:
+        refresh_post_status(post_id)
+    return len(sent_posts)
 
 
 # -- checking -------------------------------------------------------------------
@@ -318,7 +388,7 @@ def poll_account(account: MonitoredAccount, session=None) -> int:
     if token is None:
         raise AccountBusy(account.handle)
     try:
-        account.refresh_from_db(fields=["first_poll_done", "is_active", "display_name", "channel", "last_check_ok",
+        account.refresh_from_db(fields=["first_poll_done", "is_active", "display_name", "last_check_ok",
                                         "announce_posts", "announce_reposts", "announce_replies"])
         # Bluesky trouble never blocks Discord retries of posts already claimed.
         try:
@@ -335,18 +405,18 @@ def poll_account(account: MonitoredAccount, session=None) -> int:
         _check_ok(account)
 
         is_first_poll = not account.first_poll_done
-        has_channel = bool(_webhook_for(account))
+        targets = channels.targets_for(account)
         for item in items:
             kind = item_kind(item)
             if is_first_poll:
                 status = SeenPost.SEEDED
             elif not account.announces(kind):
                 status = SeenPost.SKIPPED  # this kind is switched off for the account: noted, never sent
-            elif has_channel:
+            elif targets:
                 status = SeenPost.PENDING
             else:
                 status = SeenPost.SKIPPED  # no channel set: noted, never sent (as before)
-            if not claim_post(account, item, status, kind=kind):
+            if not claim_post(account, item, status, kind=kind, targets=targets):
                 continue
             report.new_posts += 1
             if status == SeenPost.SKIPPED:

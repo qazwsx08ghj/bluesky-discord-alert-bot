@@ -4,7 +4,8 @@ finished post records; older finished records are deleted.
 Why it's safe: a check reads an account's feed from the newest post down and stops at the
 first post it already knows, and the first check notes only the newest page (30 posts).
 The newest 1,000 records per account always include those, so nothing old is announced
-again. Posts still waiting to be sent (pending, sending, retry) are never deleted.
+again. Posts still waiting to be sent to any channel (pending) are never deleted; a post's
+deliveries are deleted with it.
 
 Runs after every check (bluesky_monitor/scheduler.py). A failure is only logged.
 """
@@ -17,7 +18,7 @@ from .models import MonitoredAccount, SeenPost
 
 logger = logging.getLogger(__name__)
 
-FINISHED = (SeenPost.SEEDED, SeenPost.SENT, SeenPost.FAILED, SeenPost.SKIPPED)
+FINISHED = (SeenPost.SEEDED, SeenPost.SENT, SeenPost.PARTLY_SENT, SeenPost.FAILED, SeenPost.SKIPPED)
 
 
 def prune_seen_posts(keep=None) -> int:
@@ -28,9 +29,9 @@ def prune_seen_posts(keep=None) -> int:
         ids = SeenPost.objects.filter(account_id=account_id).order_by("-id").values_list("id", flat=True)
         boundary = list(ids[keep:keep + 1])
         if boundary:
-            count, _ = SeenPost.objects.filter(account_id=account_id, id__lte=boundary[0],
-                                               status__in=FINISHED).delete()
-            removed += count
+            _, per_model = SeenPost.objects.filter(account_id=account_id, id__lte=boundary[0],
+                                                   status__in=FINISHED).delete()
+            removed += per_model.get(SeenPost._meta.label, 0)  # posts, not their deliveries
     if removed:
         logger.info("Post history clean-up: removed %d old records", removed)
     return removed

@@ -14,9 +14,11 @@ A quick reference to the main product and architecture decisions: what was decid
 - *Tradeoff:* with replies off, only the first post of a thread is sent. Switching a type on later never sends old items.
 - *Details:* [ACCOUNTS_AND_CHECKS.md](ACCOUNTS_AND_CHECKS.md); decision 1 in [history/API_REVIEW.md](history/API_REVIEW.md), section 7.
 
-**3. Named Discord channels with one default; each account follows the default or uses its own channel.**
-- *Why:* one place to change a webhook, and accounts can be grouped by channel.
-- *Tradeoff:* deleting a channel that's in use, or the default, needs a reassignment first. Nothing is ever left without a destination silently.
+**3. Named Discord channels with one default; each account sends to 1 to 10 of them (the default among them, if it likes), each with an optional role to mention.**
+- *Why:* one place to change a webhook, accounts can be grouped by channel, and one account can reach several communities.
+- *How:* one delivery per post per channel, made when the post is noticed, with its own retries. Changing channels or roles never sends old posts again; removing a channel cancels its unsent deliveries, but a send in progress can't be recalled.
+- *Mentions:* only a role the user typed in, restricted with `allowed_mentions` (`parse` always empty). A webhook can't see the server's roles, so the only role check beyond the format is that the ID isn't the server's own ID (@everyone).
+- *Tradeoff:* deleting a channel that's in use, or the default, needs a reassignment first. Nothing is ever left without a destination silently. Going back to the single-channel database layout isn't lossless; the backup made before the upgrade is the full rollback.
 - *Details:* [CHANNELS.md](CHANNELS.md).
 
 **4. Activity history is kept for 30 days, and at most 10,000 events.**
@@ -95,3 +97,9 @@ A quick reference to the main product and architecture decisions: what was decid
 - *Why:* fast, careful progress, with the maintainer deciding and approving.
 - *Tradeoff:* not every line has been read by a human; the tests and reviews are the safeguard.
 - *Details:* [CONTRIBUTING.md](../CONTRIBUTING.md), section 10; [TESTING.md](TESTING.md).
+
+**18. An older version never runs on data a newer version has updated (from 1.0.0-rc.2).**
+- *Why:* each test version is its own download folder, and an old folder's scripts are easy to double-click by mistake.
+- *How:* the database's migrations tell which version updated it last. The scripts stop before replacing the running bot, the web start shows a warning page instead of backing up or migrating, and the checker waits.
+- *Tradeoff:* 1.0.0-rc.1 doesn't have the check and can't be given it; the instructions say to delete the old folder after an update.
+- *Details:* [DOCKER.md](DOCKER.md), "Older versions and newer data".

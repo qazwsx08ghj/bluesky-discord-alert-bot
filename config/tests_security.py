@@ -12,7 +12,7 @@ from django.db import connection
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
-from bluesky_monitor.models import CheckJob, MonitoredAccount, SeenPost
+from bluesky_monitor.models import AccountDestination, CheckJob, MonitoredAccount, SeenPost
 from botconfig import store
 from discord_alerts import channels
 from discord_alerts.models import DiscordWebhook
@@ -82,7 +82,8 @@ class SecurityTestCase(TestCase):
     def snapshot(self):
         row = store.get()
         return (
-            list(MonitoredAccount.objects.order_by("id").values_list("handle", "is_active", "channel_id")),
+            list(MonitoredAccount.objects.order_by("id").values_list("handle", "is_active")),
+            list(AccountDestination.objects.order_by("id").values_list("account_id", "channel_id", "role_id")),
             list(DiscordWebhook.objects.order_by("id").values_list("name", "url", "is_default")),
             (row.version, row.bluesky_password, row.poll_interval_minutes),
             CheckJob.objects.count(), SeenPost.objects.count(),

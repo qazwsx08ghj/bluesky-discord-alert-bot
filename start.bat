@@ -12,6 +12,7 @@ call "%COMMON%" :is_set_up
 if errorlevel 1 goto :first_time
 
 call "%COMMON%" :check_port || goto :failed
+call "%COMMON%" :check_compat || goto :failed
 echo  Starting the bot...
 call "%COMMON%" :up || goto :failed
 call "%COMMON%" :wait_ready || goto :failed

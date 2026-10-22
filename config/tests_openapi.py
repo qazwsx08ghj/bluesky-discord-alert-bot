@@ -25,8 +25,8 @@ from rest_framework.test import APIClient
 
 from activity import log as activity
 from bluesky_monitor import bluesky, jobs, locks, profiles, scheduler
-from bluesky_monitor.models import BlueskySessionState, MonitoredAccount, SchedulerState, SeenPost
-from bluesky_monitor.tests import FakeSession, feed_item
+from bluesky_monitor.models import BlueskySessionState, MonitoredAccount, PostDelivery, SchedulerState, SeenPost
+from bluesky_monitor.tests import FakeSession, claim_with_state, feed_item, with_channel
 from botconfig import store
 from discord_alerts import channels
 from discord_alerts.models import DiscordWebhook
@@ -106,6 +106,9 @@ class ContractTestCase(TestCase):
         scheduler.heartbeat("T")
 
 
+ROLE = "1189000000000000123"
+
+
 @tag("contract")
 class ContractFileTests(TestCase):
     def test_the_committed_contract_matches_the_code(self):
@@ -165,8 +168,7 @@ class StatusAndHealthTests(ContractTestCase):
             handle="bot.bsky.social", credential_fingerprint=_fingerprint("bot.bsky.social", PASSWORD),
             login_failures=1, login_retry_after=now + timedelta(minutes=10)))
         acc = MonitoredAccount.objects.get()
-        SeenPost.objects.create(account=acc, post_uri="at://x/app.bsky.feed.post/1", post_cid="c", status=SeenPost.RETRY,
-                                next_attempt_at=now + timedelta(minutes=1))
+        claim_with_state(acc, feed_item("1"), PostDelivery.RETRY, next_attempt_at=now + timedelta(minutes=1))
         activity.problem(activity.SEND_FAILED, "discord_unavailable", "Couldn't send.", account=acc, channel=self.main,
                          level="warning", attempt=1)
         body = self.check(self.client.get("/api/status/"), "/api/status/")
@@ -224,9 +226,10 @@ class SettingsTests(ContractTestCase):
 class AccountTests(ContractTestCase):
     def accounts_in_every_state(self):
         now = timezone.now()
-        MonitoredAccount.objects.create(handle="active.bsky.social", first_poll_done=True, last_checked_at=now,
-                                        last_check_ok=True, last_success_at=now, first_checked_at=now,
-                                        first_check_posts=3, channel=self.art)
+        active = MonitoredAccount.objects.create(handle="active.bsky.social", first_poll_done=True, last_checked_at=now,
+                                                 last_check_ok=True, last_success_at=now, first_checked_at=now,
+                                                 first_check_posts=3)
+        channels.set_destinations(active, [{"channel": self.art, "role_id": ROLE}, {"channel": None, "role_id": ""}])
         MonitoredAccount.objects.create(handle="paused.bsky.social", is_active=False, first_poll_done=True)
         MonitoredAccount.objects.create(handle="new.bsky.social")
         MonitoredAccount.objects.create(handle="broken.bsky.social", first_poll_done=True, last_checked_at=now,
@@ -245,14 +248,16 @@ class AccountTests(ContractTestCase):
         body = self.check(self.client.get("/api/accounts/"), "/api/accounts/")
         self.assertEqual({a["state"] for a in body["results"]},
                          {"active", "paused", "waiting_first_check", "error", "checking"})
-        new = {"handle": "@artist.bsky.social", "display_name": "Artist", "channel_id": self.art.id, "is_active": True,
+        new = {"handle": "@artist.bsky.social", "display_name": "Artist", "is_active": True,
+               "destinations": [{"channel_id": self.art.id, "role_id": ROLE}, {"channel_id": None}],
                "announce_posts": True, "announce_reposts": False, "announce_replies": True}
         self.check_request(new, "/api/accounts/", "post")
         created = self.check(self.client.post("/api/accounts/", new, format="json"), "/api/accounts/", "post")
         detail = f"/api/accounts/{created['id']}/"
         self.check(self.client.get(detail), "/api/accounts/{id}/")
         self.check_request({"is_active": False}, "/api/accounts/{id}/", "patch")
-        self.check(self.client.patch(detail, {"is_active": False, "channel_id": None}, format="json"),
+        self.check(self.client.patch(detail, {"is_active": False, "destinations": [{"channel_id": None, "role_id": ""}]},
+                                     format="json"),
                    "/api/accounts/{id}/", "patch")
         self.check(self.client.put(detail, {"handle": "artist.bsky.social", "display_name": "A"}, format="json"),
                    "/api/accounts/{id}/", "put")
@@ -264,7 +269,11 @@ class AccountTests(ContractTestCase):
         MonitoredAccount.objects.create(handle="taken.bsky.social")
         for body in ({"handle": "taken.bsky.social"}, {"handle": "has spaces"}, {"handle": "x.bsky.social",
                                                                                   "discord_webhook_url": HOOK},
-                     {"handle": "y.bsky.social", "channel_id": 999}):
+                     {"handle": "y.bsky.social", "channel_id": 999},
+                     {"handle": "y.bsky.social", "destinations": [{"channel_id": 999}]},
+                     {"handle": "y.bsky.social", "destinations": []},
+                     {"handle": "y.bsky.social", "destinations": [{"channel_id": None}, {"channel_id": None,
+                                                                                         "role_id": "@everyone"}]}):
             self.check(self.client.post("/api/accounts/", body, format="json"), "/api/accounts/", "post")
         res = self.client.generic("POST", "/api/accounts/", "{not json", content_type="application/json")
         self.assertEqual(self.check(res, "/api/accounts/", "post")["code"], "invalid_json")
@@ -330,7 +339,7 @@ class CheckJobTests(ContractTestCase):
 class ChannelTests(ContractTestCase):
     def test_list_create_read_change_test_delete(self):
         self.setup_bot()
-        MonitoredAccount.objects.create(handle="a.bsky.social", channel=self.art)
+        with_channel(MonitoredAccount.objects.create(handle="a.bsky.social"), self.art)
         self.check(self.client.get("/api/webhooks/"), "/api/webhooks/")
         new = {"name": "news", "url": "https://discord.com/api/webhooks/300/new-token", "is_default": False}
         self.check_request(new, "/api/webhooks/", "post")
@@ -353,7 +362,7 @@ class ChannelTests(ContractTestCase):
 
     def test_channel_errors(self):
         self.setup_bot()
-        MonitoredAccount.objects.create(handle="a.bsky.social", channel=self.art)
+        with_channel(MonitoredAccount.objects.create(handle="a.bsky.social"), self.art)
         for body in ({"name": "x"}, {"name": "ART", "url": HOOK2 + "x"}, {"name": "y", "url": "https://example.com/h"}):
             self.check(self.client.post("/api/webhooks/", body, format="json"), "/api/webhooks/", "post")
         art = f"/api/webhooks/{self.art.id}/"

@@ -15,6 +15,9 @@ Terms used in the Traditional Chinese (Taiwan) documents, so translations stay c
 | sign in / log in | 登入 | |
 | webhook, Webhook URL | Webhook、Webhook 網址 | keep "Webhook" untranslated, as Discord does |
 | channel / default channel | 頻道／預設頻道 | |
+| role / Role ID | 身分組／身分組 ID | Discord 介面的用語 |
+| mention a role | 提及身分組 | 訊息裡的 @身分組，會提醒組員 |
+| Developer Mode | 開發者模式 | Discord 使用者設定 → 進階 |
 | server (Discord) | 伺服器 | |
 | check, Check now, Check all | 檢查、立即檢查、全部檢查 | |
 | checker | 檢查程式 | the background service |

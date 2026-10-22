@@ -27,7 +27,7 @@ Every few minutes the bot looks at the Bluesky accounts you picked. When one of 
 Clicking the title opens the post on Bluesky.
 
 - **Any public account works.** It doesn't have to be yours.
-- **Several Discord channels:** each account can notify its own channel, or your default one.
+- **Several Discord channels:** each account can notify up to 10 channels, or just your default one. In each channel you can also mention a Discord role, so its members get pinged.
 - **No flood of old posts.** When you add an account, its existing posts are skipped; only new ones are sent.
 - **Runs on your own computer.** Your password and settings stay there; only the notifications go to Discord.
 
@@ -108,6 +108,18 @@ Press **Send test message** and look in your Discord channel. If nothing arrives
 
 Type the handle of any public Bluesky account. The panel shows the profile so you can check it's the right one. **Nothing appears in Discord until that account posts something new.**
 
+### 5. Optional: more channels, and mentioning a role
+
+An account can send its notifications to several channels: under **Discord channels**, click **Add another channel**.
+
+Next to each channel there's an optional **Role to mention** box. Leave it empty for a normal notification. To ping a Discord role, paste the role's ID:
+
+1. In Discord, open **User Settings → Advanced** and turn on **Developer Mode**.
+2. Open your server's **Server Settings → Roles**.
+3. Click **…** next to the role and choose **Copy Role ID**.
+
+@everyone and @here can't be used. Changes only affect new posts; old posts are never sent again.
+
 ---
 
 ## Every day
@@ -134,6 +146,20 @@ The status at the bottom of the sidebar shows whether the bot is running. If som
 | `setup.bat` | First-time installation (safe to run again) |
 
 **The bot runs while Docker Desktop runs.** If Docker Desktop is closed or the computer is off, notifications pause and start again by themselves when Docker Desktop is back.
+
+### Moving to a newer download (test versions)
+
+`update.bat` keeps the version its download is for: the normal (stable) download always gets the newest version. A test version ("rc", for example `1.0.0-rc.2`) is its own download. To move to a newer one:
+
+1. Download the new zip, **Unblock** it (right-click → **Properties**), and **Extract All** into a **new folder**.
+2. Double-click **`update.bat` in the new folder.** It backs up your data first, then installs the new version. Your accounts, settings, channels and history are kept. At the end it names your old folder.
+3. From then on, use only the new folder, and **delete the old one** once you're happy with the new version. Your backups stay available: `restore.bat` in the new folder lists them all.
+
+**Don't use the old folder's files after the update.** They belong to the older version, which can't use the updated data:
+- From 1.0.0-rc.2 on, an older folder's scripts notice this. They stop with a warning and change nothing, and the newer bot keeps running.
+- **1.0.0-rc.1's scripts can't check this.** Its `start.bat` (or `update.bat`) replaces your bot with the older version: notifications stop and the Accounts page shows errors. Your accounts and history aren't changed. To fix it, double-click `start.bat` in the new folder.
+
+**If the update fails,** it says what happened and deletes nothing. Run `update.bat` again; a broken download is a common cause. To go back to the version you had, double-click **`restore.bat` in the old folder** and choose the newest backup whose name starts with `db-before-update`. It backs up the current data first, puts the backup back and starts the older version.
 
 ---
 

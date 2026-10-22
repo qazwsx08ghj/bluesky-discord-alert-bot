@@ -90,30 +90,34 @@ docker build -t bluesky-alert-bot:local .          # also checks the license not
 | `activity/tests.py` | 68 | Activity log, problems and their fixes, `GET /api/status/` |
 | `bluesky_monitor/tests.py` | 19 | Watched accounts and the poller |
 | `bluesky_monitor/tests_delivery.py` | 19 | Claim-before-send, retries, interrupted sends, reading feeds |
+| `bluesky_monitor/tests_destinations.py` | 62 | Several channels per account: one delivery per channel, independent retries, role mentions and `allowed_mentions`, the @everyone (server ID) guard, Role ID checks, no resending after changes, deleting or moving channels without duplicates, and the database upgrade both ways |
 | `bluesky_monitor/tests_jobs.py` | 21 | Check All as a background job |
-| `bluesky_monitor/tests_processes.py` | 8 | Real separate Python processes sharing one SQLite file: locks, no duplicate notifications |
+| `bluesky_monitor/tests_processes.py` | 11 | Real separate Python processes sharing one SQLite file: locks, no duplicate notifications, also with two channels |
 | `bluesky_monitor/tests_scheduler.py` | 14 | Scheduler lease, restarts, standby takeover |
 | `bluesky_monitor/tests_session.py` | 15 | The shared Bluesky session: reuse, refresh, expiry, wrong password, network trouble |
 | `bluesky_monitor/tests_step6.py` | 50 | Profile lookup, login test, Check All, per-account status, post/repost/reply options |
 | `botconfig/tests.py`, `tests_step8.py` | 27, 17 | Settings in the database, the one-time import, backup and restore, Docker start-up commands |
-| `discord_alerts/tests.py`, `tests_channels.py` | 9, 46 | Webhooks and sending (Discord is always mocked), named channels |
+| `botconfig/tests_compat.py` | 14 | An older version never runs on newer data: the web start stops before the backup and migrations, the scripts' check answers 3, the checker waits, scheduled checks stop, and the warning page answers every request without the database |
+| `discord_alerts/tests.py`, `tests_channels.py` | 9, 47 | Webhooks and sending (Discord is always mocked), named channels |
 | `config/tests_security.py` | 32 | CSRF, Origin and host checks, JSON-only bodies, headers, no admin |
-| `config/tests_frontend.py` | 16 | Serving the built panel: headers, CSP, file rules, the notices page |
+| `config/tests_frontend.py` | 17 | Serving the built panel: headers, CSP, file rules, the notices page |
 | `config/tests_openapi.py` | 19 | Every API operation's real answers against `docs/openapi.yaml` (tag `contract`) |
 | `config/tests_notices.py` | 14 | `THIRD_PARTY_NOTICES.txt` is complete, current and shipped everywhere |
-| `config/tests_docs.py` | 21 | Links, the English and Chinese documents, the archive, templates, the release check |
+| `config/tests_docs.py` | 24 | Links, the English and Chinese documents, the archive, templates, the release check |
 | `config/tests_wording.py` | 4 | The panel and backend messages say "notification"; no development-step labels in code or the API contract |
-| `config/tests_deploy.py` | 45 | Docker files, the dev stack's settings, and the real `.bat` scripts under `cmd.exe` with a fake Docker (Windows only) |
+| `config/tests_deploy.py` | 55 | Docker files, the dev stack's settings, and the real `.bat` scripts under `cmd.exe` with a fake Docker (Windows only), including an older folder's scripts on newer data and naming the folder used before |
 | `config/tests.py`, `tests_step10.py` | 9, 10 | Settings API, removed routes, migrations of legacy data |
 | `config/tests_docker.py` | 11 | Opt-in, with **real containers** driven by the real scripts. It covers: `setup.bat` importing an earlier install, `start.bat`, `update.bat` backing up first, `stop.bat` and `restore.bat`; local-only access and CSRF in Docker; crash recovery; data kept across restarts, rebuilds and recreation; and the `@docker` browser checks. (`backup.bat` is covered by the fake-Docker script tests only.) |
 | `config/tests_dev_stack.py` | 6 | Opt-in: the demo stack has no mounts, credentials or internet, and Discord is fake |
 
 **Control panel:**
-- **Vitest** (`frontend/src/test/`, 51 tests) runs the whole panel in jsdom against a fake API (MSW). The fake API answers are type-checked against the generated contract types, and any request it doesn't know fails the test. The tests cover:
+- **Vitest** (`frontend/src/test/`, 58 tests) runs the whole panel in jsdom against a fake API (MSW). The fake API answers are type-checked against the generated contract types, and any request it doesn't know fails the test. The tests cover:
   - setup, accounts, Check All, settings, channels and activity;
+  - several channels per account, Role ID errors (from the browser and from the bot) on the right row, and the 10-channel limit;
   - CSRF retry, offline, secrets and keyboard use.
-- **Playwright** (`frontend/e2e/`, 15 tests) runs Chromium against the real Django app and checker started by `config/testing/demo_server.py`. It covers:
+- **Playwright** (`frontend/e2e/`, 16 tests) runs Chromium against the real Django app and checker started by `config/testing/demo_server.py`. It covers:
   - the setup-to-first-account flow and Check now sending a post;
+  - an account sending to two channels with a role in one: exactly what each channel receives (message text and `allowed_mentions`), and nothing sent twice;
   - Check All surviving a reload;
   - problems and their fixes;
   - keyboard-only use, tablet sizes and the CSP;

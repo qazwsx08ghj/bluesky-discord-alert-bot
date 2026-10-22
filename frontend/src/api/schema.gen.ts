@@ -16,7 +16,7 @@ export interface paths {
         put?: never;
         /**
          * Watch an account
-         * @description `handle` accepts @handle, a bsky.app link or a DID. Sending the removed `discord_webhook_url` field is refused; use `channel_id`.
+         * @description `handle` accepts @handle, a bsky.app link or a DID. Sending the removed `discord_webhook_url` and `channel_id` fields are refused; use `destinations` (without it, the account follows the default channel).
          */
         post: operations["accounts_create"];
         delete?: never;
@@ -41,7 +41,7 @@ export interface paths {
         delete: operations["accounts_destroy"];
         options?: never;
         head?: never;
-        /** Change an account (pause, channel, name, …) */
+        /** Change an account (pause, channels, name, …) */
         patch: operations["accounts_partial_update"];
         trace?: never;
     };
@@ -451,11 +451,10 @@ export interface components {
             announce_posts: boolean;
             announce_replies: boolean;
             announce_reposts: boolean;
-            readonly channel: components["schemas"]["AccountChannel"] | null;
-            channel_id: number | null;
             readonly checking_now: boolean;
             /** Format: date-time */
             readonly created_at: string;
+            destinations: components["schemas"]["Destination"][];
             display_name: string;
             readonly first_check: components["schemas"]["FirstCheck"];
             readonly first_poll_done: boolean;
@@ -473,11 +472,11 @@ export interface components {
             readonly state: components["schemas"]["AccountState"];
             readonly state_label: string;
             readonly state_message: string;
-            readonly uses_default_channel: boolean;
         };
         AccountChannel: {
-            id: number;
+            readonly id: number;
             is_default: boolean;
+            /** @description Friendly label, e.g. #announcements */
             name: string;
         };
         /** @enum {string} */
@@ -503,7 +502,7 @@ export interface components {
             announce_posts?: boolean;
             announce_replies?: boolean;
             announce_reposts?: boolean;
-            channel_id?: number | null;
+            destinations?: components["schemas"]["DestinationRequest"][];
             display_name?: string;
             /** @description e.g. user.bsky.social */
             handle: string;
@@ -707,6 +706,42 @@ export interface components {
             /** Format: date-time */
             since: string | null;
             title: string;
+        };
+        /** @enum {string} */
+        DeliveryStatus: "pending" | "sending" | "retry" | "sent" | "failed" | "cancelled";
+        /**
+         * @description One place an account's notifications go.
+         *
+         *     `channel_id`: a channel id, or null for "the default channel" (it follows the default,
+         *     also when the default changes later). `role_id`: the ID of a Discord role to mention in
+         *     that channel, or "" for no mention. Read-only: `channel` (null when following the
+         *     default) and `follows_default`.
+         */
+        Destination: {
+            readonly channel: components["schemas"]["AccountChannel"] | null;
+            channel_id: number | null;
+            readonly follows_default: boolean;
+            /**
+             * @description A Discord Role ID (17 to 20 digits) or the <@&ID> form; "" for no mention. @everyone and @here are refused.
+             * @default
+             */
+            role_id: string;
+        };
+        /**
+         * @description One place an account's notifications go.
+         *
+         *     `channel_id`: a channel id, or null for "the default channel" (it follows the default,
+         *     also when the default changes later). `role_id`: the ID of a Discord role to mention in
+         *     that channel, or "" for no mention. Read-only: `channel` (null when following the
+         *     default) and `follows_default`.
+         */
+        DestinationRequest: {
+            channel_id: number | null;
+            /**
+             * @description A Discord Role ID (17 to 20 digits) or the <@&ID> form; "" for no mention. @everyone and @here are refused.
+             * @default
+             */
+            role_id: string;
         };
         /**
          * @description Every error (except form field errors): a stable `code` for programs and a plain-language
@@ -932,7 +967,7 @@ export interface components {
             announce_posts?: boolean;
             announce_replies?: boolean;
             announce_reposts?: boolean;
-            channel_id?: number | null;
+            destinations?: components["schemas"]["DestinationRequest"][];
             display_name?: string;
             /** @description e.g. user.bsky.social */
             handle?: string;
@@ -968,13 +1003,16 @@ export interface components {
             was_first_poll: boolean;
         };
         /**
-         * @description A post the bot has noticed (GET /api/accounts/{id}/posts/). `status`: seeded (noted on
-         *     the first check, never sent), pending, sending, retry, sent, failed (gave up), skipped
-         *     (no channel, or notifications for that kind of post are off).
+         * @description A post the bot has noticed (GET /api/accounts/{id}/posts/).
+         *
+         *     `status` sums up its `deliveries` (one per channel): seeded (noted on the first check,
+         *     never sent), pending (a channel hasn't got it yet), sent (every channel got it),
+         *     partly_sent (some channels got it, some gave up), failed (no channel got it), skipped (no
+         *     channel, notifications for that kind of post are off, or every delivery was cancelled).
+         *     Posts sent before an upgrade to several channels have no `deliveries`.
          */
         Post: {
-            /** Format: int64 */
-            attempts: number;
+            readonly deliveries: components["schemas"]["PostDelivery"][];
             readonly id: number;
             kind: components["schemas"]["PostKind"] | components["schemas"]["BlankEnum"] | components["schemas"]["NullEnum"];
             post_uri: string;
@@ -986,10 +1024,26 @@ export interface components {
             status: components["schemas"]["PostStatus"];
             text: string;
         };
+        /**
+         * @description A post's notification to one channel. `status`: pending, sending, retry (waiting to try
+         *     again at `next_attempt_at`), sent, failed (gave up), cancelled (the channel was removed
+         *     from the account before it was sent). `role_id`: the role mentioned, or "" for none.
+         */
+        PostDelivery: {
+            /** Format: int64 */
+            attempts: number;
+            readonly channel: components["schemas"]["AccountChannel"];
+            /** Format: date-time */
+            next_attempt_at: string | null;
+            role_id: string;
+            /** Format: date-time */
+            sent_at: string | null;
+            status: components["schemas"]["DeliveryStatus"];
+        };
         /** @enum {string} */
         PostKind: "post" | "repost" | "reply";
         /** @enum {string} */
-        PostStatus: "seeded" | "pending" | "sending" | "retry" | "sent" | "failed" | "skipped";
+        PostStatus: "seeded" | "pending" | "sent" | "partly_sent" | "failed" | "skipped";
         /** @description A failure explained in plain language. `fix` says where the panel can fix it. */
         Problem: {
             /** @description Problem code, e.g. bluesky_login_rejected (docs/ACTIVITY_AND_STATUS.md). */
@@ -1155,14 +1209,16 @@ export interface operations {
                     "application/json": components["schemas"]["Account"];
                 };
             };
-            /** @description Form errors per field, e.g. {"handle": ["You're already watching @a.bsky.social."]}. No `code`: this shape is kept from the first API version. Or the standard error with code `invalid_json` when the body isn't valid JSON. */
+            /** @description Form errors per field, e.g. {"handle": ["You're already watching @a.bsky.social."]}. A list field has one object per item (empty when that item is fine), e.g. {"destinations": [{}, {"role_id": ["A Role ID is a long number, …"]}]}. No `code`: this shape is kept from the first API version. Or the standard error with code `invalid_json` when the body isn't valid JSON. */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": {
-                        [key: string]: string[];
+                        [key: string]: (string | {
+                            [key: string]: string[];
+                        })[];
                     } | components["schemas"]["Error"];
                 };
             };
@@ -1239,14 +1295,16 @@ export interface operations {
                     "application/json": components["schemas"]["Account"];
                 };
             };
-            /** @description Form errors per field, e.g. {"handle": ["You're already watching @a.bsky.social."]}. No `code`: this shape is kept from the first API version. Or the standard error with code `invalid_json` when the body isn't valid JSON. */
+            /** @description Form errors per field, e.g. {"handle": ["You're already watching @a.bsky.social."]}. A list field has one object per item (empty when that item is fine), e.g. {"destinations": [{}, {"role_id": ["A Role ID is a long number, …"]}]}. No `code`: this shape is kept from the first API version. Or the standard error with code `invalid_json` when the body isn't valid JSON. */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": {
-                        [key: string]: string[];
+                        [key: string]: (string | {
+                            [key: string]: string[];
+                        })[];
                     } | components["schemas"]["Error"];
                 };
             };
@@ -1349,14 +1407,16 @@ export interface operations {
                     "application/json": components["schemas"]["Account"];
                 };
             };
-            /** @description Form errors per field, e.g. {"handle": ["You're already watching @a.bsky.social."]}. No `code`: this shape is kept from the first API version. Or the standard error with code `invalid_json` when the body isn't valid JSON. */
+            /** @description Form errors per field, e.g. {"handle": ["You're already watching @a.bsky.social."]}. A list field has one object per item (empty when that item is fine), e.g. {"destinations": [{}, {"role_id": ["A Role ID is a long number, …"]}]}. No `code`: this shape is kept from the first API version. Or the standard error with code `invalid_json` when the body isn't valid JSON. */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": {
-                        [key: string]: string[];
+                        [key: string]: (string | {
+                            [key: string]: string[];
+                        })[];
                     } | components["schemas"]["Error"];
                 };
             };
@@ -2052,14 +2112,16 @@ export interface operations {
                     "application/json": components["schemas"]["Channel"];
                 };
             };
-            /** @description Form errors per field, e.g. {"handle": ["You're already watching @a.bsky.social."]}. No `code`: this shape is kept from the first API version. Or the standard error with code `invalid_json` when the body isn't valid JSON. */
+            /** @description Form errors per field, e.g. {"handle": ["You're already watching @a.bsky.social."]}. A list field has one object per item (empty when that item is fine), e.g. {"destinations": [{}, {"role_id": ["A Role ID is a long number, …"]}]}. No `code`: this shape is kept from the first API version. Or the standard error with code `invalid_json` when the body isn't valid JSON. */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": {
-                        [key: string]: string[];
+                        [key: string]: (string | {
+                            [key: string]: string[];
+                        })[];
                     } | components["schemas"]["Error"];
                 };
             };
@@ -2138,14 +2200,16 @@ export interface operations {
                     "application/json": components["schemas"]["Channel"];
                 };
             };
-            /** @description Form errors per field, e.g. {"handle": ["You're already watching @a.bsky.social."]}. No `code`: this shape is kept from the first API version. Or the standard error with code `invalid_json` when the body isn't valid JSON. */
+            /** @description Form errors per field, e.g. {"handle": ["You're already watching @a.bsky.social."]}. A list field has one object per item (empty when that item is fine), e.g. {"destinations": [{}, {"role_id": ["A Role ID is a long number, …"]}]}. No `code`: this shape is kept from the first API version. Or the standard error with code `invalid_json` when the body isn't valid JSON. */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": {
-                        [key: string]: string[];
+                        [key: string]: (string | {
+                            [key: string]: string[];
+                        })[];
                     } | components["schemas"]["Error"];
                 };
             };
@@ -2271,14 +2335,16 @@ export interface operations {
                     "application/json": components["schemas"]["Channel"];
                 };
             };
-            /** @description Form errors per field, e.g. {"handle": ["You're already watching @a.bsky.social."]}. No `code`: this shape is kept from the first API version. Or the standard error with code `invalid_json` when the body isn't valid JSON. */
+            /** @description Form errors per field, e.g. {"handle": ["You're already watching @a.bsky.social."]}. A list field has one object per item (empty when that item is fine), e.g. {"destinations": [{}, {"role_id": ["A Role ID is a long number, …"]}]}. No `code`: this shape is kept from the first API version. Or the standard error with code `invalid_json` when the body isn't valid JSON. */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": {
-                        [key: string]: string[];
+                        [key: string]: (string | {
+                            [key: string]: string[];
+                        })[];
                     } | components["schemas"]["Error"];
                 };
             };

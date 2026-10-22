@@ -42,10 +42,21 @@ function fieldErrors(body: Record<string, unknown>): Record<string, string[]> {
   >;
   const out: Record<string, string[]> = {};
   for (const [key, value] of Object.entries(source)) {
-    if (Array.isArray(value)) out[key] = value.map(String);
-    else if (typeof value === "string" && key !== "detail") out[key] = [value];
+    if (key !== "detail") flatten(key, value, out);
   }
   return out;
+}
+
+/** A list field's errors come per item ({destinations: [{}, {role_id: ["…"]}]}): they become
+ * "destinations.1.role_id". Plain messages stay under their field. */
+function flatten(key: string, value: unknown, out: Record<string, string[]>) {
+  if (typeof value === "string") {
+    (out[key] ??= []).push(value);
+  } else if (Array.isArray(value)) {
+    value.forEach((item, index) => (typeof item === "string" ? flatten(key, item, out) : flatten(`${key}.${index}`, item, out)));
+  } else if (value && typeof value === "object") {
+    for (const [inner, innerValue] of Object.entries(value)) flatten(`${key}.${inner}`, innerValue, out);
+  }
 }
 
 function messageFor(status: number, body: Record<string, unknown>, fields: Record<string, string[]>): string {

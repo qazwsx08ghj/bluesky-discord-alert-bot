@@ -21,8 +21,8 @@ from django.test import TestCase, TransactionTestCase, override_settings
 from rest_framework.test import APITestCase
 
 from bluesky_monitor import poller
-from bluesky_monitor.models import MonitoredAccount, SeenPost
-from bluesky_monitor.tests import FakeSession, feed_item
+from bluesky_monitor.models import AccountDestination, MonitoredAccount, PostDelivery
+from bluesky_monitor.tests import FakeSession, channel_ids, feed_item, with_channel
 from botconfig import store
 from . import channels, sender
 from .logfilter import RedactWebhooks, redact
@@ -98,15 +98,17 @@ class MigrationTests(TransactionTestCase):
     def test_accounts_get_channels_and_followers_follow_the_default(self):
         self.old_setup()
         self.migrate_to_latest()
-        own = MonitoredAccount.objects.get(handle="own.bsky.social")
-        self.assertEqual(own.channel.name, "Channel for @own.bsky.social")
-        self.assertEqual(MonitoredAccount.objects.get(handle="shares.bsky.social").channel, own.channel,
-                         "the same URL becomes one shared channel")
-        self.assertEqual(MonitoredAccount.objects.get(handle="listed.bsky.social").channel.name, "#art",
-                         "an existing channel with that URL is reused")
-        self.assertIsNone(MonitoredAccount.objects.get(handle="follows.bsky.social").channel)
-        explicit = MonitoredAccount.objects.get(handle="same-as-default.bsky.social")
-        self.assertIsNotNone(explicit.channel, "an explicit URL stays explicit even if it equals the default")
+
+        def channel(handle):  # each account has exactly one destination after the upgrade
+            return AccountDestination.objects.get(account__handle=handle).channel
+
+        own = channel("own.bsky.social")
+        self.assertEqual(own.name, "Channel for @own.bsky.social")
+        self.assertEqual(channel("shares.bsky.social"), own, "the same URL becomes one shared channel")
+        self.assertEqual(channel("listed.bsky.social").name, "#art", "an existing channel with that URL is reused")
+        self.assertIsNone(channel("follows.bsky.social"))
+        self.assertIsNotNone(channel("same-as-default.bsky.social"),
+                             "an explicit URL stays explicit even if it equals the default")
 
     def test_the_saved_default_url_becomes_the_only_default(self):
         self.old_setup()
@@ -149,10 +151,10 @@ class RoutingTests(TestCase):
         channels.make_default(self.default)
         self.other = DiscordWebhook.objects.create(name="#art", url=B)
         self.follower = MonitoredAccount.objects.create(handle="f.bsky.social", first_poll_done=True)
-        self.explicit = MonitoredAccount.objects.create(handle="e.bsky.social", first_poll_done=True,
-                                                        channel=self.other)
-        self.pinned = MonitoredAccount.objects.create(handle="p.bsky.social", first_poll_done=True,
-                                                      channel=self.default)  # chose #general on purpose
+        self.explicit = with_channel(MonitoredAccount.objects.create(handle="e.bsky.social", first_poll_done=True),
+                                     self.other)
+        self.pinned = with_channel(MonitoredAccount.objects.create(handle="p.bsky.social", first_poll_done=True),
+                                   self.default)  # chose #general on purpose
 
     def routes(self):
         return {a.handle: channels.route_for(a).name for a in MonitoredAccount.objects.order_by("handle")}
@@ -211,38 +213,48 @@ class AccountChannelApiTests(NoTokens, APITestCase):
         self.art = DiscordWebhook.objects.create(name="#art", url=B)
 
     def test_create_with_a_channel(self):
-        res = self.client.post(self.url, {"handle": "a.bsky.social", "channel_id": self.art.id}, format="json")
+        res = self.client.post(self.url, {"handle": "a.bsky.social",
+                                          "destinations": [{"channel_id": self.art.id, "role_id": ""}]}, format="json")
         self.assertEqual(res.status_code, 201)
-        self.assertEqual(res.data["channel"], {"id": self.art.id, "name": "#art", "is_default": False})
-        self.assertFalse(res.data["uses_default_channel"])
+        self.assertEqual(res.data["destinations"], [{
+            "channel_id": self.art.id, "role_id": "", "follows_default": False,
+            "channel": {"id": self.art.id, "name": "#art", "is_default": False}}])
         self.assert_no_tokens(res.data)
 
     def test_create_without_a_channel_follows_the_default(self):
         res = self.client.post(self.url, {"handle": "a.bsky.social"}, format="json")
-        self.assertTrue(res.data["uses_default_channel"])
-        self.assertIsNone(res.data["channel"])
+        self.assertEqual(res.data["destinations"], [{"channel_id": None, "role_id": "", "follows_default": True,
+                                                     "channel": None}])
         self.assertNotIn("discord_webhook_url", res.data, "no longer part of the API")
+        self.assertNotIn("channel_id", res.data, "replaced by destinations")
         self.assertNotIn("seen_posts", res.data, "no longer in the list; see /posts/")
 
     def test_the_removed_url_field_is_refused_with_a_pointer(self):
-        """Accounts pick a channel by channel_id; a webhook URL isn't silently ignored."""
+        """Accounts pick channels with destinations; a webhook URL isn't silently ignored."""
         res = self.client.post(self.url, {"handle": "a.bsky.social", "discord_webhook_url": B}, format="json")
         self.assertEqual(res.status_code, 400)
-        self.assertIn("channel_id", res.data["discord_webhook_url"][0])
+        self.assertIn("destinations", res.data["discord_webhook_url"][0])
         self.assert_no_tokens(res.data)
         self.assertFalse(MonitoredAccount.objects.exists())
 
+    def test_the_removed_channel_id_field_is_refused_with_a_pointer(self):
+        """An older client choosing one channel isn't silently ignored."""
+        res = self.client.post(self.url, {"handle": "a.bsky.social", "channel_id": self.art.id}, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("destinations", res.data["channel_id"][0])
+        self.assertFalse(MonitoredAccount.objects.exists())
+
     def test_switch_back_to_the_default(self):
-        acc = MonitoredAccount.objects.create(handle="a.bsky.social", channel=self.art)
-        res = self.client.patch(f"{self.url}{acc.id}/", {"channel_id": None}, format="json")
-        self.assertTrue(res.data["uses_default_channel"])
-        acc.refresh_from_db()
-        self.assertIsNone(acc.channel_id)
+        acc = with_channel(MonitoredAccount.objects.create(handle="a.bsky.social"), self.art)
+        res = self.client.patch(f"{self.url}{acc.id}/", {"destinations": [{"channel_id": None}]}, format="json")
+        self.assertTrue(res.data["destinations"][0]["follows_default"])
+        self.assertEqual(channel_ids(acc), [None])
 
     def test_unknown_channel_is_rejected(self):
-        res = self.client.post(self.url, {"handle": "a.bsky.social", "channel_id": 999}, format="json")
+        res = self.client.post(self.url, {"handle": "a.bsky.social", "destinations": [{"channel_id": 999}]},
+                               format="json")
         self.assertEqual(res.status_code, 400)
-        self.assertIn("channel_id", res.data)
+        self.assertIn("channel_id", res.data["destinations"][0])
 
     def test_a_url_sent_by_an_old_client_is_never_echoed(self):
         res = self.client.post(self.url, {"handle": "a.bsky.social",
@@ -260,7 +272,7 @@ class SafeDeleteTests(APITestCase):
         channels.make_default(self.default)
         self.art = DiscordWebhook.objects.create(name="#art", url=B)
         self.news = DiscordWebhook.objects.create(name="#news", url=C)
-        self.acc = MonitoredAccount.objects.create(handle="a.bsky.social", channel=self.art)
+        self.acc = with_channel(MonitoredAccount.objects.create(handle="a.bsky.social"), self.art)
         self.follower = MonitoredAccount.objects.create(handle="f.bsky.social")
 
     def delete(self, channel, query=""):
@@ -272,18 +284,15 @@ class SafeDeleteTests(APITestCase):
         self.assertEqual(res.data["code"], "channel_in_use")
         self.assertEqual(res.data["accounts"], [{"id": self.acc.id, "handle": "a.bsky.social"}])
         self.assertTrue(DiscordWebhook.objects.filter(pk=self.art.pk).exists())
-        self.acc.refresh_from_db()
-        self.assertEqual(self.acc.channel_id, self.art.id)
+        self.assertEqual(channel_ids(self.acc), [self.art.id])
 
     def test_reassign_to_another_channel(self):
         self.assertEqual(self.delete(self.art, f"?reassign_to={self.news.id}").status_code, 204)
-        self.acc.refresh_from_db()
-        self.assertEqual(self.acc.channel_id, self.news.id)
+        self.assertEqual(channel_ids(self.acc), [self.news.id])
 
     def test_reassign_to_the_default(self):
         self.assertEqual(self.delete(self.art, "?reassign_to=default").status_code, 204)
-        self.acc.refresh_from_db()
-        self.assertIsNone(self.acc.channel)
+        self.assertEqual(channel_ids(self.acc), [None])
 
     def test_reassign_to_default_needs_a_default(self):
         channels.clear_default()
@@ -296,12 +305,11 @@ class SafeDeleteTests(APITestCase):
         self.assertEqual(self.delete(self.default, "?reassign_to=default").status_code, 409)
 
     def test_default_channel_hands_over_to_the_chosen_channel(self):
-        pinned = MonitoredAccount.objects.create(handle="p.bsky.social", channel=self.default)
+        pinned = with_channel(MonitoredAccount.objects.create(handle="p.bsky.social"), self.default)
         self.assertEqual(self.delete(self.default, f"?reassign_to={self.news.id}").status_code, 204)
         self.news.refresh_from_db()
         self.assertTrue(self.news.is_default)
-        pinned.refresh_from_db()
-        self.assertEqual(pinned.channel_id, self.news.id)
+        self.assertEqual(channel_ids(pinned), [self.news.id])
         self.assertEqual(channels.route_for(self.follower).name, "#news")
 
     def test_bad_reassign_targets(self):
@@ -327,8 +335,7 @@ class SafeDeleteTests(APITestCase):
         res = self.client.post(f"{self.url}{self.news.id}/make_default/")
         self.assertEqual(res.status_code, 200)
         self.assertTrue(res.data["is_default"])
-        self.acc.refresh_from_db()
-        self.assertEqual(self.acc.channel_id, self.art.id, "explicit assignment untouched")
+        self.assertEqual(channel_ids(self.acc), [self.art.id], "explicit assignment untouched")
 
 
 # -- Editing without re-entering URLs ----------------------------------------------------
@@ -337,7 +344,7 @@ class EditChannelTests(NoTokens, APITestCase):
 
     def setUp(self):
         self.art = DiscordWebhook.objects.create(name="#art", url=B)
-        self.acc = MonitoredAccount.objects.create(handle="a.bsky.social", channel=self.art)
+        self.acc = with_channel(MonitoredAccount.objects.create(handle="a.bsky.social"), self.art)
 
     def test_rename_keeps_the_url(self):
         res = self.client.patch(f"{self.url}{self.art.id}/", {"name": "#artwork"}, format="json")
@@ -384,8 +391,8 @@ class SecretHandlingTests(NoTokens, APITestCase):
     def setUp(self):
         self.default = DiscordWebhook.objects.create(name="#general", url=A)
         channels.make_default(self.default)
-        self.acc = MonitoredAccount.objects.create(handle="a.bsky.social", first_poll_done=True,
-                                                   channel=DiscordWebhook.objects.create(name="#art", url=B))
+        self.acc = with_channel(MonitoredAccount.objects.create(handle="a.bsky.social", first_poll_done=True),
+                                DiscordWebhook.objects.create(name="#art", url=B))
 
     def capture(self):
         """Log output exactly as the console handler writes it (with its filter)."""
@@ -430,7 +437,7 @@ class SecretHandlingTests(NoTokens, APITestCase):
         with mock.patch("discord_alerts.sender.requests.post", side_effect=failures[1]):
             poller.poll_account(self.acc, session=FakeSession(feed_item("1")))
         self.assert_no_tokens(logs.getvalue())
-        self.assert_no_tokens(list(SeenPost.objects.values_list("last_error", flat=True)))
+        self.assert_no_tokens(list(PostDelivery.objects.values_list("last_error", flat=True)))
         self.assert_no_tokens(list(DiscordWebhook.objects.values_list("last_delivery_error", flat=True)))
 
     def test_safety_net_masks_urls_from_other_libraries(self):

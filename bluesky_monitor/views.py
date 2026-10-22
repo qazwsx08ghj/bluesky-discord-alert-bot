@@ -11,7 +11,7 @@ from .poller import AccountBusy, poll_account
 
 
 class MonitoredAccountViewSet(viewsets.ModelViewSet):
-    queryset = MonitoredAccount.objects.select_related("channel").order_by("-created_at")
+    queryset = MonitoredAccount.objects.prefetch_related("destinations__channel").order_by("-created_at")
     serializer_class = MonitoredAccountSerializer
     lookup_value_regex = r"\d+"  # keeps /check_all/ apart from account ids
 
@@ -59,7 +59,8 @@ class MonitoredAccountViewSet(viewsets.ModelViewSet):
         """GET /api/accounts/{id}/posts/ — the posts noticed for this account, newest first,
         20 per page (?page=2). Replaces the nested `seen_posts` list that older versions returned."""
         account = self.get_object()
-        queryset = SeenPost.objects.filter(account=account).order_by("-seen_at", "-id")
+        queryset = (SeenPost.objects.filter(account=account).prefetch_related("deliveries__channel")
+                    .order_by("-seen_at", "-id"))
         page = self.paginate_queryset(queryset)
         return self.get_paginated_response(SeenPostSerializer(page, many=True).data)
 

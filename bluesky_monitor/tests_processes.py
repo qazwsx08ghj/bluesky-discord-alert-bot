@@ -28,13 +28,15 @@ ENV = {
 
 
 class ProcessTestCase(SimpleTestCase):
+    extra_env = {}
+
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.dir = Path(tmp.name)
         self.db = str(self.dir / "shared.sqlite3")
         self.log = str(self.dir / "discord.log")
-        self.env = dict(ENV)
+        self.env = {**ENV, **self.extra_env}
         self.run_proc("migrate")
 
     def start(self, *args):
@@ -105,6 +107,39 @@ class DuplicatePreventionAcrossProcessesTests(ProcessTestCase):
         sends = self.sends()
         self.assertEqual(len(sends), 5)
         self.assertEqual(set(sends.values()), {1}, f"duplicates: {sends}")
+
+
+class TwoChannelsAcrossProcessesTests(ProcessTestCase):
+    """The account sends to the default channel and a second one: each gets each post once."""
+    extra_env = {"PROC_SECOND_CHANNEL": "https://discord.com/api/webhooks/2/second"}
+
+    def assert_each_channel_got_each_post_once(self, outs=None):
+        sends = self.sends()
+        self.assertEqual(len(sends), 10, outs)
+        self.assertEqual(set(sends.values()), {1}, f"duplicates: {sends}")
+        self.assertEqual(Counter(key.split("|")[0] for key in sends), {"x": 5, "second": 5})
+
+    def test_concurrent_checks_send_each_post_once_to_each_channel(self):
+        outs = self.run_together(4, lambda i, t: ("poll", self.log, t))
+        self.assert_each_channel_got_each_post_once(outs)
+
+    def test_claims_alone_prevent_duplicates_per_channel(self):
+        outs = self.run_together(4, lambda i, t: ("claim_and_deliver", self.log, t))
+        self.assert_each_channel_got_each_post_once(outs)
+
+    def test_a_crash_mid_send_is_recovered_once_per_channel(self):
+        self.env["ACCOUNT_LOCK_SECONDS"] = "2"
+        crashed_at = time.time()
+        _, code = self.run_proc("crash_mid_send", self.log, expect_ok=False)
+        self.assertEqual(code, 3)
+        status, _ = self.run_proc("status")
+        self.assertEqual(status.count(" sending "), 1, f"only the delivery being sent is claimed:\n{status}")
+        time.sleep(max(0, crashed_at + 3 - time.time()))  # the lock (2 s) and the stale send (1 s)
+        out, _ = self.run_proc("poll", self.log, "0")
+        self.assertEqual(out, "SENT 5")
+        self.assert_each_channel_got_each_post_once()
+        out, _ = self.run_proc("poll", self.log, "0")
+        self.assertEqual(out, "SENT 0", "nothing is sent twice afterwards")
 
 
 class CheckAllAcrossProcessesTests(ProcessTestCase):
