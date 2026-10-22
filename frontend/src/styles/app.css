@@ -401,6 +401,25 @@ dialog.modal .f { display: flex; justify-content: flex-end; gap: 8px; flex-wrap:
 .note { display: flex; gap: 10px; padding: 12px; border-radius: 10px; background: var(--accent-soft); color: var(--link); font-size: 13px; margin-top: 4px; }
 .note .icon { margin-top: 1px; }
 .subform { border: 1px solid var(--border); border-radius: 10px; padding: 14px 14px 0; margin: -6px 0 16px; background: var(--surface-2); }
+/* Account drawer: the channels an account sends to, each with an optional role */
+.dests { border: 0; padding: 0; margin: 0 0 12px; }
+.dests legend { font-weight: 500; margin-bottom: 8px; padding: 0; }
+.dest-head, .dest-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; gap: 8px; align-items: center; }
+.dest-head { font-size: 12px; font-weight: 500; color: var(--text-3); }
+.dest-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.dest-errs { grid-column: 1 / -1; display: grid; gap: 4px; }
+.dest-add { display: inline-flex; align-items: center; gap: 6px; width: max-content; margin-top: 2px; }
+.dests .subform { margin: 4px 0 0; }
+.chan-role { display: inline-flex; color: var(--text-3); }
+@media (max-width: 480px) {
+  /* Each channel on two lines: the channel and its remove button, then the role */
+  .dest-head { display: none; }
+  .dest-list { gap: 12px; }
+  .dest-row { grid-template-columns: minmax(0, 1fr) 32px; }
+  .dest-row > .select { grid-column: 1; grid-row: 1; }
+  .dest-row > :nth-child(3) { grid-column: 2; grid-row: 1; }
+  .dest-row > .input { grid-column: 1; grid-row: 2; }
+}
 .status-rows { display: grid; gap: 12px; margin: 16px 0 4px; }
 .status-rows > div { display: flex; gap: 10px; align-items: flex-start; }
 .status-rows .dot { margin-top: 6px; }

@@ -11,7 +11,16 @@ export async function reset(request: APIRequestContext, scenario: "empty" | "wor
   expect(res.ok(), "the demo server's reset address answers").toBe(true);
 }
 
-export async function discordMessages(request: APIRequestContext): Promise<{ handle: string; text: string; channel_token: string }[]> {
+/** What the fake Discord received: the post, and the message text and allowed_mentions sent with it. */
+export type DiscordMessage = {
+  handle: string;
+  text: string;
+  channel_token: string;
+  content?: string;
+  allowed_mentions?: { parse: string[]; roles?: string[] };
+};
+
+export async function discordMessages(request: APIRequestContext): Promise<DiscordMessage[]> {
   return (await (await request.get("/__demo__/discord/")).json()).messages;
 }
 

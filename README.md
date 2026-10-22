@@ -27,7 +27,7 @@ Every few minutes the bot looks at the Bluesky accounts you picked. When one of 
 Clicking the title opens the post on Bluesky.
 
 - **Any public account works.** It doesn't have to be yours.
-- **Several Discord channels:** each account can notify its own channel, or your default one.
+- **Several Discord channels:** each account can notify up to 10 channels, or just your default one. In each channel you can also mention a Discord role, so its members get pinged.
 - **No flood of old posts.** When you add an account, its existing posts are skipped; only new ones are sent.
 - **Runs on your own computer.** Your password and settings stay there; only the notifications go to Discord.
 
@@ -107,6 +107,18 @@ Press **Send test message** and look in your Discord channel. If nothing arrives
 ### 4. Add your first account
 
 Type the handle of any public Bluesky account. The panel shows the profile so you can check it's the right one. **Nothing appears in Discord until that account posts something new.**
+
+### 5. Optional: more channels, and mentioning a role
+
+An account can send its notifications to several channels: under **Discord channels**, click **Add another channel**.
+
+Next to each channel there's an optional **Role to mention** box. Leave it empty for a normal notification. To ping a Discord role, paste the role's ID:
+
+1. In Discord, open **User Settings → Advanced** and turn on **Developer Mode**.
+2. Open your server's **Server Settings → Roles**.
+3. Click **…** next to the role and choose **Copy Role ID**.
+
+@everyone and @here can't be used. Changes only affect new posts; old posts are never sent again.
 
 ---
 

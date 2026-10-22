@@ -89,6 +89,7 @@ SPECTACULAR_SETTINGS["ENUM_NAME_OVERRIDES"] = {
     "LastCheckResult": LAST_CHECK_RESULTS, "LoginTestResult": LOGIN_TEST_RESULTS,
     "LookupResult": LOOKUP_RESULTS, "HealthStatus": HEALTH_STATUSES, "ProblemSeverity": SEVERITIES,
     "PostStatus": "bluesky_monitor.models.SeenPost.STATUS_CHOICES",
+    "DeliveryStatus": "bluesky_monitor.models.PostDelivery.STATUS_CHOICES",
     "PostKind": "bluesky_monitor.models.KIND_CHOICES",
     "ActivityLevel": "activity.models.ActivityEvent.LEVELS",
 }
@@ -116,8 +117,13 @@ class ErrorSerializer(serializers.Serializer):
 
 
 FIELD_ERRORS = OpenApiResponse(
-    response={"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}}},
+    response={"type": "object", "additionalProperties": {"type": "array", "items": {"oneOf": [
+        {"type": "string"},
+        {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}}},
+    ]}}},
     description="Form errors per field, e.g. {\"handle\": [\"You're already watching @a.bsky.social.\"]}. "
+                "A list field has one object per item (empty when that item is fine), e.g. "
+                "{\"destinations\": [{}, {\"role_id\": [\"A Role ID is a long number, …\"]}]}. "
                 "No `code`: this shape is kept from the first API version.")
 
 
@@ -153,10 +159,6 @@ class AccountRefSerializer(serializers.Serializer):
 class ChannelRefSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     name = serializers.CharField()
-
-
-class AccountChannelSerializer(ChannelRefSerializer):
-    is_default = serializers.BooleanField()
 
 
 class CurrentProblemSerializer(ProblemSerializer):
@@ -336,8 +338,6 @@ class LastErrorSerializer(AccountProblemSerializer):
 
 class AccountSerializer(MonitoredAccountSerializer):
     """A watched account, with its current status (bluesky_monitor/account_status.py)."""
-    channel = _nullable(AccountChannelSerializer(read_only=True))
-    uses_default_channel = serializers.BooleanField(read_only=True)
     state = serializers.ChoiceField(choices=ACCOUNT_STATES, read_only=True)
     state_label = serializers.CharField(read_only=True)
     state_message = serializers.CharField(read_only=True)
@@ -532,7 +532,8 @@ def add_change_protection(result, generator, request, public):
 
 # Response schemas built from model serializers: every listed field is always in the answer
 # (fields that are optional only apply to requests, which have their own *Request schemas).
-ALWAYS_COMPLETE = ("Account", "Channel", "Post", "ActivityEvent", "ActivityEventDetail")
+ALWAYS_COMPLETE = ("Account", "AccountChannel", "Channel", "Post", "Destination", "PostDelivery", "ActivityEvent",
+                   "ActivityEventDetail")
 
 
 def _nullable_for_openapi_31(node):
@@ -679,13 +680,14 @@ class AccountsDoc(_Replace):
         list=extend_schema(tags=["accounts"], summary="Watched accounts, newest first"),
         create=extend_schema(tags=["accounts"], summary="Watch an account",
                              description="`handle` accepts @handle, a bsky.app link or a DID. Sending the removed "
-                                         "`discord_webhook_url` field is refused; use `channel_id`.",
+                                         "`discord_webhook_url` and `channel_id` fields are refused; use `destinations` "
+                                         "(without it, the account follows the default channel).",
                              responses={201: AccountSerializer, 400: FIELD_ERRORS}),
         retrieve=extend_schema(tags=["accounts"], summary="One account", responses={200: AccountSerializer,
                                                                                     404: NOT_FOUND}),
         update=extend_schema(tags=["accounts"], summary="Replace an account's settings",
                              responses={200: AccountSerializer, 400: FIELD_ERRORS, 404: NOT_FOUND}),
-        partial_update=extend_schema(tags=["accounts"], summary="Change an account (pause, channel, name, …)",
+        partial_update=extend_schema(tags=["accounts"], summary="Change an account (pause, channels, name, …)",
                                      responses={200: AccountSerializer, 400: FIELD_ERRORS, 404: NOT_FOUND}),
         destroy=extend_schema(tags=["accounts"], summary="Stop watching an account",
                               responses={204: None, 404: NOT_FOUND}),

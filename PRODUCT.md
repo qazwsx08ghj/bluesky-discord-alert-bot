@@ -50,14 +50,14 @@ A self-hosted, no-code bridge from Bluesky to Discord. The owner runs it on thei
   4. add the first account.
 - **Checking:** on an interval (default 5 minutes, 1–60), by one checker. **Check now** and **Check all now** are available at any time; Check all runs in the background.
 - **The first check** of a new account records its existing posts without sending them, so Discord isn't flooded. Owners can find this confusing ("nothing appeared"), and the panel explains it.
-- **Routing:** each account sends either to the default channel or to a named channel picked for it. It sends posts and reposts by default, and replies only if switched on.
+- **Routing:** each account sends to 1 to 10 channels: the default channel, named channels picked for it, or both. Each can mention one Discord role (optional; empty means no mention). It sends posts and reposts by default, and replies only if switched on.
 - **Downtime:** long downtime can miss posts (polling, not catch-up). This is accepted (see [docs/DECISIONS.md](docs/DECISIONS.md)).
 
 ## Capabilities and Constraints
 
 Confirmed functionality (from code):
 
-- **Accounts:** add with a Bluesky profile lookup, edit, pause and resume, remove, per-account post types (posts, reposts, replies) and channel, Check now, Check all now. (`/api/accounts/`, `/api/bluesky/profile/`, `/api/check-jobs/`)
+- **Accounts:** add with a Bluesky profile lookup, edit, pause and resume, remove, per-account post types (posts, reposts, replies), channels and role mentions, Check now, Check all now. (`/api/accounts/`, `/api/bluesky/profile/`, `/api/check-jobs/`)
 - **Named Discord channels:** one default, a test message per channel, and deletion that never strands an account. (`/api/webhooks/`)
 - **Settings:**
   - the Bluesky handle;

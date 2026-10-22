@@ -19,7 +19,7 @@ class DiscordWebhookViewSet(viewsets.ModelViewSet):
     DELETE refuses (409) while accounts use the channel or it is the default, unless
     `?reassign_to=<channel id>` or `?reassign_to=default` says where they should go.
     """
-    queryset = DiscordWebhook.objects.annotate(account_count=Count("accounts")).order_by("-created_at")
+    queryset = DiscordWebhook.objects.annotate(account_count=Count("destinations__account", distinct=True)).order_by("-created_at")
     serializer_class = DiscordWebhookSerializer
 
     def destroy(self, request, *args, **kwargs):

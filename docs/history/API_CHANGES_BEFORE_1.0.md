@@ -42,3 +42,10 @@ The compatibility layers kept for older versions and the old page are gone. Ever
 - Sending a removed field (`discord_webhook_url`) to the settings or account API is refused with `400` and a message naming the replacement, rather than being silently ignored.
 - `poll_interval_minutes` in `GET /api/settings/` is now a number (it was a string for older clients). Requests accept either.
 - Post history is capped at the newest 1,000 finished posts per account (`SEEN_POSTS_KEPT_PER_ACCOUNT`); posts still waiting to be sent are never removed.
+
+## After 1.0.0-rc.1: several channels per account, and role mentions
+
+- **Accounts:** `channel_id`, `channel` and `uses_default_channel` are replaced by `destinations: [{channel_id, role_id}]` (plus read-only `channel` and `follows_default` per row). Sending `channel_id` is refused with `400` and a pointer to `destinations`.
+- **Per-row errors:** `{"destinations": [{}, {"role_id": ["…"]}]}`.
+- **Posts:** `attempts` moved to the new `deliveries` list (one per channel); `status` loses `sending` and `retry` (those are delivery states now) and gains `partly_sent`.
+- **Activity:** new type `mention_not_sent`, new problem category `mention_refused`.

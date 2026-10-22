@@ -13,7 +13,7 @@ from rest_framework.test import APITestCase
 from discord_alerts.sender import DeliveryResult
 from . import poller
 from .locks import acquire_account_lock
-from .models import MonitoredAccount, SeenPost
+from .models import MonitoredAccount, PostDelivery, SeenPost
 from .tests import FakeSession, feed_item
 
 HOOK = "https://discord.com/api/webhooks/1/default"
@@ -54,6 +54,10 @@ class DeliveryTests(TestCase):
     def post(self, rkey):
         return SeenPost.objects.get(post_uri__endswith=f"/{rkey}")
 
+    def delivery(self, rkey):
+        """The post's one delivery (the account follows the default channel)."""
+        return PostDelivery.objects.get(post__post_uri__endswith=f"/{rkey}")
+
     # -- claiming -------------------------------------------------------------
     def test_a_post_can_only_be_claimed_once(self):
         self.claim("a")
@@ -80,10 +84,11 @@ class DeliveryTests(TestCase):
         self.claim("a")
         self.results = [DeliveryResult(False, "Couldn't reach Discord.")]
         self.assertEqual(poller.deliver_pending(self.account), 0)
-        post = self.post("a")
-        self.assertEqual((post.status, post.attempts), (SeenPost.RETRY, 1))
-        self.assertEqual(post.next_attempt_at, T0 + timedelta(minutes=1))
-        self.assertEqual(post.last_error, "Couldn't reach Discord.")
+        delivery = self.delivery("a")
+        self.assertEqual((delivery.status, delivery.attempts), (PostDelivery.RETRY, 1))
+        self.assertEqual(delivery.next_attempt_at, T0 + timedelta(minutes=1))
+        self.assertEqual(delivery.last_error, "Couldn't reach Discord.")
+        self.assertEqual(self.post("a").status, SeenPost.PENDING, "the post waits while a delivery does")
 
         self.assertEqual(poller.deliver_pending(self.account), 0, "not before its retry time")
         self.clock.advance(minutes=1, seconds=1)
@@ -98,11 +103,12 @@ class DeliveryTests(TestCase):
         self.results = [fail] * 4
         for expected_delay in (1, 5, 30):
             poller.deliver_pending(self.account)
-            self.assertEqual(self.post("a").next_attempt_at, self.clock() + timedelta(minutes=expected_delay))
+            self.assertEqual(self.delivery("a").next_attempt_at, self.clock() + timedelta(minutes=expected_delay))
             self.clock.advance(minutes=expected_delay)
         poller.deliver_pending(self.account)
-        post = self.post("a")
-        self.assertEqual((post.status, post.attempts), (SeenPost.FAILED, 4))
+        delivery = self.delivery("a")
+        self.assertEqual((delivery.status, delivery.attempts), (PostDelivery.FAILED, 4))
+        self.assertEqual(self.post("a").status, SeenPost.FAILED)
         self.clock.advance(hours=1)
         poller.deliver_pending(self.account)
         self.assertEqual(self.send.call_count, 4)
@@ -111,7 +117,7 @@ class DeliveryTests(TestCase):
         self.claim("a")
         self.results = [DeliveryResult(False, "slow down", retry_after=600, status_code=429)]
         poller.deliver_pending(self.account)
-        self.assertEqual(self.post("a").next_attempt_at, T0 + timedelta(seconds=600))
+        self.assertEqual(self.delivery("a").next_attempt_at, T0 + timedelta(seconds=600))
 
     def test_posts_older_than_the_retry_window_give_up_without_sending(self):
         self.claim("a")
@@ -127,7 +133,8 @@ class DeliveryTests(TestCase):
         self.results = [DeliveryResult(False, "down")]
         poller.deliver_pending(self.account)
         self.assertEqual(self.send.call_count, 1)
-        self.assertEqual([self.post(r).status for r in "abc"], [SeenPost.RETRY, SeenPost.PENDING, SeenPost.PENDING])
+        self.assertEqual([self.delivery(r).status for r in "abc"],
+                         [PostDelivery.RETRY, PostDelivery.PENDING, PostDelivery.PENDING])
         self.clock.advance(minutes=2)
         self.assertEqual(poller.deliver_pending(self.account), 3)
         texts = [c.kwargs["post_url"].rsplit("/", 1)[1] for c in self.send.call_args_list]
@@ -145,30 +152,31 @@ class DeliveryTests(TestCase):
     # -- interrupted sends ----------------------------------------------------
     def test_send_in_progress_elsewhere_is_left_alone(self):
         self.claim("a")
-        SeenPost.objects.update(status=SeenPost.SENDING, claimed_at=T0, claim_token="other", attempts=1)
+        PostDelivery.objects.update(status=PostDelivery.SENDING, claimed_at=T0, claim_token="other", attempts=1)
         self.clock.advance(seconds=60)
         self.assertEqual(poller.deliver_pending(self.account), 0)
         self.send.assert_not_called()
 
     def test_send_interrupted_by_a_crash_is_retried_once_stale(self):
         self.claim("a")
-        SeenPost.objects.update(status=SeenPost.SENDING, claimed_at=T0, claim_token="dead", attempts=1)
+        PostDelivery.objects.update(status=PostDelivery.SENDING, claimed_at=T0, claim_token="dead", attempts=1)
         self.clock.advance(seconds=121)
         self.assertEqual(poller.deliver_pending(self.account), 1)
-        post = self.post("a")
-        self.assertEqual((post.status, post.attempts), (SeenPost.SENT, 2))
+        delivery = self.delivery("a")
+        self.assertEqual((delivery.status, delivery.attempts), (PostDelivery.SENT, 2))
+        self.assertEqual(self.post("a").status, SeenPost.SENT)
         self.assertEqual(poller.deliver_pending(self.account), 0)
 
     def test_a_late_result_from_a_taken_over_send_is_ignored(self):
         """If a stale send is taken over, the old sender's result can't overwrite the new state."""
         self.claim("a")
-        old = SeenPost.objects.get()
-        SeenPost.objects.update(status=SeenPost.SENDING, claim_token="old-sender", claimed_at=T0)
+        old = PostDelivery.objects.get()
+        PostDelivery.objects.update(status=PostDelivery.SENDING, claim_token="old-sender", claimed_at=T0)
         self.clock.advance(seconds=121)
         self.results = [DeliveryResult(False, "down")]
         poller.deliver_pending(self.account)  # new sender fails -> retry
-        SeenPost.objects.filter(pk=old.pk, claim_token="old-sender").update(status=SeenPost.SENT)
-        self.assertEqual(self.post("a").status, SeenPost.RETRY)
+        PostDelivery.objects.filter(pk=old.pk, claim_token="old-sender").update(status=PostDelivery.SENT)
+        self.assertEqual(self.delivery("a").status, PostDelivery.RETRY)
 
 
 @override_settings(DISCORD_WEBHOOK_URL=HOOK)

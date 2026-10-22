@@ -2,9 +2,10 @@ import { createContext, useCallback, useContext, useEffect, useId, useMemo, useS
 import { Check, Info, X } from "lucide-react";
 import { ApiError, OfflineError, errorMessage } from "../api/client";
 import { useAddAccount, useAddChannel, useChannels, useCheckNow, useProfileLookup, useUpdateAccount } from "../api/queries";
-import type { Account, Channel, ProfileLookup } from "../api/types";
+import type { Account, ProfileLookup } from "../api/types";
 import { Avatar, Button, Dialog, FieldError, FieldWarn, ICON, ICON_LG, IconButton, useToast } from "../components/ui";
 import { displayName } from "../lib/people";
+import { DestinationsField, initialRows, rolesAreValid, toInput } from "./Destinations";
 import { plural } from "../lib/time";
 
 type DrawerState = { mode: "add" } | { mode: "edit"; account: Account } | null;
@@ -145,7 +146,8 @@ function DrawerBody({
   const [handle, setHandle] = useState(editing?.handle ?? "");
   const [name, setName] = useState(editing?.display_name ?? "");
   const [nameTouched, setNameTouched] = useState(Boolean(editing));
-  const [channel, setChannel] = useState<string>(editing?.channel_id ? String(editing.channel_id) : "default");
+  const [rows, setRows] = useState(() => initialRows(editing));
+  const [triedSave, setTriedSave] = useState(false);
   const [newChannel, setNewChannel] = useState({ name: "", url: "" });
   const [announce, setAnnounce] = useState({
     posts: editing?.announce_posts ?? true,
@@ -166,8 +168,6 @@ function DrawerBody({
   }, [profile, nameTouched]);
 
   const all = channels.data ?? [];
-  const defaultChannel = all.find((c) => c.is_default);
-  const choices: Channel[] = all.filter((c) => !c.is_default || c.id === editing?.channel_id);
   const busy = addAccount.isPending || updateAccount.isPending || addChannel.isPending;
   const lookupSettled = Boolean(editing) || (!typing && !lookup.isFetching && (lookup.data !== undefined || lookup.error !== null));
   const canSubmit = !busy && cleanHandle(handle).length > 0 && lookupSettled && verdict.canAdd;
@@ -177,16 +177,18 @@ function DrawerBody({
     if (!canSubmit) return;
     setFieldErrors({});
     setFormError("");
+    setTriedSave(true);
+    if (!rolesAreValid(rows)) return;
     try {
-      let channelId: number | null = channel === "default" ? null : Number(channel);
-      if (channel === "new") {
+      let newChannelId: number | null = null;
+      if (rows.some((r) => r.channel === "new")) {
         const created = await addChannel.mutateAsync({ name: newChannel.name.trim(), url: newChannel.url.trim() });
-        channelId = created.id;
-        setChannel(String(created.id));
+        newChannelId = created.id;
+        setRows((current) => current.map((r) => (r.channel === "new" ? { ...r, channel: String(created.id) } : r)));
       }
       const body = {
         display_name: name.trim(),
-        channel_id: channelId,
+        destinations: toInput(rows, newChannelId),
         announce_posts: announce.posts,
         announce_reposts: announce.reposts,
         announce_replies: announce.replies,
@@ -205,7 +207,8 @@ function DrawerBody({
         const fields = Object.fromEntries(Object.entries(error.fields).map(([k, v]) => [k, v.join(" ")]));
         // A failed new channel reports name/url; show them on the channel fields.
         setFieldErrors(fields);
-        if (!fields.handle && !fields.display_name && !fields.name && !fields.url && !fields.channel_id) setFormError(error.message);
+        const shown = ["handle", "display_name", "name", "url", "destinations"];
+        if (!Object.keys(fields).some((key) => shown.includes(key.split(".")[0]))) setFormError(error.message);
       } else {
         setFormError(errorMessage(error));
       }
@@ -284,37 +287,23 @@ function DrawerBody({
           <FieldError>{fieldErrors.display_name}</FieldError>
         </div>
 
-        <div className="field">
-          <label htmlFor={`${handleId}-chan`}>Post to channel</label>
-          <select id={`${handleId}-chan`} className="select" value={channel} onChange={(e) => setChannel(e.target.value)}>
-            <option value="default">{defaultChannel ? `Default channel (#${defaultChannel.name})` : "Default channel (none set up yet)"}</option>
-            {choices.map((c) => (
-              <option key={c.id} value={c.id}>
-                #{c.name}
-              </option>
-            ))}
-            <option value="new">Add a new channel…</option>
-          </select>
-          <span className="help">
-            {channel === "default" ? "Follows the default channel, also if you change the default later." : "Only this account posts here, whatever the default is."}
-          </span>
-          <FieldError>{fieldErrors.channel_id}</FieldError>
-        </div>
-        {channel === "new" ? (
-          <div className="subform">
-            <div className="field">
-              <label htmlFor={`${handleId}-cn`}>Channel name</label>
-              <input id={`${handleId}-cn`} className="input" placeholder="art-drops" value={newChannel.name} aria-invalid={Boolean(fieldErrors.name) || undefined} onChange={(e) => setNewChannel({ ...newChannel, name: e.target.value })} />
-              <span className="help">Just a label for you, usually the Discord channel's name.</span>
-              <FieldError>{fieldErrors.name}</FieldError>
+        <DestinationsField rows={rows} onChange={setRows} channels={all} errors={fieldErrors} showAllErrors={triedSave}>
+          {rows.some((r) => r.channel === "new") ? (
+            <div className="subform">
+              <div className="field">
+                <label htmlFor={`${handleId}-cn`}>Channel name</label>
+                <input id={`${handleId}-cn`} className="input" placeholder="art-drops" value={newChannel.name} aria-invalid={Boolean(fieldErrors.name) || undefined} onChange={(e) => setNewChannel({ ...newChannel, name: e.target.value })} />
+                <span className="help">Just a label for you, usually the Discord channel's name.</span>
+                <FieldError>{fieldErrors.name}</FieldError>
+              </div>
+              <div className="field">
+                <label htmlFor={`${handleId}-cu`}>Webhook URL</label>
+                <input id={`${handleId}-cu`} className="input mono" placeholder="https://discord.com/api/webhooks/…" autoComplete="off" spellCheck={false} value={newChannel.url} aria-invalid={Boolean(fieldErrors.url) || undefined} onChange={(e) => setNewChannel({ ...newChannel, url: e.target.value })} />
+                <FieldError>{fieldErrors.url}</FieldError>
+              </div>
             </div>
-            <div className="field">
-              <label htmlFor={`${handleId}-cu`}>Webhook URL</label>
-              <input id={`${handleId}-cu`} className="input mono" placeholder="https://discord.com/api/webhooks/…" autoComplete="off" spellCheck={false} value={newChannel.url} aria-invalid={Boolean(fieldErrors.url) || undefined} onChange={(e) => setNewChannel({ ...newChannel, url: e.target.value })} />
-              <FieldError>{fieldErrors.url}</FieldError>
-            </div>
-          </div>
-        ) : null}
+          ) : null}
+        </DestinationsField>
 
         <fieldset className="field opts">
           <legend>Send notifications for</legend>

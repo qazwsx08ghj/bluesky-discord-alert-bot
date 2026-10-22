@@ -20,8 +20,8 @@ from rest_framework.test import APITestCase
 
 from bluesky_monitor import poller, scheduler
 from bluesky_monitor.bluesky import BlueskyLoginError, BlueskyNotConfigured, SharedSession, _fingerprint
-from bluesky_monitor.models import BlueskySessionState, MonitoredAccount, SchedulerState, SeenPost
-from bluesky_monitor.tests import FakeSession, feed_item
+from bluesky_monitor.models import BlueskySessionState, MonitoredAccount, PostDelivery, SchedulerState, SeenPost
+from bluesky_monitor.tests import FakeSession, claim_with_state, feed_item
 from botconfig.secrets import scrub
 from discord_alerts import channels
 from discord_alerts.models import DiscordWebhook
@@ -258,10 +258,10 @@ class StatusTests(ClockMixin, APITestCase):
     def test_counts(self):
         checker_running(self.clock.now)
         MonitoredAccount.objects.create(handle="paused.bsky.social", is_active=False)
-        for rkey, state in [("a", SeenPost.PENDING), ("b", SeenPost.RETRY), ("c", SeenPost.SENDING),
-                            ("d", SeenPost.SENT), ("e", SeenPost.FAILED)]:
-            poller.claim_post(self.account, feed_item(rkey), state)
-        SeenPost.objects.filter(status=SeenPost.SENT).update(sent_at=self.clock.now)
+        for rkey, state in [("a", PostDelivery.PENDING), ("b", PostDelivery.RETRY), ("c", PostDelivery.SENDING),
+                            ("d", PostDelivery.SENT), ("e", PostDelivery.FAILED)]:
+            claim_with_state(self.account, feed_item(rkey), state,
+                             **({"sent_at": self.clock.now} if state == PostDelivery.SENT else {}))
         counts = self.get()["counts"]
         self.assertEqual(counts["accounts_total"], 2)
         self.assertEqual(counts["accounts_active"], 1)
@@ -512,8 +512,8 @@ class DeliveryEventTests(ClockMixin, TestCase):
         self.assertEqual(SeenPost.objects.get().status, SeenPost.FAILED)
 
     def test_posts_too_old_to_send_are_logged(self):
-        poller.claim_post(self.account, feed_item("old"), SeenPost.RETRY)
-        SeenPost.objects.update(seen_at=self.clock.now - timedelta(hours=25), next_attempt_at=self.clock.now)
+        claim_with_state(self.account, feed_item("old"), PostDelivery.RETRY, next_attempt_at=self.clock.now)
+        SeenPost.objects.update(seen_at=self.clock.now - timedelta(hours=25))
         poller.deliver_pending(self.account)
         self.assertEqual(self.events(type=log.SEND_GAVE_UP)[0].category, "send_expired")
 
@@ -712,9 +712,9 @@ class RetentionTests(ClockMixin, TestCase):
 
     def test_clean_up_never_touches_the_delivery_queue(self):
         account = MonitoredAccount.objects.create(handle="a.bsky.social", first_poll_done=True)
-        for rkey, state in [("p", SeenPost.PENDING), ("r", SeenPost.RETRY), ("s", SeenPost.SENDING),
-                            ("x", SeenPost.SENT)]:
-            poller.claim_post(account, feed_item(rkey), state)
+        for rkey, state in [("p", PostDelivery.PENDING), ("r", PostDelivery.RETRY), ("s", PostDelivery.SENDING),
+                            ("x", PostDelivery.SENT)]:
+            claim_with_state(account, feed_item(rkey), state)
             log.record(log.SEND_FAILED, "warning", f"about {rkey}", account=account)
         SeenPost.objects.update(seen_at=self.clock.now - timedelta(days=60))
         ActivityEvent.objects.update(created_at=self.clock.now - timedelta(days=60))
@@ -722,8 +722,8 @@ class RetentionTests(ClockMixin, TestCase):
             retention.prune()
         self.assertEqual(ActivityEvent.objects.count(), 0)
         self.assertEqual(SeenPost.objects.count(), 4, "every queued post is still there")
-        self.assertEqual(set(SeenPost.objects.values_list("status", flat=True)),
-                         {SeenPost.PENDING, SeenPost.RETRY, SeenPost.SENDING, SeenPost.SENT})
+        self.assertEqual(set(PostDelivery.objects.values_list("status", flat=True)),
+                         {PostDelivery.PENDING, PostDelivery.RETRY, PostDelivery.SENDING, PostDelivery.SENT})
 
     def test_deleting_accounts_and_channels_is_not_blocked_by_the_log(self):
         channel = DiscordWebhook.objects.create(name="#a", url=WEBHOOK)
@@ -841,7 +841,7 @@ class MigrationTests(TransactionTestCase):
 
     def test_reversible_and_data_is_kept(self):
         account = MonitoredAccount.objects.create(handle="kept.bsky.social", first_poll_done=True)
-        poller.claim_post(account, feed_item("q"), SeenPost.RETRY)
+        claim_with_state(account, feed_item("q"), PostDelivery.RETRY)
         log.record("post_sent", "success", "x", account=account)
         self.migrate(self.before)
         with connection.cursor() as cursor:
@@ -857,4 +857,5 @@ class MigrationTests(TransactionTestCase):
         self.migrate(self.after)
         account = MonitoredAccount.objects.get(handle="kept.bsky.social")
         self.assertIsNone(account.last_check_ok)
-        self.assertEqual(SeenPost.objects.get().status, SeenPost.RETRY)
+        self.assertEqual(SeenPost.objects.get().status, SeenPost.PENDING)
+        self.assertEqual(PostDelivery.objects.get().status, PostDelivery.RETRY, "the retry survives both ways")

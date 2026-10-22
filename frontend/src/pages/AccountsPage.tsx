@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Activity, ExternalLink, Hash, MoreHorizontal, Pause, Pencil, Play, Plus, RefreshCw, Trash2, Users } from "lucide-react";
+import { Activity, AtSign, ExternalLink, Hash, MoreHorizontal, Pause, Pencil, Play, Plus, RefreshCw, Trash2, Users } from "lucide-react";
 import { ApiError, errorMessage } from "../api/client";
 import { useAccounts, useChannels, useCheckNow, useRecentActivity, useRemoveAccount, useUpdateAccount } from "../api/queries";
 import type { Account, Channel } from "../api/types";
@@ -173,25 +173,37 @@ function StateCell({ account }: { account: Account }) {
   }
 }
 
+/** The account's channels: the first one, then "+N" for the rest (all of them in the tooltip). */
 function ChannelCell({ account, defaultChannel }: { account: Account; defaultChannel: Channel | undefined }) {
-  if (account.channel) {
-    return (
-      <span className="chan">
-        <Hash {...ICON} />
-        {account.channel.name}
-      </span>
-    );
-  }
-  if (defaultChannel) {
-    return (
-      <span className="chan" title="Follows the default channel">
-        <Hash {...ICON} />
-        {defaultChannel.name}
-        <small>default</small>
-      </span>
-    );
-  }
-  return <span className="chan" style={{ color: "var(--warn)" }}>No channel yet</span>;
+  const seen = new Set<number>();
+  const list = account.destinations.flatMap((d) => {
+    const channel = d.channel ?? defaultChannel;
+    if (!channel || seen.has(channel.id)) return [];
+    seen.add(channel.id);
+    return [{ name: channel.name, followsDefault: d.follows_default, mentions: Boolean(d.role_id) }];
+  });
+  if (list.length === 0) return <span className="chan" style={{ color: "var(--warn)" }}>No channel yet</span>;
+  const describe = (c: (typeof list)[number]) => `#${c.name}${c.followsDefault ? " (default)" : ""}${c.mentions ? ", mentions a role" : ""}`;
+  const [first, ...rest] = list;
+  return (
+    <span className="chan" title={list.map(describe).join("\n")}>
+      <Hash {...ICON} />
+      {first.name}
+      {first.followsDefault ? <small>default</small> : null}
+      {first.mentions ? (
+        <span className="chan-role" title="Mentions a role">
+          <AtSign {...ICON} />
+          <span className="sr">, mentions a role</span>
+        </span>
+      ) : null}
+      {rest.length ? (
+        <>
+          <small aria-hidden="true">+{rest.length}</small>
+          <span className="sr">, and {rest.map(describe).join(", ")}</span>
+        </>
+      ) : null}
+    </span>
+  );
 }
 
 function AccountsTable({ accounts, channels, now, interval }: { accounts: Account[]; channels: Channel[]; now: number; interval?: number }) {

@@ -127,7 +127,7 @@ describe("settings", () => {
     await user.click(within(confirm).getByRole("button", { name: "Delete channel" }));
     await waitFor(() => expect(state.channels.map((c) => c.name)).toEqual(["announcements"]));
     expect(changes(state)).toEqual(["DELETE /api/webhooks/2/?reassign_to=default"]);
-    expect(state.accounts[0].channel_id).toBeNull();
+    expect(state.accounts[0].destinations).toEqual([{ channel_id: null, role_id: "" }]);
   });
 
   it("explains that the default channel can't be deleted", async () => {

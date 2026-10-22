@@ -82,7 +82,7 @@ describe("adding and editing an account", () => {
     await user.type(within(drawer()).getByLabelText("Bluesky handle"), "@studio-kite.bsky.social");
     expect(await within(drawer()).findByText("Studio Kite", { selector: "b" })).toBeInTheDocument();
     expect(within(drawer()).getByLabelText("Name shown in Discord")).toHaveValue("Studio Kite");
-    await user.selectOptions(within(drawer()).getByLabelText("Post to channel"), "#art-drops");
+    await user.selectOptions(within(drawer()).getByLabelText("Channel"), "#art-drops");
     await user.click(within(drawer()).getByLabelText(/Replies/));
     await user.click(add);
     await waitFor(() => expect(state.accounts).toHaveLength(4));
@@ -90,7 +90,7 @@ describe("adding and editing an account", () => {
       handle: "studio-kite.bsky.social",
       is_active: true,
       display_name: "Studio Kite",
-      channel_id: 2,
+      destinations: [{ channel_id: 2, role_id: "" }],
       announce_posts: true,
       announce_reposts: true,
       announce_replies: true,
@@ -129,13 +129,13 @@ describe("adding and editing an account", () => {
     await user.click(await screen.findByRole("button", { name: "Add account" }));
     await user.type(within(drawer()).getByLabelText("Bluesky handle"), "greenhouse.bsky.social");
     await within(drawer()).findByText("Greenhouse Weekly", { selector: "b" });
-    await user.selectOptions(within(drawer()).getByLabelText("Post to channel"), "Add a new channel…");
+    await user.selectOptions(within(drawer()).getByLabelText("Channel"), "Add a new channel…");
     await user.type(within(drawer()).getByLabelText("Channel name"), "garden");
     await user.type(within(drawer()).getByLabelText("Webhook URL"), "https://discord.com/api/webhooks/42/garden-token");
     await user.click(within(drawer()).getByRole("button", { name: "Add account" }));
     await waitFor(() => expect(state.accounts).toHaveLength(4));
     const garden = state.channels.find((c) => c.name === "garden")!;
-    expect(state.accounts[3].channel_id).toBe(garden.id);
+    expect(state.accounts[3].destinations).toEqual([{ channel_id: garden.id, role_id: "" }]);
     expect(changes(state).slice(0, 2)).toEqual(["POST /api/webhooks/", "POST /api/accounts/"]);
   });
 
@@ -148,10 +148,121 @@ describe("adding and editing an account", () => {
     const name = within(edit).getByLabelText("Name shown in Discord");
     await user.clear(name);
     await user.type(name, "Pixel Forge");
-    await user.selectOptions(within(edit).getByLabelText("Post to channel"), "#art-drops");
+    await user.selectOptions(within(edit).getByLabelText("Channel"), "#art-drops");
     await user.click(within(edit).getByRole("button", { name: "Save changes" }));
-    await waitFor(() => expect(state.accounts[1]).toMatchObject({ display_name: "Pixel Forge", channel_id: 2 }));
+    await waitFor(() => expect(state.accounts[1]).toMatchObject({ display_name: "Pixel Forge", destinations: [{ channel_id: 2, role_id: "" }] }));
     expect(changes(state)).toEqual(["PATCH /api/accounts/2/"]);
     expect(await screen.findByText("Saved the changes to Pixel Forge.")).toBeInTheDocument();
+  });
+});
+
+describe("several channels and role mentions", () => {
+  const ROLE = "1189000000000000123";
+
+  async function addStudioKite(user: ReturnType<typeof renderApp>["user"]) {
+    await user.click(await screen.findByRole("button", { name: "Add account" }));
+    await user.type(within(drawer()).getByLabelText("Bluesky handle"), "studio-kite.bsky.social");
+    await within(drawer()).findByText("Studio Kite", { selector: "b" });
+  }
+
+  it("sends to several channels, each with an optional role", async () => {
+    const { user, state } = renderApp("/accounts", workingState());
+    await addStudioKite(user);
+    await user.click(within(drawer()).getByRole("button", { name: "Add another channel" }));
+    expect(within(drawer()).getByLabelText("Channel 1")).toHaveValue("default");
+    expect(within(drawer()).getByLabelText("Channel 2")).toHaveValue("2");
+    await user.type(within(drawer()).getByLabelText("Role to mention in channel 2 (optional)"), `<@&${ROLE}>`);
+    await user.click(within(drawer()).getByRole("button", { name: "Add account" }));
+    await waitFor(() => expect(state.accounts).toHaveLength(4));
+    expect(state.requests[0].body).toMatchObject({
+      destinations: [
+        { channel_id: null, role_id: "" },
+        { channel_id: 2, role_id: ROLE },
+      ],
+    });
+    const added = await screen.findByText("Studio Kite", { selector: "b" });
+    const cell = within(added.closest("tr")!);
+    expect(cell.getByText("announcements")).toBeInTheDocument();
+    expect(cell.getByText("+1")).toBeInTheDocument();
+    expect(cell.getByText(", and #art-drops, mentions a role")).toBeInTheDocument();
+  });
+
+  it("each channel can be chosen once", async () => {
+    const { user } = renderApp("/accounts", workingState());
+    await addStudioKite(user);
+    await user.click(within(drawer()).getByRole("button", { name: "Add another channel" }));
+    const options = (label: string) => Array.from((within(drawer()).getByLabelText(label) as HTMLSelectElement).options).map((o) => o.text);
+    expect(options("Channel 1")).toEqual(["Default channel (#announcements)", "Add a new channel…"]);
+    expect(options("Channel 2")).toEqual(["#art-drops", "Add a new channel…"]);
+  });
+
+  it("says what's wrong with a Role ID and saves nothing", async () => {
+    const { user, state } = renderApp("/accounts", workingState());
+    await addStudioKite(user);
+    const role = within(drawer()).getByLabelText("Role to mention (optional)");
+    await user.type(role, "@everyone");
+    await user.tab();
+    expect(within(drawer()).getByText(/@everyone and @here can't be mentioned/)).toBeInTheDocument();
+    expect(role).toHaveAttribute("aria-invalid", "true");
+    await user.click(within(drawer()).getByRole("button", { name: "Add account" }));
+    expect(state.requests).toHaveLength(0);
+
+    await user.clear(role);
+    await user.type(role, "moderators");
+    await user.click(within(drawer()).getByRole("button", { name: "Add account" }));
+    expect(within(drawer()).getByText(/A Role ID is a long number/)).toBeInTheDocument();
+    expect(state.requests).toHaveLength(0);
+
+    await user.clear(role);
+    await user.click(within(drawer()).getByRole("button", { name: "Add account" }));
+    await waitFor(() => expect(state.accounts).toHaveLength(4));
+    expect(state.requests[0].body).toMatchObject({ destinations: [{ channel_id: null, role_id: "" }] });
+  });
+
+  it("shows the bot's answer under the row it is about", async () => {
+    const { user, state } = renderApp("/accounts", workingState());
+    await addStudioKite(user);
+    await user.click(within(drawer()).getByRole("button", { name: "Add another channel" }));
+    await user.type(within(drawer()).getByLabelText("Role to mention in channel 2 (optional)"), "1100000000000000000");
+    await user.click(within(drawer()).getByRole("button", { name: "Add account" }));
+    const error = await within(drawer()).findByText(/This is the Discord server's ID/);
+    expect(error.closest("li")).toContainElement(within(drawer()).getByLabelText("Channel 2"));
+    expect(state.accounts).toHaveLength(3);
+  });
+
+  it("removes a channel from an account", async () => {
+    const state = workingState();
+    state.accounts[0].destinations = [
+      { channel_id: 2, role_id: ROLE },
+      { channel_id: null, role_id: "" },
+    ];
+    const { user } = renderApp("/accounts", state);
+    await user.click(await screen.findByRole("button", { name: "More actions for Mira Draws" }));
+    await user.click(screen.getByRole("menuitem", { name: "Edit" }));
+    const edit = screen.getByRole("dialog", { name: "Edit Mira Draws" });
+    expect(within(edit).getByLabelText("Role to mention in channel 1 (optional)")).toHaveValue(ROLE);
+    await user.click(within(edit).getByRole("button", { name: "Remove channel 1" }));
+    expect(within(edit).queryByRole("button", { name: /Remove channel/ })).not.toBeInTheDocument();
+    await user.click(within(edit).getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(state.accounts[0].destinations).toEqual([{ channel_id: null, role_id: "" }]));
+  });
+
+  it("explains how to find a Role ID", async () => {
+    const { user } = renderApp("/accounts", workingState());
+    await addStudioKite(user);
+    await user.click(within(drawer()).getByText("How do I find a Role ID?"));
+    expect(within(drawer()).getByText(/turn on Developer Mode/)).toBeVisible();
+    expect(within(drawer()).getByText(/choose Copy Role ID/)).toBeVisible();
+  });
+
+  it("stops at ten channels", async () => {
+    const state = workingState();
+    for (let n = 3; n <= 12; n++) state.channels.push({ id: n, name: `c${n}`, url: `https://discord.com/api/webhooks/${n}/t`, is_default: false, last_delivery: null });
+    const { user } = renderApp("/accounts", state);
+    await addStudioKite(user);
+    for (let n = 1; n < 10; n++) await user.click(within(drawer()).getByRole("button", { name: "Add another channel" }));
+    expect(within(drawer()).getAllByRole("combobox", { name: /^Channel / })).toHaveLength(10);
+    expect(within(drawer()).queryByRole("button", { name: "Add another channel" })).not.toBeInTheDocument();
+    expect(within(drawer()).getByText("An account can send to at most 10 channels.")).toBeInTheDocument();
   });
 });

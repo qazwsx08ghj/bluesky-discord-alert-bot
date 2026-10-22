@@ -161,7 +161,7 @@ def bluesky_login(now):
 
 # -- putting it together ---------------------------------------------------------------------
 def compute(now=None):
-    from bluesky_monitor.models import MonitoredAccount, SeenPost
+    from bluesky_monitor.models import MonitoredAccount, PostDelivery, SeenPost
     from botconfig import store
     from discord_alerts import channels
     from discord_alerts.models import DiscordWebhook
@@ -172,9 +172,10 @@ def compute(now=None):
     login = bluesky_login(now)
     default = channels.default_channel()
 
-    accounts = MonitoredAccount.objects.select_related("channel")
+    accounts = MonitoredAccount.objects.prefetch_related("destinations__channel")
     active = [a for a in accounts.filter(is_active=True).order_by("id")]
-    queue = dict(SeenPost.objects.filter(status__in=[SeenPost.PENDING, SeenPost.SENDING, SeenPost.RETRY])
+    # One notification per post per channel.
+    queue = dict(PostDelivery.objects.filter(status__in=PostDelivery.UNFINISHED)
                  .values_list("status").annotate(n=Count("id")).order_by())
     since = now - RECENT_WINDOW
     counts = {
@@ -182,9 +183,11 @@ def compute(now=None):
         "accounts_active": len(active),
         "channels": DiscordWebhook.objects.count(),
         "pending_deliveries": sum(queue.values()),
-        "deliveries_waiting": queue.get(SeenPost.PENDING, 0) + queue.get(SeenPost.SENDING, 0),
-        "deliveries_retrying": queue.get(SeenPost.RETRY, 0),
-        "sent_last_24h": SeenPost.objects.filter(status=SeenPost.SENT, sent_at__gte=since).count(),
+        "deliveries_waiting": queue.get(PostDelivery.PENDING, 0) + queue.get(PostDelivery.SENDING, 0),
+        "deliveries_retrying": queue.get(PostDelivery.RETRY, 0),
+        # Notifications sent; posts sent before the upgrade to several channels have no deliveries.
+        "sent_last_24h": PostDelivery.objects.filter(status=PostDelivery.SENT, sent_at__gte=since).count()
+        + SeenPost.objects.filter(status=SeenPost.SENT, sent_at__gte=since, deliveries__isnull=True).count(),
         "failed_sends_last_24h": ActivityEvent.objects.filter(type="send_gave_up", created_at__gte=since).count(),
     }
 
@@ -241,7 +244,8 @@ def compute(now=None):
 
 def _current_problems(now, checker, login, active, default):
     """Problems as things stand now (not a count of log lines): they clear once fixed."""
-    from bluesky_monitor.models import SeenPost
+    from bluesky_monitor.models import PostDelivery
+    from discord_alerts import channels
     from discord_alerts.models import DiscordWebhook
 
     found = []
@@ -262,19 +266,19 @@ def _current_problems(now, checker, login, active, default):
             found.append(_problem(code, f"@{account.handle}: {problems.get(code).title}.",
                                   severity="warning" if temporary else "error",
                                   since=account.last_checked_at, account=account))
-        if account.channel_id is None and default is None:
+        if not channels.targets_for(account, account.destinations.all(), default=default):
             found.append(_problem("no_channel", f"@{account.handle}: no Discord channel chosen, so its new posts "
                                   "aren't sent.", severity="error", account=account))
 
     in_use = DiscordWebhook.objects.filter(
-        Q(accounts__is_active=True) | Q(is_default=True)).distinct().filter(last_delivery_ok=False)
+        Q(destinations__account__is_active=True) | Q(is_default=True)).distinct().filter(last_delivery_ok=False)
     for channel in in_use:
         code = _latest_send_category(channel.pk) or "discord_error"
         found.append(_problem(code, f'"{channel.name}": {problems.get(code).title}.',
                               severity="warning" if problems.is_temporary(code) else "error",
                               since=channel.last_delivery_at, channel=channel))
 
-    retrying = SeenPost.objects.filter(status=SeenPost.RETRY).count()
+    retrying = PostDelivery.objects.filter(status=PostDelivery.RETRY).count()
     if retrying and not any(p.get("channel") for p in found):
         found.append({"code": "deliveries_retrying", "category": "discord_unavailable", "severity": "warning",
                       "title": "Some posts are waiting to be sent again",

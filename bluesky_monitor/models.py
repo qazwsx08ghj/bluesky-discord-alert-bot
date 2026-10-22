@@ -13,11 +13,7 @@ class MonitoredAccount(models.Model):
 
     handle = models.CharField(max_length=255, unique=True, help_text="e.g. user.bsky.social")
     display_name = models.CharField(max_length=255, blank=True)
-    # Where this account's posts go. Null means "the default channel", so changing the
-    # default moves these accounts and never touches accounts with their own channel.
-    # PROTECT: a channel can't be deleted while accounts still use it.
-    channel = models.ForeignKey("discord_alerts.DiscordWebhook", null=True, blank=True,
-                                on_delete=models.PROTECT, related_name="accounts")
+    # Where this account's posts go: its destinations (AccountDestination, one per channel).
     is_active = models.BooleanField(default=True)
     first_poll_done = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -46,6 +42,12 @@ class MonitoredAccount(models.Model):
     last_error_at = models.DateTimeField(null=True, blank=True)
     last_error_category = models.CharField(max_length=32, null=True, blank=True)
 
+    def save(self, *args, **kwargs):
+        adding = self._state.adding
+        super().save(*args, **kwargs)
+        if adding:  # a new account follows the default channel until it is given others
+            AccountDestination.objects.get_or_create(account=self, channel=None)
+
     def announces(self, kind: str) -> bool:
         value = {POST: self.announce_posts, REPOST: self.announce_reposts, REPLY: self.announce_replies}.get(kind)
         return self.ANNOUNCE_DEFAULTS.get(kind, True) if value is None else value
@@ -54,22 +56,52 @@ class MonitoredAccount(models.Model):
         return self.handle
 
 
-class SeenPost(models.Model):
-    """One Bluesky post the bot has noticed for one account, and where its Discord delivery stands.
+class AccountDestination(models.Model):
+    """One place a watched account's notifications go, with an optional Discord role to mention.
 
-    A row is created (claimed) before anything is sent. The unique (account, post_uri)
-    constraint means only one process can ever claim a post, so it is announced at most
-    once per account, even when checks overlap.
+    channel null means "the default channel": changing the default moves these, and never
+    touches destinations with their own channel. An account has 1 to MAX_PER_ACCOUNT
+    destinations, at most one per channel and at most one that follows the default.
+    PROTECT: a channel can't be deleted while a destination uses it (see channels.delete_channel).
+    """
+    MAX_PER_ACCOUNT = 10
+
+    account = models.ForeignKey(MonitoredAccount, on_delete=models.CASCADE, related_name="destinations")
+    channel = models.ForeignKey("discord_alerts.DiscordWebhook", null=True, blank=True,
+                                on_delete=models.PROTECT, related_name="destinations")
+    role_id = models.CharField(max_length=20, blank=True, default="")  # "" = no mention
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["id"]
+        constraints = [
+            models.UniqueConstraint(fields=["account", "channel"], name="destination_one_per_channel"),
+            models.UniqueConstraint(fields=["account"], condition=models.Q(channel__isnull=True),
+                                    name="destination_one_default"),
+        ]
+
+    def __str__(self):
+        return f"{self.account_id} → {self.channel_id or 'default'}"
+
+
+class SeenPost(models.Model):
+    """One Bluesky post the bot has noticed for one account.
+
+    A row is created (claimed) before anything is sent, together with one PostDelivery per
+    channel it goes to. The unique (account, post_uri) constraint means only one process can
+    ever claim a post, so each channel gets it at most once per account, even when checks overlap.
+
+    `status` sums up its deliveries (see delivery.refresh_post_status), so lists and clean-up
+    need only this table.
     """
 
     SEEDED = "seeded"     # noted during the first check; never announced
-    PENDING = "pending"   # claimed, waiting to be sent
-    SENDING = "sending"   # one process is sending it right now
-    RETRY = "retry"       # a send failed; try again at next_attempt_at
-    SENT = "sent"         # Discord accepted it
-    FAILED = "failed"     # gave up after the last retry or the retry window
-    SKIPPED = "skipped"   # not to be sent: no Discord channel, or the account doesn't announce this kind
-    STATUS_CHOICES = [(s, s) for s in (SEEDED, PENDING, SENDING, RETRY, SENT, FAILED, SKIPPED)]
+    PENDING = "pending"   # at least one delivery isn't finished yet
+    SENT = "sent"         # every delivery was sent
+    PARTLY_SENT = "partly_sent"  # some deliveries were sent, some gave up
+    FAILED = "failed"     # no delivery was sent; at least one gave up
+    SKIPPED = "skipped"   # not to be sent: no Discord channel, the kind is off, or every delivery was cancelled
+    STATUS_CHOICES = [(s, s) for s in (SEEDED, PENDING, SENT, PARTLY_SENT, FAILED, SKIPPED)]
 
     account = models.ForeignKey(MonitoredAccount, on_delete=models.CASCADE, related_name="seen_posts")
     post_uri = models.CharField(max_length=512)
@@ -78,13 +110,8 @@ class SeenPost(models.Model):
     post_url = models.URLField(blank=True)
     seen_at = models.DateTimeField(auto_now_add=True)
 
-    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=PENDING)
-    attempts = models.PositiveSmallIntegerField(default=0)
-    claim_token = models.CharField(max_length=64, blank=True)
-    claimed_at = models.DateTimeField(null=True, blank=True)
-    next_attempt_at = models.DateTimeField(null=True, blank=True)
-    sent_at = models.DateTimeField(null=True, blank=True)
-    last_error = models.CharField(max_length=500, blank=True)
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=PENDING)
+    sent_at = models.DateTimeField(null=True, blank=True)  # the newest successful delivery
     # post, repost or reply. Null for posts noted by older versions.
     kind = models.CharField(max_length=10, choices=KIND_CHOICES, null=True, blank=True)
 
@@ -96,6 +123,50 @@ class SeenPost(models.Model):
 
     def __str__(self):
         return f"{self.account.handle} — {self.post_uri}"
+
+
+class PostDelivery(models.Model):
+    """One post's notification to one Discord channel, and where it stands.
+
+    Created together with its post, for each channel the account sent to at that moment,
+    so changing an account's channels or roles later never sends old posts. The unique
+    (post, channel) constraint means a channel gets a post at most once. Each delivery has
+    its own attempts and retries, so a failing channel never holds up or repeats the others.
+    """
+
+    PENDING = "pending"     # waiting to be sent
+    SENDING = "sending"     # one process is sending it right now
+    RETRY = "retry"         # a send failed; try again at next_attempt_at
+    SENT = "sent"           # Discord accepted it
+    FAILED = "failed"       # gave up after the last retry or the retry window
+    CANCELLED = "cancelled"  # the channel was removed from the account (or deleted) before it was sent
+    STATUS_CHOICES = [(s, s) for s in (PENDING, SENDING, RETRY, SENT, FAILED, CANCELLED)]
+    UNFINISHED = (PENDING, SENDING, RETRY)
+    CANCELLABLE = (PENDING, RETRY)  # a send in progress can't be recalled
+
+    post = models.ForeignKey(SeenPost, on_delete=models.CASCADE, related_name="deliveries")
+    channel = models.ForeignKey("discord_alerts.DiscordWebhook", on_delete=models.CASCADE,
+                                related_name="deliveries")
+    role_id = models.CharField(max_length=20, blank=True, default="")  # as set when the post was noticed
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=PENDING)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    claim_token = models.CharField(max_length=64, blank=True)
+    claimed_at = models.DateTimeField(null=True, blank=True)
+    next_attempt_at = models.DateTimeField(null=True, blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.CharField(max_length=500, blank=True)
+
+    class Meta:
+        ordering = ["id"]
+        constraints = [
+            models.UniqueConstraint(fields=["post", "channel"], name="delivery_once_per_channel"),
+        ]
+        indexes = [models.Index(fields=["status", "next_attempt_at"], name="delivery_status_next")]
+
+    def __str__(self):
+        return f"post {self.post_id} → channel {self.channel_id}: {self.status}"
 
 
 class SchedulerState(models.Model):

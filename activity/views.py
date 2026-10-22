@@ -17,7 +17,8 @@ GROUPS = {
     "all": {},
     "sent": {"type__in": [log.POST_SENT]},
     "failed_checks": {"type__in": [log.CHECK_FAILED, log.LOGIN_FAILED, log.CYCLE_FAILED]},
-    "failed_sends": {"type__in": [log.SEND_FAILED, log.SEND_GAVE_UP, log.POST_NOT_SENT, log.CHANNEL_TEST_FAILED]},
+    "failed_sends": {"type__in": [log.SEND_FAILED, log.SEND_GAVE_UP, log.POST_NOT_SENT, log.MENTION_NOT_SENT,
+                                  log.CHANNEL_TEST_FAILED]},
     "retries": {"attempt__gt": 1},
     "problems": {"level__in": [ActivityEvent.WARNING, ActivityEvent.ERROR]},
 }

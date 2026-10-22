@@ -85,6 +85,12 @@ _ALL = [
              "Discord didn't accept the test message. Check that the webhook still exists in Discord, "
              "or paste a new webhook URL into this channel.",
              "update_webhook"),
+    Category("mention_refused", "Role mention left out",
+             "The notification was sent, but without mentioning the role. Either the Role ID is the Discord "
+             "server's own ID (which Discord uses for @everyone), or Discord didn't say which server the channel "
+             "is in, so this couldn't be checked. Open the account and check the Role ID: in Discord, open "
+             "Server Settings > Roles, click … next to the role and choose Copy Role ID.",
+             "check_handle"),
     Category("send_expired", "A post was never sent",
              "The bot couldn't send this post within 24 hours (for example because Discord kept failing, or the "
              "bot was turned off). It was dropped so old posts don't arrive late.",

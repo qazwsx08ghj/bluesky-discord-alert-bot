@@ -38,6 +38,10 @@ class Migration(migrations.Migration):
     dependencies = [
         ("botconfig", "0001_bot_settings"),
         ("discord_alerts", "0002_channel_health_and_single_default"),
+        # Added in 1.0.0: bluesky_monitor 0003 reads discord_webhook_url, which this removes.
+        # The order was right before only by chance. Every install that has this migration
+        # also has that one, so nothing changes for existing databases.
+        ("bluesky_monitor", "0003_account_channel"),
     ]
 
     operations = [

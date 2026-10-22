@@ -42,6 +42,8 @@ GOOD_HANDLE = "alertbot-demo.bsky.social"
 GOOD_PASSWORD = "demo-demo-demo-demo"  # any App Password-shaped value without "wrong" works
 WEBHOOK = "https://discord.com/api/webhooks/1189000000000000001/demo-token-announcements"
 WEBHOOK_2 = "https://discord.com/api/webhooks/1204000000000000002/demo-token-art-drops"
+DEMO_GUILD = "1100000000000000000"      # the made-up Discord server (its @everyone role has this ID)
+DEMO_ROLE = "1189000000000000123"       # a made-up role in it
 
 
 def _isolate(data_dir: Path):
@@ -195,15 +197,27 @@ class FakePublicClient:
                                posts_count=len(posts) * 40)
 
 
-def fake_deliver(webhook_url, handle, display_name, text, post_url, kind="post", **kwargs):
-    from discord_alerts.sender import DeliveryResult
+def fake_deliver(webhook_url, handle, display_name, text, post_url, kind="post", role_id="", **kwargs):
+    from discord_alerts.sender import DeliveryResult, build_payload
 
     if "broken" in webhook_url:
         return DeliveryResult(False, "Discord didn't accept the webhook. It may have been deleted.", status_code=404,
                               category="discord_webhook_invalid", technical="HTTP 404: Unknown Webhook")
+    payload = build_payload(handle, display_name, text, post_url, kind, role_id)  # exactly what Discord would get
     with _lock:
-        DISCORD.append({"channel_token": webhook_url.rsplit("/", 1)[-1], "handle": handle, "text": text})
+        DISCORD.append({"channel_token": webhook_url.rsplit("/", 1)[-1], "handle": handle, "text": text,
+                        "content": payload.get("content", ""), "allowed_mentions": payload["allowed_mentions"]})
     return DeliveryResult(True, status_code=200)
+
+
+def fake_lookup(webhook_url, label=""):
+    """Every demo channel is in the same made-up Discord server, DEMO_GUILD."""
+    from discord_alerts.sender import DeliveryResult, WebhookInfo
+
+    if "broken" in webhook_url:
+        return WebhookInfo(False, failure=DeliveryResult(False, "Discord didn't accept the webhook.", status_code=404,
+                                                         category="discord_webhook_invalid"))
+    return WebhookInfo(True, DEMO_GUILD)
 
 
 def install_fakes():
@@ -213,6 +227,7 @@ def install_fakes():
     bluesky.SharedSession.client_factory = FakeClient
     profiles.client_factory = FakePublicClient
     sender.deliver_alert = fake_deliver
+    sender.lookup_webhook = fake_lookup
 
 
 # -- data -----------------------------------------------------------------------------------------
@@ -246,21 +261,23 @@ def seed(scenario: str):
         login_retry_after=None if scenario == "working" else now + timedelta(minutes=10),
         last_error="" if scenario == "working" else "Bluesky didn't accept the handle or App Password."))
 
-    rows = [  # handle, channel, active, first check done, minutes since checked
-        ("mira-draws.bsky.social", art, True, True, 1),
-        ("pixelforge.games", None, True, True, 2),
-        ("nightbus-news.bsky.social", None, True, True, 2),
-        ("lowtide.band", None, True, False, None),
-        ("tamsin.bsky.social", art, False, True, 60 * 72),
+    default = None  # "the default channel"
+    rows = [  # handle, destinations [(channel, role)], active, first check done, minutes since checked
+        ("mira-draws.bsky.social", [(art, DEMO_ROLE), (default, "")], True, True, 1),
+        ("pixelforge.games", [(default, "")], True, True, 2),
+        ("nightbus-news.bsky.social", [(default, "")], True, True, 2),
+        ("lowtide.band", [(default, "")], True, False, None),
+        ("tamsin.bsky.social", [(art, "")], False, True, 60 * 72),
     ]
     accounts = {}
-    for i, (handle, channel, active, first_done, ago) in enumerate(rows):
+    for i, (handle, destinations, active, first_done, ago) in enumerate(rows):
         checked = now - timedelta(minutes=ago) if ago is not None else None
         acc = MonitoredAccount.objects.create(
-            handle=handle, display_name=PEOPLE[handle][0], channel=channel, is_active=active,
+            handle=handle, display_name=PEOPLE[handle][0], is_active=active,
             first_poll_done=first_done, last_checked_at=checked, last_check_ok=True if checked else None,
             last_success_at=checked, first_checked_at=now - timedelta(days=3) if first_done else None,
             first_check_posts=len(PEOPLE[handle][1]) if first_done else None)
+        channels.set_destinations(acc, [{"channel": c, "role_id": r} for c, r in destinations])
         MonitoredAccount.objects.filter(pk=acc.pk).update(created_at=now - timedelta(days=5 - i))
         accounts[handle] = acc
         if first_done:  # the existing posts were noted on the first check

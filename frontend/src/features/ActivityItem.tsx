@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import {
+  AtSign,
   Check,
   CircleAlert,
   CircleCheck,
@@ -28,6 +29,7 @@ const LOOKS: Record<string, Look> = {
   send_failed: { tone: "warn", icon: CircleAlert, title: (e) => `Couldn't send to ${chan(e)} yet` },
   send_gave_up: { tone: "bad", icon: CircleAlert, title: (e) => `Not sent to ${chan(e)}` },
   post_not_sent: { tone: "warn", icon: Hash, title: () => "Not sent: no channel to post to" },
+  mention_not_sent: { tone: "warn", icon: AtSign, title: (e) => `Sent to ${chan(e)} without the role mention` },
   check_failed: { tone: "warn", icon: Clock, title: () => "Check didn't work" },
   check_recovered: { tone: "ok", icon: CircleCheck, title: () => "Checks work again" },
   first_check_done: { tone: "info", icon: Check, title: () => "First check done" },

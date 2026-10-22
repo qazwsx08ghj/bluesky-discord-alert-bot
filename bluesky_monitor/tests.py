@@ -22,6 +22,39 @@ def feed_item(rkey, text="hello", author="artist.bsky.social", did="did:plc:abc"
         uri=uri, cid=f"cid-{rkey}", record=SimpleNamespace(text=text), author=SimpleNamespace(handle=author)))
 
 
+def with_channel(account, channel):
+    """Give a test account exactly one channel (None = it follows the default channel)."""
+    from discord_alerts import channels
+
+    channels.assign(account, channel)
+    return account
+
+
+def claim_with_state(account, item, delivery_status, **fields):
+    """Claim a post to be sent, then put its deliveries in `delivery_status` (e.g. retry).
+
+    If the account has nowhere to send to, a default channel is made first.
+    """
+    from discord_alerts import channels
+    from . import poller
+    from .models import PostDelivery
+
+    if not channels.targets_for(account):
+        channels.make_default(channels.channel_for_url("https://discord.com/api/webhooks/9/test-default", "#test"))
+    poller.claim_post(account, item, SeenPost.PENDING)
+    post = SeenPost.objects.get(account=account, post_uri=item.post.uri)
+    PostDelivery.objects.filter(post=post).update(status=delivery_status, **fields)
+    poller.refresh_post_status(post.pk)
+    return post
+
+
+def channel_ids(account):
+    """The account's destinations, as channel ids (None = the default channel), oldest first."""
+    from .models import AccountDestination
+
+    return list(AccountDestination.objects.filter(account=account).order_by("id").values_list("channel_id", flat=True))
+
+
 class FakeSession:
     """Stands in for SharedSession: returns items newest first, like the real API."""
 
@@ -157,7 +190,7 @@ class AccountApiTests(APITestCase):
         self.assertEqual(len(first["results"]), 20)
         self.assertEqual(first["results"][0]["text"], "post 24")
         self.assertEqual(set(first["results"][0]), {"id", "post_uri", "post_url", "text", "kind", "status",
-                                                     "attempts", "seen_at", "sent_at"})
+                                                     "seen_at", "sent_at", "deliveries"})
         second = self.client.get(f"{self.url}{acc.id}/posts/?page=2").data
         self.assertEqual([p["text"] for p in second["results"]][-1], "post 0")
         self.assertEqual(self.client.get(f"{self.url}999/posts/").status_code, 404)

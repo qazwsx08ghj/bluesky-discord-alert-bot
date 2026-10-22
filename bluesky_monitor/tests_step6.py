@@ -24,8 +24,8 @@ from discord_alerts.models import DiscordWebhook
 from discord_alerts.sender import DeliveryResult, build_payload
 from . import account_status, bluesky, check_all, jobs, locks, poller, profiles, scheduler
 from .bluesky import BlueskyLoginError, SharedSession, _fingerprint
-from .models import BlueskySessionState, MonitoredAccount, SchedulerState, SeenPost
-from .tests import FakeSession, feed_item
+from .models import BlueskySessionState, MonitoredAccount, PostDelivery, SchedulerState, SeenPost
+from .tests import FakeSession, claim_with_state, feed_item
 
 HANDLE = "bot.bsky.social"
 PASSWORD = "abcd-efgh-ijkl-mnop"           # looks like a real App Password
@@ -632,10 +632,10 @@ class CheckAllTests(CacheMixin, APITestCase):
     def test_every_account_gets_a_result_and_one_failure_stops_nothing(self):
         real_claim = poller.claim_post
 
-        def claim(account, item, status, kind=None):
+        def claim(account, item, status, kind=None, **kwargs):
             if account.handle == "crashy.bsky.social":
                 raise RuntimeError(f"bug while saving {PASSWORD}")
-            return real_claim(account, item, status, kind=kind)
+            return real_claim(account, item, status, kind=kind, **kwargs)
 
         with mock.patch("bluesky_monitor.poller.claim_post", side_effect=claim):
             body = self.check_all()
@@ -757,7 +757,7 @@ class Step6MigrationTests(TransactionTestCase):
     def test_reversible_backfilled_and_data_is_kept(self):
         account = MonitoredAccount.objects.create(handle="kept.bsky.social", first_poll_done=True)
         failing = MonitoredAccount.objects.create(handle="failing.bsky.social")
-        poller.claim_post(account, feed_item("q"), SeenPost.RETRY)
+        claim_with_state(account, feed_item("q"), PostDelivery.RETRY)
         self.migrate(self.before)
         with connection.cursor() as cursor:
             columns = [c.name for c in connection.introspection.get_table_description(
@@ -777,4 +777,5 @@ class Step6MigrationTests(TransactionTestCase):
         self.assertEqual(failing.last_error_category, "account_not_found")
         self.assertIsNotNone(failing.last_error_at)
         post = SeenPost.objects.get()
-        self.assertEqual((post.status, post.kind), (SeenPost.RETRY, None))
+        self.assertEqual((post.status, post.kind), (SeenPost.PENDING, None))
+        self.assertEqual(PostDelivery.objects.get().status, PostDelivery.RETRY)

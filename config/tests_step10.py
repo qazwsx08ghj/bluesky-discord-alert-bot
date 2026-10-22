@@ -15,6 +15,7 @@ from django.test import TestCase, TransactionTestCase, override_settings
 
 from bluesky_monitor import retention
 from bluesky_monitor.models import MonitoredAccount, SeenPost
+from bluesky_monitor.tests import with_channel
 from botconfig import store
 from discord_alerts import channels
 from discord_alerts.models import DiscordWebhook
@@ -70,7 +71,7 @@ class LegacyColumnMigrationTests(TransactionTestCase):
     def test_the_removal_can_be_undone(self):
         art = DiscordWebhook.objects.create(name="art", url=B)
         channels.make_default(DiscordWebhook.objects.create(name="main", url=A))
-        MonitoredAccount.objects.create(handle="own.bsky.social", channel=art)
+        with_channel(MonitoredAccount.objects.create(handle="own.bsky.social"), art)
         MonitoredAccount.objects.create(handle="follower.bsky.social")
         store.save({"poll_interval_minutes": 9})
 
@@ -127,11 +128,10 @@ class PostHistoryTests(TestCase):
 
     def test_posts_still_to_be_sent_are_never_deleted(self):
         acc = MonitoredAccount.objects.create(handle="a.bsky.social")
-        self.posts(acc, 3, status=SeenPost.RETRY)
-        self.posts(acc, 3, status=SeenPost.PENDING, start=3)
+        self.posts(acc, 6, status=SeenPost.PENDING)
         self.posts(acc, 10, start=6)
         retention.prune_seen_posts(keep=4)
-        self.assertEqual(SeenPost.objects.filter(status__in=[SeenPost.RETRY, SeenPost.PENDING]).count(), 6)
+        self.assertEqual(SeenPost.objects.filter(status=SeenPost.PENDING).count(), 6)
         self.assertEqual(SeenPost.objects.filter(status=SeenPost.SENT).count(), 4)
 
     def test_a_pruned_account_still_announces_nothing_old(self):

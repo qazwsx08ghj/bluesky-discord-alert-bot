@@ -25,6 +25,10 @@ export type Account = Schemas["Account"];
 export type AccountInput = Schemas["PatchedAccountRequest"];
 export type PollResult = Schemas["PollResult"];
 export type Post = Schemas["Post"];
+/** Where an account's notifications go: a channel (null = the default channel) and an optional role. */
+export type Destination = Schemas["Destination"];
+export type DestinationInput = Schemas["DestinationRequest"];
+export type PostDelivery = Schemas["PostDelivery"];
 
 // -- channels --------------------------------------------------------------------------------------
 export type Channel = Schemas["Channel"];
