@@ -228,6 +228,55 @@ class PolicyFileTests(SimpleTestCase):
         self.assertIn("third_party_notices.py --write", pr)
 
 
+MENTION = re.compile(r"(?<![\w.`/@+-])@([A-Za-z0-9][A-Za-z0-9-]{0,38})(?![\w@-])")
+NOT_PROSE = re.compile(r"`[^`\n]*`|\]\([^)]*\)|<https?://[^>]*>|https?://\S+")
+
+
+def bare_mentions(markdown):
+    """`@name` written as plain text, which GitHub turns into a link to that user (and a mention).
+
+    Not counted: code spans and code blocks (`@here`), email addresses, link targets and URLs.
+    """
+    found = []
+    fence = None
+    for line in markdown.splitlines():
+        marker = re.match(r"^[ \t]*(```|~~~)", line)
+        if marker:
+            fence = None if fence else marker.group(1)
+            continue
+        if fence or line.startswith("    "):
+            continue
+        found += [f"@{m.group(1)}" for m in MENTION.finditer(NOT_PROSE.sub(" ", line))]
+    return found
+
+
+class GitHubMentionTests(SimpleTestCase):
+    """GitHub links `@name` to the user called "name": in the release notes (taken from CHANGELOG.md)
+    it even lists that person as a contributor and may notify them. v1.0.0-rc.2's notes linked two
+    unrelated people through Discord's @everyone and @here. Such words are written as code."""
+
+    def test_no_document_mentions_anyone_by_accident(self):
+        for path in DOCS:
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                self.assertEqual(bare_mentions(path.read_text(encoding="utf-8")), [],
+                                 "write it as code, e.g. `@everyone`")
+
+    def test_the_release_notes_mention_no_one(self):
+        rc = load("release_check")
+        version = json.loads(text("frontend/package.json"))["version"]
+        self.assertEqual(bare_mentions(rc.changelog_section(text("CHANGELOG.md"), version)[1]), [])
+
+    def test_what_counts_as_a_mention(self):
+        for line in ["@everyone and @here are refused", "ask @someone-else.", "(@here)", "不能使用 @everyone 和"]:
+            with self.subTest(line=line):
+                self.assertNotEqual(bare_mentions(line), [])
+        for line in ["`@everyone` and `@here`", "write to me@example.com", "see [it](https://bsky.app/profile/@x)",
+                     "<https://github.com/@x>", "https://example.com/@x", "```\n@here\n```",
+                     "    @indented code", "@@ -1 +1 @@", "C@ts and d@gs"]:
+            with self.subTest(line=line):
+                self.assertEqual(bare_mentions(line), [])
+
+
 class ReleaseCheckTests(SimpleTestCase):
     """docker/release_check.py, run by release.yml before anything is published."""
 

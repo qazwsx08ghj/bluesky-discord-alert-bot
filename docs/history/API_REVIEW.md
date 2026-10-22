@@ -75,7 +75,7 @@ Smaller items: "Check All Now" loops in the browser one account at a time; `setu
 - Deleting a channel safely:
   - Still assigned to accounts: `409 {code: "channel_in_use", accounts: [...]}`. The UI asks where to move them and retries with `?reassign_to=<id>` or `?reassign_to=default`. `PROTECT` also blocks this at the database level.
   - The default channel: `409 {code: "channel_is_default"}`. Another channel must be made default first. The last remaining channel can't be deleted while any account is active.
-- Existing per-account `discord_webhook_url` values: a data migration creates (or reuses, matched by URL) a `DiscordWebhook` for each, named "Channel for @handle", and links it. The old field is removed in a later migration. Because of B1, real installs have no account rows, so in practice this only matters for anyone who created the tables by hand.
+- Existing per-account `discord_webhook_url` values: a data migration creates (or reuses, matched by URL) a `DiscordWebhook` for each, named "Channel for `@handle`", and links it. The old field is removed in a later migration. Because of B1, real installs have no account rows, so in practice this only matters for anyone who created the tables by hand.
 - The `.env` value `DISCORD_WEBHOOK_URL` is imported once as the default channel (see R5).
 - `POST /api/webhooks/{id}/test/` (already exists) is kept. It gets the corrected message text and updates delivery health plus the setup step "test message sent". `POST /api/settings/test-discord/` stays as is, for a URL typed in before it's saved.
 

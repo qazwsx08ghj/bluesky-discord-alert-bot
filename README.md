@@ -118,7 +118,7 @@ Next to each channel there's an optional **Role to mention** box. Leave it empty
 2. Open your server's **Server Settings → Roles**.
 3. Click **…** next to the role and choose **Copy Role ID**.
 
-@everyone and @here can't be used. Changes only affect new posts; old posts are never sent again.
+`@everyone` and `@here` can't be used. Changes only affect new posts; old posts are never sent again.
 
 ---
 

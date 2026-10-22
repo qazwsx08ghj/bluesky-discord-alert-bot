@@ -17,7 +17,7 @@ A quick reference to the main product and architecture decisions: what was decid
 **3. Named Discord channels with one default; each account sends to 1 to 10 of them (the default among them, if it likes), each with an optional role to mention.**
 - *Why:* one place to change a webhook, accounts can be grouped by channel, and one account can reach several communities.
 - *How:* one delivery per post per channel, made when the post is noticed, with its own retries. Changing channels or roles never sends old posts again; removing a channel cancels its unsent deliveries, but a send in progress can't be recalled.
-- *Mentions:* only a role the user typed in, restricted with `allowed_mentions` (`parse` always empty). A webhook can't see the server's roles, so the only role check beyond the format is that the ID isn't the server's own ID (@everyone).
+- *Mentions:* only a role the user typed in, restricted with `allowed_mentions` (`parse` always empty). A webhook can't see the server's roles, so the only role check beyond the format is that the ID isn't the server's own ID (`@everyone`).
 - *Tradeoff:* deleting a channel that's in use, or the default, needs a reassignment first. Nothing is ever left without a destination silently. Going back to the single-channel database layout isn't lossless; the backup made before the upgrade is the full rollback.
 - *Details:* [CHANNELS.md](CHANNELS.md).
 
