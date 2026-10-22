@@ -94,6 +94,8 @@ The contract is generated from the code, and the frontend's types from the contr
 
 ## 5. Tests
 
+The full reference is [docs/TESTING.md](docs/TESTING.md): every suite and what it verifies, prerequisites, CI, the release acceptance tests and the known limitations. The most used commands:
+
 | Command | What it checks | Needs |
 |---|---|---|
 | `python manage.py test` | Every backend test: API, checker, delivery, security, serving the panel, the contract, the Windows scripts (on Windows) | Python |
@@ -127,7 +129,7 @@ Keep it that way: a test that could reach the real services or real data is a bu
 | Windows scripts | Windows | the real `.bat` files under cmd.exe, with a fake Docker |
 | Docker | Linux | Compose files, image build (not pushed), image contents, the demo stack's safety |
 
-`release.yml` runs all of them first, and publishes nothing unless every one passes.
+`release.yml` runs all of them first, and publishes nothing unless every one passes. What each job runs, and the latest verified results: [docs/TESTING.md](docs/TESTING.md), section 6.
 
 ## 7. Ground rules
 
@@ -178,6 +180,18 @@ This project uses **human-directed, AI-assisted agentic development**.
 - CI, which runs them on every change;
 - the safety rules in section 7;
 - the maintainer's review of approaches and results.
+
+**How a change gets from idea to `main`:**
+1. **Requirements:** the maintainer states what's wanted and the constraints. For example: don't modify real data, don't push or publish without approval.
+2. **Plan:** for anything larger, Claude Code first presents a plan: the files to change, how it will be tested, and the risks. The maintainer reviews it before work starts.
+3. **Implementation:** the work is done on a separate local branch, with tests written or updated alongside the code.
+4. **Local checks:**
+   - the affected suites run, then the full regression set from [docs/TESTING.md](docs/TESTING.md);
+   - the opt-in real-Docker tests run when deployment is affected;
+   - every commit is scanned beforehand for real credentials and personal data.
+5. **Report:** Claude Code reports what changed, the test results, failures and their causes, and anything not tested. A test that wasn't run is reported as not run, never as passed.
+6. **Approval:** the maintainer reviews the report and decides. Merging, pushing, repository settings, releases and anything touching real data happen only with the maintainer's explicit approval.
+7. **CI:** after a push, all CI jobs must pass. A failure is investigated, and its cause explained, before more changes are made ([docs/TESTING.md](docs/TESTING.md), section 8).
 
 If you find a problem, please report it. For security problems, follow [SECURITY.md](SECURITY.md).
 

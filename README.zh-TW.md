@@ -197,6 +197,7 @@ Webhook 網址是 Discord 提供的連結，機器人可以透過它在某個頻
 - [docs/FRONTEND.md](docs/FRONTEND.md)：React 控制面板
 - [docs/API.md](docs/API.md) 和 [docs/openapi.yaml](docs/openapi.yaml)：API
 - [docs/DOCKER.md](docs/DOCKER.md)：Docker 版本的運作方式，以及如何發行新版本
+- [docs/TESTING.md](docs/TESTING.md)：所有測試的說明
 
 發現安全性問題時，請依照 [SECURITY.md](SECURITY.md) 私下回報，不要開公開的 issue。
 

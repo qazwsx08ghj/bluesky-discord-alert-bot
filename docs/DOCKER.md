@@ -136,6 +136,8 @@ Your data and the backups are untouched; nothing in the update deletes anything.
 
 ## 6. Tested with
 
+The Docker and release acceptance tests, and what hasn't been tested yet: [TESTING.md](TESTING.md), sections 7 and 9.
+
 - Windows 11, Docker Desktop 4.25 (Docker Engine 24, Compose v2.23) in step 8, and Docker Desktop 4.96.1 (Docker Engine 29.9, Compose v5.6) in step 10.
 - The real-container tests (`config/tests_docker.py`) cover: setup with an import, local-only port, DEBUG off, Host/Origin/CSRF/JSON protection, the React panel in a browser, crashed services coming back, restart/rebuild/recreate keeping data, update with backup and a new image, a migration backed up on start, removed containers keeping the volume, stop, and restore (also undoing a restore).
 - Checked by hand in step 10: recovery after a full Docker Desktop restart, the upgrade of a step 9 install with `update.bat`, a folder with a Chinese name, the release download with a registry standing in for ghcr.io, and the import of a copy of a real first-version install with networking switched off.

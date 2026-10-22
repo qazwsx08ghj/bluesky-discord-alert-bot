@@ -123,6 +123,22 @@ class PolicyFileTests(SimpleTestCase):
         self.assertIn("## AI assistance / AI 協助", text(".github/PULL_REQUEST_TEMPLATE.md"))
         self.assertNotIn("AI", text("README.md").split("## For developers")[0], "the user guide stays about using the bot")
 
+    def test_testing_reference_is_linked_and_honest_about_limits(self):
+        testing = text("docs/TESTING.md")
+        for linked_from in ("CONTRIBUTING.md", "CONTRIBUTING.zh-TW.md", "docs/BACKEND.md", "docs/FRONTEND.md",
+                            "docs/DOCKER.md", "README.md", "README.zh-TW.md"):
+            self.assertIn("TESTING.md", text(linked_from), linked_from)
+        self.assertIn("**Deferred.**", testing)
+        self.assertIn("under emulation only", testing)
+        self.assertIn("Not tested on real ARM hardware", testing)
+        self.assertIn("Not every line of AI-written code has been read by a human", text("CONTRIBUTING.md"))
+        for command in ("python manage.py test --tag contract", "python docker/third_party_notices.py",
+                        "npm run e2e", "set RUN_DOCKER_TESTS=1"):
+            self.assertIn(command, testing)
+        ci = text(".github/workflows/ci.yml")
+        for job in ("backend:", "contract:", "frontend:", "browser:", "windows-scripts:", "docker:"):
+            self.assertIn(f"\n  {job}\n", ci, "TESTING.md describes exactly these six CI jobs")
+
     def test_changelog_matches_the_panel_version(self):
         changelog = text("CHANGELOG.md")
         self.assertIn("## [Unreleased]", changelog)

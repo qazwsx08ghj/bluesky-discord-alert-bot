@@ -195,6 +195,7 @@ Want to change the bot, run the tests or contribute? Start with [CONTRIBUTING.md
 - [docs/FRONTEND.md](docs/FRONTEND.md): the React control panel
 - [docs/API.md](docs/API.md) and [docs/openapi.yaml](docs/openapi.yaml): the API
 - [docs/DOCKER.md](docs/DOCKER.md): how the Docker version works, and how releases are made
+- [docs/TESTING.md](docs/TESTING.md): how everything is tested
 
 To report a security problem, please follow [SECURITY.md](SECURITY.md) instead of opening a public issue.
 
