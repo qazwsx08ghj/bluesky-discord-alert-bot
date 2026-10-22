@@ -135,7 +135,6 @@ class MonitoredAccountSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(f"An account can send to at most {limit} channels.",
                                               code="too_many_destinations")
         default = channels.default_channel()
-        follows_default = any(item["channel"] is None for item in items)
         errors, seen = [{} for _ in items], set()
         for n, item in enumerate(items):
             channel = item["channel"]
@@ -143,8 +142,6 @@ class MonitoredAccountSerializer(serializers.ModelSerializer):
             if key in seen:
                 errors[n]["channel_id"] = ["The default channel is already in the list." if channel is None
                                            else f"#{channel.name} is already in the list."]
-            elif channel is not None and follows_default and default is not None and channel.pk == default.pk:
-                errors[n]["channel_id"] = [f"#{channel.name} is the default channel, which is already in the list."]
             seen.add(key)
             target = channel if channel is not None else default
             if target is not None and mentions.is_server_id(item.get("role_id", ""), target.guild_id or ""):

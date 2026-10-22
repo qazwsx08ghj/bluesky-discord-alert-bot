@@ -224,7 +224,7 @@ def delete_channel(channel: DiscordWebhook, reassign_to=None):
     its role. Unsent notifications move along, unless the post already goes there; then they
     are cancelled, so nothing is sent twice. A send in progress can't be recalled.
     """
-    from bluesky_monitor.models import AccountDestination, MonitoredAccount
+    from bluesky_monitor.models import AccountDestination, MonitoredAccount, PostDelivery
 
     with transaction.atomic():
         channel = DiscordWebhook.objects.select_for_update().get(pk=channel.pk)
@@ -258,11 +258,21 @@ def delete_channel(channel: DiscordWebhook, reassign_to=None):
             DiscordWebhook.objects.filter(pk=channel.pk).update(is_default=False)
             DiscordWebhook.objects.filter(pk=target.pk).update(is_default=True)
         _move_unsent(channel, target if target is not None else (default if reassign_to == "default" else None))
+        # The channel's remaining deliveries (sent, given up, or being sent right now) go with it;
+        # their posts' statuses are summed up again afterwards.
+        affected = list(PostDelivery.objects.filter(channel=channel).values_list("post_id", flat=True).distinct())
         try:
             DiscordWebhook.objects.filter(pk=channel.pk).delete()
         except ProtectedError:  # an account was given this channel at the same moment
             raise ChannelError("channel_in_use", "A watched account was just assigned to this channel. "
                                                  "Please try again.")
+        from bluesky_monitor import poller
+        from bluesky_monitor.models import SeenPost
+        for post_id in affected:
+            poller.refresh_post_status(post_id)
+        # A post that was only waiting for this channel has nowhere left to go.
+        SeenPost.objects.filter(pk__in=affected, status=SeenPost.PENDING, deliveries__isnull=True).update(
+            status=SeenPost.SKIPPED)
     logger.info("Channel %r deleted; %d account(s) moved", channel.name, len(accounts))
 
 

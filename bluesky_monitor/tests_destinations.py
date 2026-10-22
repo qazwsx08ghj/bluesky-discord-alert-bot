@@ -425,8 +425,9 @@ class DestinationApiTests(APITestCase):
         self.assertIn("already in the list", str(res.data["destinations"][1]["channel_id"]))
         res = self.add([{"channel_id": None}, {"channel_id": None}])
         self.assertIn("default channel is already in the list", str(res.data["destinations"][1]["channel_id"]))
-        res = self.add([{"channel_id": None}, {"channel_id": self.main.id}])
-        self.assertIn("is the default channel", str(res.data["destinations"][1]["channel_id"]))
+        # Following the default and naming the default channel too is allowed: it is sent there once.
+        # (The default can become one of an account's channels later, and editing must still work.)
+        self.assertEqual(self.add([{"channel_id": None}, {"channel_id": self.main.id}]).status_code, 201)
 
     def test_ten_channels_are_allowed(self):
         many = [{"channel_id": DiscordWebhook.objects.create(name=f"#c{n}", url=hook(100 + n)).id} for n in range(10)]
@@ -567,6 +568,22 @@ class DeleteChannelTests(DestinationTestCase):
         self.clock.advance(hours=1)
         self.check("a")
         self.assertEqual(self.discord.to("token-4"), [])
+
+    def test_a_post_sent_while_its_channel_is_deleted_is_summed_up_again(self):
+        three = DiscordWebhook.objects.create(name="#three", url=hook(4))
+        self.send_to(self.account, (self.two, ""))
+        poller.claim_post(self.account, feed_item("a"), SeenPost.PENDING)
+        PostDelivery.objects.update(status=PostDelivery.SENDING, claim_token="busy", claimed_at=T0)
+        channels.delete_channel(self.two, reassign_to=three)
+        self.assertFalse(PostDelivery.objects.exists())
+        self.assertEqual(self.post("a").status, SeenPost.SKIPPED, "not left pending forever")
+
+    def test_a_sent_post_stays_sent_when_its_channel_is_deleted(self):
+        three = DiscordWebhook.objects.create(name="#three", url=hook(4))
+        self.send_to(self.account, (self.two, ""))
+        self.check("a")
+        channels.delete_channel(self.two, reassign_to=three)
+        self.assertEqual(self.post("a").status, SeenPost.SENT, "history is kept")
 
     def test_a_delivery_moved_while_being_read_is_not_sent_to_the_old_channel(self):
         three = DiscordWebhook.objects.create(name="#three", url=hook(4))
