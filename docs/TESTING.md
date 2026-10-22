@@ -2,16 +2,17 @@
 
 How this project is tested: the tools, what each suite checks, how to run everything yourself, what CI runs, which acceptance tests are manual, and what hasn't been tested yet. For setup and the contribution rules, see [CONTRIBUTING.md](../CONTRIBUTING.md).
 
-Counts and results below are as of **2026-10-22**; the commands always give the current numbers.
+Counts and results below are as of **2026-10-22** (updated with the terminology change); the commands always give the current numbers.
 
 ## 1. Overview
 
 | Layer | Tool | Tests | Runs locally | Runs in GitHub Actions |
 |---|---|---|---|---|
-| Backend: API, checker, delivery, security, settings, serving the panel | Django's test runner (`unittest`) | 492 in total, including the rows below | Yes | Yes (Linux), except the Windows-only and opt-in tests |
+| Backend: API, checker, delivery, security, settings, serving the panel | Django's test runner (`unittest`) | 500 in total, including the rows below | Yes | Yes (Linux), except the Windows-only and opt-in tests |
 | API contract conformance | Django tests (tag `contract`), `jsonschema` | 19 | Yes | Yes |
 | Third-party notices | `docker/third_party_notices.py` + Django tests | 14 | Yes | Yes |
-| Documentation, templates, release check | Django tests (`config/tests_docs.py`) | 17 | Yes | Yes |
+| Documentation, templates, release check | Django tests (`config/tests_docs.py`) | 21 | Yes | Yes |
+| Wording ("notification", no development history in code or the API contract) | Django tests (`config/tests_wording.py`) | 4 | Yes | Yes |
 | Windows `.bat` scripts (with a fake Docker) | Django tests run under `cmd.exe` | part of `config/tests_deploy.py` (45) | Windows only | Yes (`windows-latest`) |
 | Real Docker install via the Windows scripts | Django tests, opt-in | 11 (`config/tests_docker.py`) | Windows + Docker Desktop only | **No** |
 | Development stack safety | Django tests, opt-in | 6 (`config/tests_dev_stack.py`) | With Docker | Yes (Linux) |
@@ -100,7 +101,8 @@ docker build -t bluesky-alert-bot:local .          # also checks the license not
 | `config/tests_frontend.py` | 16 | Serving the built panel: headers, CSP, file rules, the notices page |
 | `config/tests_openapi.py` | 19 | Every API operation's real answers against `docs/openapi.yaml` (tag `contract`) |
 | `config/tests_notices.py` | 14 | `THIRD_PARTY_NOTICES.txt` is complete, current and shipped everywhere |
-| `config/tests_docs.py` | 17 | Links, the English and Chinese documents, templates, the release check |
+| `config/tests_docs.py` | 21 | Links, the English and Chinese documents, the archive, templates, the release check |
+| `config/tests_wording.py` | 4 | The panel and backend messages say "notification"; no development-step labels in code or the API contract |
 | `config/tests_deploy.py` | 45 | Docker files, the dev stack's settings, and the real `.bat` scripts under `cmd.exe` with a fake Docker (Windows only) |
 | `config/tests.py`, `tests_step10.py` | 9, 10 | Settings API, removed routes, migrations of legacy data |
 | `config/tests_docker.py` | 11 | Opt-in, with **real containers** driven by the real scripts. It covers: `setup.bat` importing an earlier install, `start.bat`, `update.bat` backing up first, `stop.bat` and `restore.bat`; local-only access and CSRF in Docker; crash recovery; data kept across restarts, rebuilds and recreation; and the `@docker` browser checks. (`backup.bat` is covered by the fake-Docker script tests only.) |

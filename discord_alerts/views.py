@@ -14,7 +14,7 @@ from .serializers import DiscordWebhookSerializer
 
 @method_decorator(sensitive_post_parameters(), name="dispatch")
 class DiscordWebhookViewSet(viewsets.ModelViewSet):
-    """Named Discord channels. Routes are unchanged from before step 4.
+    """Named Discord channels (webhooks).
 
     DELETE refuses (409) while accounts use the channel or it is the default, unless
     `?reassign_to=<channel id>` or `?reassign_to=default` says where they should go.

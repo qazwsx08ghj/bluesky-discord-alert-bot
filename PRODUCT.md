@@ -74,9 +74,8 @@ Constraints:
 
 - **Secrets stay secret:** the App Password, webhook URLs and Django's secret key are never echoed back or exposed beyond the local machine. Webhook URLs are shown masked.
 - **Terminology:**
-  - **The panel uses:** "Setup", "Accounts" (and "Watched accounts" as the table heading), "Activity", "Settings", "App Password", "Webhook URL", "default channel", "Check now", "Check all now", "Pause" / "Resume". It says "announce" for sending posts to Discord ("Where announcements go").
-  - **The documentation says** "notification" in English and 「通知」 in Traditional Chinese.
-  - Keep each consistent within its own context, and align them if the panel's copy is revised.
+  - **The panel uses:** "Setup", "Accounts" (and "Watched accounts" as the table heading), "Activity", "Settings", "App Password", "Webhook URL", "default channel", "Check now", "Check all now", "Pause" / "Resume". What the bot sends to Discord is a "notification" ("Where notifications go"), in the panel and in the documentation (「通知」 in Traditional Chinese). API field names such as `announce_posts` keep their original names.
+  - A test (`config/tests_wording.py`) keeps "announce" out of the panel's text and the backend's messages.
 - **Copy** is written for non-technical readers: plain language, and it explains why a step is needed.
 - **Languages:** the panel is in English only for now. The user documentation is in English and Traditional Chinese (Taiwan).
 

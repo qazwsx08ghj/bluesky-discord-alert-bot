@@ -42,7 +42,7 @@ class MonitoredAccountViewSet(viewsets.ModelViewSet):
             # Same response as before (nothing announced), plus the reason.
             body.update(new_posts_announced=0, error=str(exc),
                         problem=problems.describe(getattr(exc, "category", "")))
-        # Added in step 6: the account's status after the check, and what the check did.
+        # Also: the account's status after the check, and what the check did.
         account.refresh_from_db()
         report = getattr(account, "check_report", None)
         info = account_status.describe(account)
@@ -57,7 +57,7 @@ class MonitoredAccountViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"])
     def posts(self, request, pk=None):
         """GET /api/accounts/{id}/posts/ — the posts noticed for this account, newest first,
-        20 per page (?page=2). Replaces the nested `seen_posts` list removed in step 10."""
+        20 per page (?page=2). Replaces the nested `seen_posts` list that older versions returned."""
         account = self.get_object()
         queryset = SeenPost.objects.filter(account=account).order_by("-seen_at", "-id")
         page = self.paginate_queryset(queryset)

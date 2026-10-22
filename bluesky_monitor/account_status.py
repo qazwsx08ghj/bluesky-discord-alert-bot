@@ -56,7 +56,7 @@ def describe(account, now=None) -> dict:
     elif not first_done:
         state = WAITING
         message = ("Waiting for its first check. The first check notes the posts that already exist without "
-                   "sending them, so nothing old is announced.")
+                   "sending them, so you aren't notified about old posts.")
     else:
         state, message = ACTIVE, "Watching for new posts."
 
@@ -75,7 +75,7 @@ def describe(account, now=None) -> dict:
         "first_check": {
             "done": first_done,
             "at": _iso(account.first_checked_at),
-            "seeded_posts": account.first_check_posts,  # null for accounts first checked before step 6
+            "seeded_posts": account.first_check_posts,  # null for accounts first checked by older versions
         },
         "last_checked_at": _iso(account.last_checked_at),
         "last_check_ok": account.last_check_ok,

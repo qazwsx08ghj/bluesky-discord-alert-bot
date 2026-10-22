@@ -54,7 +54,7 @@ export function SettingsPage() {
       <section className="sect" id="channels" aria-labelledby="s-channels">
         <div>
           <h2 id="s-channels">Discord channels</h2>
-          <p className="d">Where announcements are posted. Each channel needs a webhook URL from Discord. The default channel is used unless an account picks another.</p>
+          <p className="d">Where notifications are posted. Each channel needs a webhook URL from Discord. The default channel is used unless an account picks another.</p>
         </div>
         <ChannelsCard />
       </section>

@@ -1,4 +1,4 @@
-"""Step 8: what the Docker services run on start (prepare_data, wait_for_database,
+"""What the Docker services run on start (prepare_data, wait_for_database,
 checker_health, /api/health/, backup_db --label/--export, the checker watchdog).
 
 The command tests run `manage.py` in separate processes on a temporary data folder, like

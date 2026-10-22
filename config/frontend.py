@@ -1,4 +1,4 @@
-"""Serving the React control panel (step 9). The API itself is unchanged.
+"""Serving the React control panel.
 
 The panel is built by `npm run build` (in Docker: the image's frontend stage) into
 FRONTEND_DIST, normally frontend/dist:

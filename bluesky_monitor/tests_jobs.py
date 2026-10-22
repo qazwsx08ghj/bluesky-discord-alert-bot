@@ -1,4 +1,4 @@
-"""Step 7: "Check all" as a background job (bluesky_monitor/jobs.py).
+""""Check all" as a background job (bluesky_monitor/jobs.py).
 
 Bluesky and Discord are faked. The cross-process version (the job, a scheduled check and
 two more Check All runs at once, each in its own process) is in tests_processes.py.

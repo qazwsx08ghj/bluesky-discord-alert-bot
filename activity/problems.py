@@ -54,8 +54,8 @@ _ALL = [
              "check_handle"),
     Category("account_unavailable", "Account can't be viewed right now",
              "This Bluesky account exists but the bot can't see its posts right now: its owner deactivated it, "
-             "Bluesky suspended it, or it blocks the bot's account. The bot keeps trying; new posts are "
-             "announced if that changes.",
+             "Bluesky suspended it, or it blocks the bot's account. The bot keeps trying; you'll get "
+             "notifications again if that changes.",
              "wait"),
     Category("bluesky_app_password_needed", "Use an App Password",
              "This account asks for an email code when signing in, so the bot can't use its main password. "

@@ -25,12 +25,12 @@ SECRET_KEY = _secret_key()
 # Shown by /api/health/; set when the Docker image is built (ALERTBOT_VERSION).
 APP_VERSION = os.getenv("ALERTBOT_VERSION", "dev")
 DEBUG = os.getenv("DEBUG", "False") == "True"
-# Local only (step 7): the panel has no login, so it answers only to this computer's own names.
+# Local only: the panel has no login, so it answers only to this computer's own names.
 # This also blocks DNS-rebinding attacks. See config/security.py and docs/API.md.
 ALLOWED_HOSTS = [h.strip() for h in os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1,[::1]").split(",") if h.strip()]
 
-# The Django admin (/admin/) was removed in step 7: it was unused, and its tables stay in
-# the database untouched, so older versions still work after a rollback.
+# The Django admin (/admin/) was removed because nothing used it. Its tables stay in the
+# database untouched; nothing reads them.
 INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -118,14 +118,14 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
-# Step 9: the built React control panel (config/frontend.py). Docker builds it into the image.
+# The built React control panel (config/frontend.py). Docker builds it into the image.
 FRONTEND_DIST = Path(os.getenv("FRONTEND_DIST") or BASE_DIR / "frontend" / "dist")
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
-    # Step 7: JSON in, JSON out. No browsable HTML pages, no form posts, no login backends
+    # JSON in, JSON out. No browsable HTML pages, no form posts, no login backends
     # (the panel is local-only; cross-site requests are stopped by config.security).
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
@@ -137,7 +137,7 @@ REST_FRAMEWORK = {
 
 _RUNNING_TESTS = len(sys.argv) > 1 and sys.argv[1] == "test"
 
-# Bot settings live in the database since step 3 (botconfig/store.py). These .env values
+# Bot settings live in the database (botconfig/store.py). These .env values
 # are read only once, to fill the database the first time. Edits here are ignored after that.
 # Tests never see the real values; they set their own.
 # LEGACY_ENV_FILE: read them from that file instead (Docker setup: the old install's .env,
@@ -175,17 +175,17 @@ SEEN_POSTS_KEPT_PER_ACCOUNT = int(os.getenv("SEEN_POSTS_KEPT_PER_ACCOUNT", "1000
 # this past its planned time counts as overdue.
 SCHEDULER_STALL_MINUTES = int(os.getenv("SCHEDULER_STALL_MINUTES", "10"))
 SCHEDULER_OVERDUE_GRACE_SECONDS = int(os.getenv("SCHEDULER_OVERDUE_GRACE_SECONDS", "120"))
-# Step 8: a standalone checker (`run_scheduler`, the Docker checker service) exits if its own
+# A standalone checker (`run_scheduler`, the Docker checker service) exits if its own
 # heartbeat hasn't run for this long, so Docker restarts it. 0 turns the watchdog off.
 SCHEDULER_WATCHDOG_SECONDS = int(os.getenv("SCHEDULER_WATCHDOG_SECONDS", "300"))
 
-# Step 6: profile lookup, login test, "Check all"
+# Profile lookup, login test, "Check all"
 BLUESKY_PUBLIC_API_URL = os.getenv("BLUESKY_PUBLIC_API_URL", "https://public.api.bsky.app")  # read-only, no login
 BLUESKY_REQUEST_TIMEOUT_SECONDS = int(os.getenv("BLUESKY_REQUEST_TIMEOUT_SECONDS", "10"))
 PROFILE_LOOKUP_CACHE_SECONDS = int(os.getenv("PROFILE_LOOKUP_CACHE_SECONDS", "60"))
 LOGIN_TEST_LIMIT = int(os.getenv("LOGIN_TEST_LIMIT", "5"))  # tests per window
 LOGIN_TEST_WINDOW_SECONDS = int(os.getenv("LOGIN_TEST_WINDOW_SECONDS", "300"))
-# Step 7: "Check all" runs in the background (bluesky_monitor/jobs.py). New accounts stop being
+# "Check all" runs in the background (bluesky_monitor/jobs.py). New accounts stop being
 # started after this long; the rest are left for the next scheduled check.
 CHECK_ALL_TIME_LIMIT_SECONDS = int(os.getenv("CHECK_ALL_TIME_LIMIT_SECONDS", "600"))
 CHECK_JOB_POLL_SECONDS = float(os.getenv("CHECK_JOB_POLL_SECONDS", "2"))  # how often the checker looks for jobs

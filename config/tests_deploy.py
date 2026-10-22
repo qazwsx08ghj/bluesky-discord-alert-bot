@@ -1,4 +1,4 @@
-"""Step 8: Docker deployment files and the Windows scripts.
+"""Docker deployment files and the Windows scripts.
 
 - Static checks of the Dockerfile, Compose file, .dockerignore and entrypoint.
 - The real setup.bat / start.bat / update.bat / stop.bat / backup.bat run under cmd.exe
@@ -42,7 +42,7 @@ class DockerFilesTests(SimpleTestCase):
         self.assertIn("restart: unless-stopped", text)
         self.assertIn('DEBUG: "False"', text)
         self.assertIn('ALLOWED_HOSTS: "localhost,127.0.0.1,[::1]"', text)
-        self.assertNotIn("SETTINGS_ENV_MIRROR_PATH", text, "removed in step 10: nothing writes .env")
+        self.assertNotIn("SETTINGS_ENV_MIRROR_PATH", text, "removed: nothing writes .env")
         for service in ("web:", "checker:"):
             self.assertIn(f"  {service}\n    <<: *bot", text)
         self.assertEqual(text.count("healthcheck:"), 2)
@@ -72,7 +72,7 @@ class DockerFilesTests(SimpleTestCase):
         self.assertIn("USER bot", dockerfile)
 
     def test_the_control_panel_is_built_in_its_own_stage(self):
-        """Step 9: users need no Node.js; it's used only while building the image."""
+        """Users need no Node.js; it's used only while building the image."""
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         stages = re.findall(r"^FROM\s+(.+)$", dockerfile, flags=re.M)
         self.assertEqual(len(stages), 3)
@@ -93,7 +93,7 @@ class DockerFilesTests(SimpleTestCase):
             if line and not line.startswith("#"):
                 self.assertRegex(line, r"^[A-Za-z0-9_.\-]+==[\w.\-]+$")
         self.assertIn("Django==5.2.18", lock)
-        self.assertNotIn("django-apscheduler", lock, "unused; removed in step 10")
+        self.assertNotIn("django-apscheduler", lock, "unused; removed")
         self.assertIn("-r requirements-lock.txt", (ROOT / "requirements-docker.txt").read_text(encoding="utf-8"))
 
     def test_entrypoint_backs_up_and_migrates_before_serving(self):
@@ -147,7 +147,7 @@ class BatchFileTests(SimpleTestCase):
             data.decode("ascii")
             self.assertEqual(data.count(b"\n"), data.count(b"\r\n"), f"{name} must use CRLF line endings")
 
-    # Anything that could delete the bot's data. (Until step 10 these patterns held stray control
+    # Anything that could delete the bot's data. (These patterns once held stray control
     # characters instead of \b, so most of them could never match; test_the_guard_catches_* checks them.)
     FORBIDDEN = (r"compose\b.*\bdown\b", r"volume\s+rm\b", r"volume\s+prune\b", r"system\s+prune\b",
                  r"\bprune\b", r"--volumes\b", r"\brmdir\b", r"\brd\s", r"\bdel\s", r"\berase\b")

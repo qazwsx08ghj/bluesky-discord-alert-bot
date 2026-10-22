@@ -123,7 +123,7 @@ class CheckAllAcrossProcessesTests(ProcessTestCase):
 
 
 class CheckAllJobAcrossProcessesTests(ProcessTestCase):
-    """Step 7: the background job, the scheduled check and two more Check All runs at once."""
+    """The background job, the scheduled check and two more Check All runs at once."""
 
     def test_background_job_during_other_checks_sends_each_post_once(self):
         self.env["SCHEDULER_LEASE_SECONDS"] = "30"  # the job's checker keeps its lease throughout

@@ -18,7 +18,7 @@ before the "sent" update, and even then only once, after the stale timeout.
 Every send, retry, give-up and failed check is also written to the activity log
 (activity.log), which is separate from this queue.
 
-What is announced is set per account (announce_posts / _reposts / _replies). Items of a
+What is sent is set per account (announce_posts / _reposts / _replies). Items of a
 kind that is switched off are still recorded, as "skipped", so switching it on later
 never floods the channel with old items.
 
@@ -94,7 +94,7 @@ class AccountCheck:
     first_check: bool = False
     new_posts: int = 0      # posts noticed this time (on the first check: noted, never sent)
     posts_sent: int = 0     # posts sent to Discord during this check (includes retries of older ones)
-    turned_off: int = 0     # new posts not announced because their kind is switched off
+    turned_off: int = 0     # new posts not sent because their kind is switched off
     no_channel: int = 0     # new posts not sent because no Discord channel is chosen
 
     def as_dict(self):
@@ -272,7 +272,7 @@ def deliver_pending(account: MonitoredAccount) -> int:
         if result.ok:
             mine.update(status=SeenPost.SENT, sent_at=timezone.now(), next_attempt_at=None, last_error="")
             sent += 1
-            logger.info("Announced post from %s: %s", account.handle, post.post_uri)
+            logger.info("Sent post from %s: %s", account.handle, post.post_uri)
             retry_note = f" It worked on try {attempts} of {max_attempts}." if attempts > 1 else ""
             activity.record(activity.POST_SENT, ActivityEvent.SUCCESS, f"Sent a post from {where}.{retry_note}",
                             account=account, channel=channel, attempt=attempts, detail=_post_detail(post))
@@ -306,7 +306,7 @@ def deliver_pending(account: MonitoredAccount) -> int:
 
 # -- checking -------------------------------------------------------------------
 def poll_account(account: MonitoredAccount, session=None) -> int:
-    """Fetch recent posts for one account and announce any new ones. Returns count of posts sent.
+    """Fetch recent posts for one account and send any new ones. Returns count of posts sent.
 
     The details of what happened are left on `account.check_report` (an AccountCheck).
     Raises AccountBusy if another process is checking this account right now, and
@@ -361,10 +361,10 @@ def poll_account(account: MonitoredAccount, session=None) -> int:
             MonitoredAccount.objects.filter(pk=account.pk).update(
                 first_poll_done=True, first_checked_at=timezone.now(), first_check_posts=claimed)
             account.first_poll_done = True
-            logger.info("Seeded existing posts for %s - no announcements on first poll", account.handle)
+            logger.info("Seeded existing posts for %s - nothing sent on the first check", account.handle)
             activity.record(activity.FIRST_CHECK_DONE, ActivityEvent.INFO,
                             f"First check of @{account.handle} done. Noted {_plural(claimed, 'existing post')}; "
-                            "none were sent to Discord. New posts from now on will be announced.",
+                            "none were sent to Discord. You'll get a notification for each new post from now on.",
                             account=account, detail={"seeded_posts": claimed})
         elif report.no_channel:
             activity.problem(activity.POST_NOT_SENT, "no_channel",

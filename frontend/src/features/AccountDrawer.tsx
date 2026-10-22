@@ -48,7 +48,7 @@ export function AccountDrawerProvider({ children }: { children: ReactNode }) {
           const noted = result.first_check?.seeded_posts;
           toast(
             result.was_first_poll
-              ? `First check done for ${displayName(account)}. ${noted != null ? `Noted ${plural(noted, "existing post")}; none were sent. ` : ""}New posts will be announced.`
+              ? `First check done for ${displayName(account)}. ${noted != null ? `Noted ${plural(noted, "existing post")}; none were sent. ` : ""}You'll get a notification for each new post.`
               : (result.check?.message ?? `Checked ${displayName(account)}.`),
           );
         },
@@ -317,7 +317,7 @@ function DrawerBody({
         ) : null}
 
         <fieldset className="field opts">
-          <legend>What to announce</legend>
+          <legend>Send notifications for</legend>
           <label className="opt">
             <input type="checkbox" checked={announce.posts} onChange={(e) => setAnnounce({ ...announce, posts: e.target.checked })} />
             <span>
@@ -345,7 +345,7 @@ function DrawerBody({
         {editing ? null : (
           <div className="note">
             <Info {...ICON} />
-            <div>The first check runs straight away. It only notes their existing posts, so your channel isn't flooded. New posts after that are announced.</div>
+            <div>The first check runs straight away. It only notes their existing posts, so your channel isn't flooded. After that, each new post sends a notification.</div>
           </div>
         )}
         <div style={{ marginTop: 12 }}>

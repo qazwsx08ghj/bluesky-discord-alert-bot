@@ -10,7 +10,7 @@ A quick reference to the main product and architecture decisions: what was decid
 - *Details:* [ACCOUNTS_AND_CHECKS.md](ACCOUNTS_AND_CHECKS.md).
 
 **2. Posts and reposts are sent by default, replies only when switched on, per account.**
-- *Why:* replies are often conversation, not announcements.
+- *Why:* replies are often conversation rather than news worth a notification.
 - *Tradeoff:* with replies off, only the first post of a thread is sent. Switching a type on later never sends old items.
 - *Details:* [ACCOUNTS_AND_CHECKS.md](ACCOUNTS_AND_CHECKS.md); decision 1 in [history/API_REVIEW.md](history/API_REVIEW.md), section 7.
 

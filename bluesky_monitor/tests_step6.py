@@ -1,4 +1,4 @@
-"""Step 6: profile lookup, login test, "Check all", per-account status, announce options.
+"""Profile lookup, login test, "Check all", per-account status, per-account post types.
 
 Bluesky and Discord are always faked; nothing here touches the network.
 """
@@ -480,7 +480,7 @@ class AccountApiStep6Tests(APITestCase):
             self.assertIn(key, row)
         self.assertEqual(row["state"], "waiting_first_check")
         self.assertEqual((row["announce_posts"], row["announce_reposts"], row["announce_replies"]), (True, True, False))
-        self.assertNotIn("seen_posts", row, "removed in step 10; GET /api/accounts/{id}/posts/")
+        self.assertNotIn("seen_posts", row, "no longer in the list; GET /api/accounts/{id}/posts/")
 
     def test_accounts_from_older_code_get_the_defaults(self):
         account = MonitoredAccount.objects.create(handle="old.bsky.social")
@@ -619,7 +619,7 @@ class CheckAllTests(CacheMixin, APITestCase):
         return {r["handle"]: r for r in body["accounts"]}
 
     def check_all(self):
-        """Since step 7 Check All runs in the background: queue it, let the checker run it, read the job."""
+        """Check All runs in the background: queue it, let the checker run it, read the job."""
         res = self.client.post(self.url)
         self.assertEqual(res.status_code, 202)
         self.assertTrue(locks.acquire_scheduler_lease("T"))

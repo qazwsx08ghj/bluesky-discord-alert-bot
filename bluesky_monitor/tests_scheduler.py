@@ -151,7 +151,7 @@ class StartInProcessTests(TestCase):
 
 
 class MigrationSafetyTests(TransactionTestCase):
-    """Posts recorded before step 2 must never be announced again after upgrading."""
+    """Posts recorded by older versions must never be sent again after upgrading."""
 
     def test_existing_seen_posts_are_marked_sent(self):
         executor = MigrationExecutor(connection)
