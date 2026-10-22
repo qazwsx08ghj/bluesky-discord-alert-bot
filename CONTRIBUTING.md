@@ -9,7 +9,7 @@ The project has two halves that meet at one place, the API:
 - **Frontend:** the React control panel in `frontend/`. See [docs/FRONTEND.md](docs/FRONTEND.md).
 - **The contract between them:** [`docs/openapi.yaml`](docs/openapi.yaml), an OpenAPI 3.1 description of every endpoint, generated from the backend code. The frontend's TypeScript types are generated from it. [docs/API.md](docs/API.md) explains the API in words; for the exact fields and types, the contract is authoritative.
 
-You can work on either half without the other's tools.
+You can work on either half without the other's tools. How the project itself is developed, including its use of AI, is described in [section 10](#10-how-this-project-is-developed).
 
 ## 1. Project map
 
@@ -156,3 +156,33 @@ When you add a dependency:
 - **Changelog.** Add a line under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) for anything a user or API client would notice. Internal clean-ups don't need one.
 - **Two languages.** `README.md` and `CONTRIBUTING.md` have Traditional Chinese versions (`*.zh-TW.md`). When you change one, change the other in the same pull request; if you can't write Chinese, say so in the pull request and a maintainer will update it. The tests check that both versions have the same sections, links and commands. Terms are listed in [docs/GLOSSARY.zh-TW.md](docs/GLOSSARY.zh-TW.md). The other documents are in English only.
 - **Security problems** are never reported in public issues: see [SECURITY.md](SECURITY.md).
+
+## 10. How this project is developed
+
+This project uses **human-directed, AI-assisted agentic development**.
+
+**Claude Code (an AI coding agent) does most of the hands-on work:**
+- writing and changing the code;
+- writing and running the automated tests;
+- debugging;
+- writing the documentation.
+
+**The human maintainer directs and decides:**
+- defines what the bot should do and the constraints the work must respect (for example: never touch real user data, keep the one-click Windows install);
+- reviews the proposed approach before larger changes;
+- evaluates the test results;
+- explicitly approves important operations, such as merges, releases, repository settings and migrating real data.
+
+**Not every line of AI-written code has been read by a human.** Confidence in the code comes mainly from:
+- the automated tests: the backend, the API contract, the control panel, browser tests, the Windows scripts and real Docker containers;
+- CI, which runs them on every change;
+- the safety rules in section 7;
+- the maintainer's review of approaches and results.
+
+If you find a problem, please report it. For security problems, follow [SECURITY.md](SECURITY.md).
+
+**AI help in your contributions is welcome.**
+- Describe any substantial AI assistance in your pull request (the template asks); a short note is enough.
+- This is not a reason to reject a contribution. Every pull request is reviewed the same way: correctness, security, maintainability, and appropriate tests.
+- You're responsible for what you submit: understand it, test it, and make sure you have the right to contribute it under the MIT License.
+- Never paste secrets or real user data (App Passwords, webhook URLs, `.env` files, databases, problem reports) into an AI tool.

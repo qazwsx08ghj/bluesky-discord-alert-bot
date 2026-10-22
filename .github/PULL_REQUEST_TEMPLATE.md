@@ -8,6 +8,11 @@
 
 <!-- Commands you ran, and anything you checked by hand. -->
 
+## AI assistance / AI 協助
+
+<!-- Did an AI tool write or substantially change part of this? Say which parts and how you checked them. "None" is fine. This doesn't affect how the pull request is reviewed (CONTRIBUTING.md, section 10). -->
+<!-- 是否有用 AI 工具撰寫或大幅修改其中的內容？請說明是哪些部分、你怎麼確認的。沒有就寫「無」。這不會影響審查方式（見 CONTRIBUTING.zh-TW.md 第 10 節）。 -->
+
 ## Checklist / 檢查清單
 
 - [ ] One change per pull request, with tests for it. / 每個 PR 只做一件事，並附上測試。

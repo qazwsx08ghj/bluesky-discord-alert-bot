@@ -112,6 +112,17 @@ class PolicyFileTests(SimpleTestCase):
                          "## 繁體中文摘要", "127.0.0.1"):
             self.assertIn(required, policy)
 
+    def test_ai_assisted_development_is_disclosed(self):
+        en, zh = text("CONTRIBUTING.md"), text("CONTRIBUTING.zh-TW.md")
+        self.assertIn("## 10. How this project is developed", en)
+        self.assertIn("human-directed, AI-assisted agentic development", en)
+        self.assertIn("Not every line of AI-written code has been read by a human", en)
+        self.assertIn("This is not a reason to reject a contribution", en)
+        self.assertIn("## 10. 這個專案的開發方式", zh)
+        self.assertIn("並沒有每一行都經過人工逐行審閱", zh)
+        self.assertIn("## AI assistance / AI 協助", text(".github/PULL_REQUEST_TEMPLATE.md"))
+        self.assertNotIn("AI", text("README.md").split("## For developers")[0], "the user guide stays about using the bot")
+
     def test_changelog_matches_the_panel_version(self):
         changelog = text("CHANGELOG.md")
         self.assertIn("## [Unreleased]", changelog)
