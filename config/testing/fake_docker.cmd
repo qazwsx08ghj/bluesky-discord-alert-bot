@@ -7,10 +7,17 @@ rem   FAKE_OSTYPE       what "docker info --format" prints (default linux)
 rem   FAKE_COMPOSE=missing   "docker compose version" fails
 rem   FAKE_VOLUME=missing    "docker volume inspect" fails (not set up yet)
 rem   FAKE_FAIL_ON      a word; any compose call containing it fails
+rem   FAKE_COMPAT=newer the compatibility check answers 3 (the data is from a newer version)
+rem   FAKE_LABELS       what "docker ps --format {{.Labels}}" prints (the containers' labels)
 >>"%FAKE_DOCKER_LOG%" echo docker %*
 if "%~1"=="info" goto :info
 if "%~1"=="volume" goto :volume
 if "%~1"=="compose" goto :compose
+if "%~1"=="ps" goto :ps
+exit /b 0
+
+:ps
+if defined FAKE_LABELS echo %FAKE_LABELS%
 exit /b 0
 
 :info
@@ -25,6 +32,10 @@ exit /b 0
 
 :compose
 if "%~2"=="version" if "%FAKE_COMPOSE%"=="missing" exit /b 1
+if not "%FAKE_COMPAT%"=="newer" goto :fail_on
+echo %* | findstr /c:"check_compat" >nul
+if not errorlevel 1 exit /b 3
+:fail_on
 if not defined FAKE_FAIL_ON exit /b 0
 echo %* | findstr /c:"%FAKE_FAIL_ON%" >nul
 if errorlevel 1 exit /b 0

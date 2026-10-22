@@ -152,8 +152,14 @@ The status at the bottom of the sidebar shows whether the bot is running. If som
 `update.bat` keeps the version its download is for: the normal (stable) download always gets the newest version. A test version ("rc", for example `1.0.0-rc.2`) is its own download. To move to a newer one:
 
 1. Download the new zip, **Unblock** it (right-click → **Properties**), and **Extract All** into a **new folder**.
-2. Double-click **`update.bat` in the new folder.** It backs up your data first, then installs the new version. Your accounts, settings, channels and history are kept.
-3. From then on, use only the new folder, and **delete the old one.** Its scripts would start the older version again. Your backups stay available: `restore.bat` in the new folder lists them all.
+2. Double-click **`update.bat` in the new folder.** It backs up your data first, then installs the new version. Your accounts, settings, channels and history are kept. At the end it names your old folder.
+3. From then on, use only the new folder, and **delete the old one** once you're happy with the new version. Your backups stay available: `restore.bat` in the new folder lists them all.
+
+**Don't use the old folder's files after the update.** They belong to the older version, which can't use the updated data:
+- From 1.0.0-rc.2 on, an older folder's scripts notice this. They stop with a warning and change nothing, and the newer bot keeps running.
+- **1.0.0-rc.1's scripts can't check this.** Its `start.bat` (or `update.bat`) replaces your bot with the older version: notifications stop and the Accounts page shows errors. Your accounts and history aren't changed. To fix it, double-click `start.bat` in the new folder.
+
+**If the update fails,** it says what happened and deletes nothing. Run `update.bat` again; a broken download is a common cause. To go back to the version you had, double-click **`restore.bat` in the old folder** and choose the newest backup whose name starts with `db-before-update`. It backs up the current data first, puts the backup back and starts the older version.
 
 ---
 

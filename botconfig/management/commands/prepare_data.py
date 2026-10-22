@@ -8,6 +8,9 @@ In order, stopping at the first problem so the database is never changed half-wa
 2. --import-from: copy the old install's db.sqlite3 into place, but only if there is no
    database yet. The old file is only read, never changed. Its .env settings are brought
    over by the normal one-time import, which reads LEGACY_ENV_FILE (set by setup.bat).
+   Then: if a newer version updated the data last, stop here with exit code 3 (see
+   botconfig/compat.py): no backup, no migrations, nothing changed. entrypoint.sh then
+   shows a warning page instead of the panel.
 3. Back up the database if migrations are waiting (backup_db --if-pending).
 4. Apply migrations (--fake-initial, as start.bat always did, for databases made by the
    very first version, whose tables had no migration records).
@@ -93,7 +96,13 @@ class Command(BaseCommand):
         if import_from:
             self._import(Path(import_from), db)
 
+        from botconfig import compat
+
+        newer = compat.unknown_migrations()
         connections.close_all()
+        if newer:
+            self.stderr.write(compat.explanation(newer))
+            raise SystemExit(compat.NEWER_DATA_EXIT)
         call_command("backup_db", if_pending=True, stdout=self.stdout)
         call_command("migrate", fake_initial=True, interactive=False, verbosity=0)
         self.stdout.write("The database is up to date.")

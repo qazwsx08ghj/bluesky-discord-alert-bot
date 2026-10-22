@@ -3,12 +3,17 @@
 The web service applies migrations (with a backup first). After Docker Desktop restarts,
 both services start at once, so the checker waits here instead of using a half-updated
 database. Exits 1 after --timeout seconds; Docker then restarts it and it waits again.
+
+If a newer version updated the data last (botconfig/compat.py), it never goes on: it says
+so once and checks again every --newer-interval seconds (until a backup this version can use
+is restored), without a timeout, so Docker doesn't restart it over and over.
 """
 import time
 
 from django.core.management.base import BaseCommand
 from django.db import connections
 
+from botconfig import compat
 from botconfig.management.commands.backup_db import pending_migrations
 
 
@@ -18,11 +23,25 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("--timeout", type=float, default=300)
         parser.add_argument("--interval", type=float, default=2)
+        parser.add_argument("--newer-interval", type=float, default=60)
 
-    def handle(self, *args, timeout=300, interval=2, **options):
+    def handle(self, *args, timeout=300, interval=2, newer_interval=60, **options):
         deadline = time.monotonic() + timeout
-        said = False
+        said = said_newer = False
         while True:
+            try:
+                newer = compat.unknown_migrations()
+            except Exception:  # no database yet, or it is locked for the update
+                newer = []
+            finally:
+                connections.close_all()
+            if newer:
+                if not said_newer:
+                    self.stderr.write("Checker: " + compat.explanation(newer))
+                    said_newer = True
+                deadline = time.monotonic() + timeout
+                time.sleep(newer_interval)
+                continue
             try:
                 if not pending_migrations():
                     self.stdout.write("The database is ready.")

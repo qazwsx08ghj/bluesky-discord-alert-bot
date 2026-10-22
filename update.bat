@@ -22,6 +22,8 @@ echo.
 echo [2/4] Getting the new version...
 set "BUILD_ARGS=--pull"
 call "%COMMON%" :get_image || goto :keep_running
+call "%COMMON%" :check_compat || goto :failed
+call "%COMMON%" :previous_folder
 
 echo.
 echo [3/4] Restarting the bot with the new version...
@@ -34,6 +36,7 @@ call "%COMMON%" :tidy_images
 call "%COMMON%" :open_browser
 echo.
 echo  The update is complete. Your accounts, settings and history were kept.
+call "%COMMON%" :old_folder_note
 call "%COMMON%" :pause_end
 exit /b 0
 

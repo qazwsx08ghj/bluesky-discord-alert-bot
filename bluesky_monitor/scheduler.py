@@ -36,6 +36,7 @@ from django.utils import timezone
 from activity import log as activity, retention
 from . import retention as post_retention
 from activity.models import ActivityEvent
+from botconfig import compat
 from botconfig.secrets import scrub
 from . import locks
 from .models import SchedulerState
@@ -176,6 +177,10 @@ def run_cycle(instance_id: str = INSTANCE_ID) -> bool:
     from .poller import poll_all_active_accounts
 
     close_old_connections()
+    newer = compat.unknown_migrations()
+    if newer:  # a newer version updated the data: this one must not check, send or write anything
+        logger.error("Not checking: %s", compat.explanation(newer))
+        return False
     if not locks.acquire_scheduler_lease(instance_id):
         logger.info("Another checker is active; this one is on standby")
         return False

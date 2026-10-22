@@ -97,3 +97,9 @@ A quick reference to the main product and architecture decisions: what was decid
 - *Why:* fast, careful progress, with the maintainer deciding and approving.
 - *Tradeoff:* not every line has been read by a human; the tests and reviews are the safeguard.
 - *Details:* [CONTRIBUTING.md](../CONTRIBUTING.md), section 10; [TESTING.md](TESTING.md).
+
+**18. An older version never runs on data a newer version has updated (from 1.0.0-rc.2).**
+- *Why:* each test version is its own download folder, and an old folder's scripts are easy to double-click by mistake.
+- *How:* the database's migrations tell which version updated it last. The scripts stop before replacing the running bot, the web start shows a warning page instead of backing up or migrating, and the checker waits.
+- *Tradeoff:* 1.0.0-rc.1 doesn't have the check and can't be given it; the instructions say to delete the old folder after an update.
+- *Details:* [DOCKER.md](DOCKER.md), "Older versions and newer data".

@@ -23,12 +23,17 @@ call "%COMMON%" :import_old || goto :failed
 
 echo.
 echo [4/5] Starting the bot...
+rem An existing install: is its data from a newer version than this folder's?
+call "%COMMON%" :is_set_up
+if not errorlevel 1 call "%COMMON%" :check_compat || goto :failed
+call "%COMMON%" :previous_folder
 call "%COMMON%" :up || goto :failed
 
 echo.
 echo [5/5] Opening the control panel...
 call "%COMMON%" :wait_ready || goto :failed
 call "%COMMON%" :open_browser
+call "%COMMON%" :old_folder_note
 echo.
 echo  Setup is complete. The bot now runs in Docker Desktop, also after a restart of the
 echo  computer, as long as Docker Desktop starts when you sign in.

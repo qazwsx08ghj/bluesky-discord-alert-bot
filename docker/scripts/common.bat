@@ -266,6 +266,8 @@ set /a WAITED=0
 :ready_loop
 %ALERTBOT_CURL% -fsS -o nul --max-time 3 "%URL%api/health/" >nul 2>&1
 if not errorlevel 1 goto :ready_ok
+%ALERTBOT_CURL% -sS --max-time 3 "%URL%api/health/" 2>nul | findstr /c:"newer_data" >nul
+if not errorlevel 1 goto :msg_newer_running
 if %WAITED% geq %READY_WAIT% goto :msg_not_ready
 ping -n 3 127.0.0.1 >nul
 set /a WAITED+=2
@@ -291,6 +293,67 @@ set "LOGFILE=logs\problem-report.txt"
 %COMPOSE% logs --no-color --tail 300 >> "%LOGFILE%" 2>&1
 echo  Details were saved to %BOT_DIR%\%LOGFILE%
 echo  If you ask for help, share that file.
+exit /b 0
+
+
+rem -- Can this folder's version use the bot's data? (before starting or replacing the bot) -------
+rem Versions 1.0.0-rc.2 and later know which data they can use. Exit code 3: a newer version
+rem updated the data last, so nothing is started or replaced, and a newer bot that is running
+rem keeps running. Any other failure stops nothing: the bot checks again itself when it starts.
+:check_compat
+%COMPOSE% run --rm --no-deps web python manage.py check_compat >nul 2>&1
+if errorlevel 4 exit /b 0
+if errorlevel 3 goto :msg_newer_data
+exit /b 0
+
+:msg_newer_data
+echo.
+echo  STOP: this folder has an OLDER version of the bot than the one that last used your data.
+echo  Nothing was started or changed. If the newer version was running, it is still running.
+echo   - To keep using the newer version: close this window and use start.bat in the folder
+echo     of your newest download. Then delete this older folder, so it isn't used by mistake.
+echo   - To go back to this older version on purpose: double-click restore.bat in this folder
+echo     and choose a backup made before the update (its name starts with db-before-update).
+exit /b 1
+
+:msg_newer_running
+echo.
+echo  This folder's version of the bot is OLDER than your data, so it shows a warning page
+echo  instead of running. Your data wasn't changed, but the bot isn't running right now.
+echo   - Start the newer version: double-click start.bat in the folder of your newest download.
+echo   - Or go back to this older version on purpose: double-click restore.bat in this folder
+echo     and choose a backup made before the update (its name starts with db-before-update).
+exit /b 1
+
+
+rem -- Which folder ran the bot until now? Docker keeps it on the bot's containers ---------------
+rem Sets PREVIOUS_DIR (empty if unknown). Only reads. Docker answers in UTF-8, so the console reads it
+rem as UTF-8 meanwhile (folder names in other languages stay readable), then goes back to its own code page.
+:previous_folder
+set "PREVIOUS_DIR="
+set "LABELS="
+set "OLD_CP="
+for /f "tokens=2 delims=:." %%P in ('chcp 2^>nul') do set /a OLD_CP=%%P >nul 2>&1
+chcp 65001 >nul 2>&1
+for /f "usebackq delims=" %%L in (`%ALERTBOT_DOCKER% ps -a --filter "label=com.docker.compose.project=%PROJECT%" --filter "label=com.docker.compose.service=web" --format "{{.Labels}}" 2^>nul`) do set "LABELS=%%L"
+if defined OLD_CP chcp %OLD_CP% >nul 2>&1
+if not defined LABELS exit /b 0
+set "REST=%LABELS:*project.working_dir=%"
+if "%REST%"=="%LABELS%" exit /b 0
+for /f "tokens=1 delims=," %%D in ("%REST:~1%") do set "PREVIOUS_DIR=%%D"
+exit /b 0
+
+rem -- After the bot has moved to this folder: name the old one, so it isn't used by mistake ------
+:old_folder_note
+if not defined PREVIOUS_DIR exit /b 0
+if /i "%PREVIOUS_DIR%"=="%BOT_DIR%" exit /b 0
+echo.
+echo  IMPORTANT: until now the bot was run from another folder:
+echo     %PREVIOUS_DIR%
+echo  That folder has an older version. Don't use its files any more: they would start the older
+echo  version again. Once you're happy with this version, delete that folder. From now on, use
+echo  the files in this folder:
+echo     %BOT_DIR%
 exit /b 0
 
 

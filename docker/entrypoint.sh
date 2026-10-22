@@ -1,8 +1,9 @@
 #!/bin/sh
 # Starts one part of the bot inside its container. See docs/DOCKER.md.
 #
-#   web         prepare the data (secret key, backup before migrations, migrations), then the control panel
-#   checker     wait until the database is ready, then the Bluesky checker
+#   web         prepare the data (secret key, backup before migrations, migrations), then the control panel;
+#               a warning page instead if a newer version updated the data (botconfig/compat.py)
+#   checker     wait until the database is ready (and not from a newer version), then the checker
 #   import-old  setup.bat: bring over the data of an earlier install mounted at /import (read-only)
 #   backup      update.bat / backup.bat: copy the database (backup_db options follow)
 #   backups     restore.bat: copy every backup in the volume to /export (existing files are kept)
@@ -13,7 +14,15 @@ cd /app
 
 case "${1:-web}" in
   web)
-    python manage.py prepare_data
+    # Exit code 3: a newer version of the bot updated the data last (botconfig/compat.py).
+    # Nothing was backed up, migrated or changed; the panel shows a warning page instead.
+    status=0
+    python manage.py prepare_data || status=$?
+    if [ "$status" -eq 3 ]; then
+      export ALERTBOT_BLOCKED=newer_data
+    elif [ "$status" -ne 0 ]; then
+      exit "$status"
+    fi
     exec gunicorn config.wsgi:application \
       --bind 0.0.0.0:8000 \
       --workers "${WEB_WORKERS:-2}" \
