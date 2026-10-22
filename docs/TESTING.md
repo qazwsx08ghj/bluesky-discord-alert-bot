@@ -231,3 +231,23 @@ The first command scans only your staged changes; the second scans the whole his
 - the maintainer's own pre-commit check found none of the real credential values in the history.
 
 If a real secret was ever committed or pushed, removing it from the code isn't enough. Cancel it at its source: delete the App Password in Bluesky, or the webhook in Discord, and create a new one.
+
+## 11. Code scanning (CodeQL)
+
+GitHub's CodeQL "default setup" analyses Python, JavaScript/TypeScript and the workflows on every push, on pull requests and weekly. It needs no workflow file. Results are on the repository's **Security → Code scanning** page. It isn't a required check.
+
+The first analysis (2026-10-22, commit `993ba76`) raised 9 alerts:
+- **Fixed:** the two real ones.
+- **Dismissed:** the other seven, each with the reason below, after checking the code and the tests. CodeQL rules aren't disabled, and nothing is suppressed globally; a new instance of any of these patterns is reported again.
+
+| Alert | Rule | Where | Disposition |
+|---|---|---|---|
+| #1–3 | Path injection | `config/frontend.py` (serving panel files) | **False positive.** The file name must match `^[A-Za-z0-9][A-Za-z0-9_.-]{0,150}$` (no slashes), `..` is refused, and the resolved path must be directly inside `frontend/dist/assets`. Only listed file types are served. `config/tests_frontend.py` tries traversal (`..`, encoded slashes, `.env`, database names). |
+| #4 | Exception information exposed | `config/frontend_views.py` (saving settings) | **False positive.** The message returned is from `SettingsSaveError`, which only ever carries two fixed sentences written for users. Database errors are logged by type only, never returned. |
+| #5 | CSRF protection disabled | `config/settings.py` | **False positive.** Django's `CsrfViewMiddleware` is replaced by `config.security.RequestGuardMiddleware`, which runs Django's own CSRF check and adds Origin, `Sec-Fetch-Site` and JSON-only checks for the API too (`config/tests_security.py`). |
+| #6 | Clear-text storage of sensitive data | `config/tests_docker.py` | **Used in tests.** The test writes a fake earlier install's `.env`, with fake credentials, into a temporary folder. |
+| #7 | Weak hashing of sensitive data | `bluesky_monitor/bluesky.py` (`_fingerprint`) | **Won't fix (accepted).** SHA-256 of the handle and App Password is only a fingerprint, compared to notice when the saved login has changed. It doesn't protect or verify a password. The App Password itself must be stored readable in the same local database, to sign in to Bluesky, so the fingerprint exposes nothing more. |
+| #8 | DOM text read as HTML | `docs/history/prototype/control-panel.html` | **Fixed.** The archived prototype inserted avatar initials from typed text without escaping (two places); they're now escaped like the names. The file isn't shipped or served. |
+| #9 | Useless regex escape | `frontend/e2e/docker.spec.ts` | **Fixed.** `\.` in a template string lost its backslash, so the test matched any character instead of a literal dot. `config/tests_frontend.py` now checks every `new RegExp(` template string for this. |
+
+Before dismissing a future alert, record its reason here, and use the matching GitHub dismissal reason: false positive, used in tests, or won't fix.

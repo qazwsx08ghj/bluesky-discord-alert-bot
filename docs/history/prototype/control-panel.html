@@ -4,6 +4,7 @@
   The static mock-up that the control panel's design was approved from. It is not the current
   interface and isn't shipped: the control panel is frontend/ (see DESIGN.md and docs/FRONTEND.md).
   Opening this file loads the Inter font from Google Fonts; the real panel bundles its fonts.
+  Changed after archiving: the avatar initials are HTML-escaped like the names (code scanning).
 -->
 <html lang="en">
 <head>
@@ -432,7 +433,7 @@ function viewAccounts(){
       ?`<button class="btn sm" data-act="toggle" data-id="${a.id}">${ic("play")}Resume</button>`
       :`<button class="btn sm ghost" data-act="toggle" data-id="${a.id}" ${a.status==="checking"?"disabled":""}>${ic("pause")}Pause</button>`;
     return `<tr class="${a.status==="paused"?"paused":""} ${a.fresh?"fresh":""}">
-      <td><div class="who"><div class="av" style="background:${a.color}">${initials(a.name)}</div><div style="min-width:0"><b>${esc(a.name)}</b><a href="https://bsky.app/profile/${esc(a.handle)}" target="_blank" rel="noopener">@${esc(a.handle)}</a></div></div></td>
+      <td><div class="who"><div class="av" style="background:${a.color}">${esc(initials(a.name))}</div><div style="min-width:0"><b>${esc(a.name)}</b><a href="https://bsky.app/profile/${esc(a.handle)}" target="_blank" rel="noopener">@${esc(a.handle)}</a></div></div></td>
       <td><span class="chan">${ic("hash")}${esc(c.name)}</span></td>
       <td>${badge}</td>
       <td class="num" style="white-space:nowrap">${a.last}<span class="hint">${a.post?"Last post sent "+a.postAt:"Nothing sent yet"}</span></td>
@@ -556,7 +557,7 @@ function openDrawer(edit){
   $("#d-c").addEventListener("change",e=>{$("#newchan").innerHTML=e.target.value==="new"?`<div class="row2"><div class="field"><label for="d-cn">Channel name</label><input class="input" id="d-cn" placeholder="art-drops"></div><div class="field"><label for="d-cu">Webhook link</label><input class="input" id="d-cu" placeholder="https://discord.com/api/webhooks/…"></div></div>`:""});
   $("#acct-form").addEventListener("submit",e=>{e.preventDefault();a?saveEdit(a):addAccount();});
 }
-function profileCard(p){return `<div class="profile"><div class="av" style="background:${p.color}">${initials(p.name)}</div><div><b>${esc(p.name)}</b><span>@${esc(p.handle)}</span></div><span class="ok-ic">${ic("check","lg")}</span></div>`;}
+function profileCard(p){return `<div class="profile"><div class="av" style="background:${p.color}">${esc(initials(p.name))}</div><div><b>${esc(p.name)}</b><span>@${esc(p.handle)}</span></div><span class="ok-ic">${ic("check","lg")}</span></div>`;}
 function closeOverlay(){$("#overlay").innerHTML="";}
 
 function addAccount(){
