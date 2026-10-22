@@ -197,8 +197,35 @@ Tests never touch real data or real services:
 - **The release rehearsal and ARM smoke test** were run with local scripts that aren't in this repository, so they aren't repeatable from the repository yet.
 - **Real Bluesky and Discord** are only exercised in rare, approved live tests. Everything else uses fakes, so changes in those services' behaviour would show up in production first.
 - **Code review:** not every line of AI-written code has been read by a human (CONTRIBUTING.md, section 10). These tests, CI and the maintainer's review of approaches and results are the main safeguards.
-- **One-off checks during release preparation:**
-  - `gitleaks` (full git history secret scan);
-  - `actionlint` (workflow lint).
+- **No automated secret scanning:** CI doesn't scan for secrets; it's a manual step (section 10). `actionlint` (workflow lint) was also only run by hand during release preparation.
 
-  They aren't part of CI.
+## 10. Secret checks (manual)
+
+CI doesn't scan for secrets, so check your changes yourself before committing. What protects you already:
+- `.gitignore` excludes `.env`, databases, `backups/` and `logs/` (problem reports);
+- the tests check that the Docker image, the release download and the files the panel serves contain none of them.
+
+**Without extra tools:** read what you're about to commit, and make sure it holds no App Passwords, webhook URLs or real data:
+
+```
+git status
+git diff --cached
+```
+
+**With Docker:** [gitleaks](https://github.com/gitleaks/gitleaks), a secret scanner, runs in a throwaway container; nothing is installed. From the project folder in `cmd.exe` (in PowerShell, write `${PWD}` instead of `%cd%`):
+
+```
+docker run --rm -v "%cd%:/repo:ro" zricethezav/gitleaks:v8.21.2 git /repo --pre-commit --staged --redact
+docker run --rm -v "%cd%:/repo:ro" zricethezav/gitleaks:v8.21.2 git /repo --redact
+```
+
+The first command scans only your staged changes; the second scans the whole history. Both should end with `no leaks found`. `--redact` keeps any finding out of the output.
+
+`.gitleaksignore` lists the two known false positives: fake login tokens built in the tests from made-up data. Add to it only after checking that a finding really is fake, with a comment saying why.
+
+**Verified on 2026-10-22, locally:**
+- the full-history scan reports `no leaks found`;
+- the staged scan caught a fake access token planted in a staged file;
+- the maintainer's own pre-commit check found none of the real credential values in the history.
+
+If a real secret was ever committed or pushed, removing it from the code isn't enough. Cancel it at its source: delete the App Password in Bluesky, or the webhook in Discord, and create a new one.

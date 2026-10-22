@@ -132,6 +132,13 @@ class PolicyFileTests(SimpleTestCase):
         self.assertIn("under emulation only", testing)
         self.assertIn("Not tested on real ARM hardware", testing)
         self.assertIn("Not every line of AI-written code has been read by a human", text("CONTRIBUTING.md"))
+        self.assertIn("CI doesn't scan for secrets", testing)
+        self.assertIn("--pre-commit --staged --redact", testing)
+        self.assertIn("CI doesn't scan for secrets", text("CONTRIBUTING.md"))
+        self.assertIn("CI 不會掃描機密資訊", text("CONTRIBUTING.zh-TW.md"))
+        ignored = [l for l in text(".gitleaksignore").splitlines() if l and not l.startswith("#")]
+        self.assertEqual(len(ignored), 2, "only the two known fake test tokens are ignored")
+        self.assertTrue(all(":jwt:" in l and "/tests" in l for l in ignored))
         for command in ("python manage.py test --tag contract", "python docker/third_party_notices.py",
                         "npm run e2e", "set RUN_DOCKER_TESTS=1"):
             self.assertIn(command, testing)

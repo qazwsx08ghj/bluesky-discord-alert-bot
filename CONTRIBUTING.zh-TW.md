@@ -153,7 +153,8 @@ Django 的測試會用臨時的建置結果檢查控制面板，所以不需要 
 - **機密資訊不能外流。**
   - Webhook 網址和密碼不能出現在 API 回應、紀錄檔或頁面上。
   - 只能顯示遮蔽過的樣子。
-  - 不要 commit `.env`、資料庫或備份。
+  - 不要 commit `.env`、資料庫或備份。`.gitignore` 已經排除了這些檔案，也排除了 `logs/`。
+  - commit 前請先檢查一下要送出的內容，做法請看 [docs/TESTING.md](docs/TESTING.md) 第 10 節。這一步要自己手動做，CI 不會掃描機密資訊。
 - **版本要固定。** Python 套件的版本寫在 `requirements-lock.txt`（和 `requirements-dev.txt`），Node.js 套件寫在 `package-lock.json`。更新套件後請跑一次安全性檢查（audit）。
 
 ## 8. 授權
@@ -203,7 +204,7 @@ Django 的測試會用臨時的建置結果檢查控制面板，所以不需要 
 4. **本機檢查：**
    - 先跑受影響的測試，再跑 [docs/TESTING.md](docs/TESTING.md) 裡完整的回歸測試；
    - 動到部署相關的部分時，也會跑需要另外開啟的實際 Docker 測試；
-   - 每次 commit 前都會掃描，確認沒有真實的帳密或個人資料。
+   - 每次 commit 前，都會檢查準備送出的變更裡有沒有維護者真實的帳密或個人 email（檢查時不會把這些值印出來）。第一次 push 之前，也用 gitleaks 掃過完整的 git 歷史。這兩項檢查都不在 CI 裡；貢獻者也可以自己跑同樣的 gitleaks 掃描（[docs/TESTING.md](docs/TESTING.md) 第 10 節）。
 5. **回報：** Claude Code 會回報改了什麼、測試結果、失敗的原因，以及哪些部分沒有測到。沒跑的測試就回報「沒跑」，絕不會說成「通過」。
 6. **核准：** 維護者看過回報後做決定。合併、push、GitHub 專案設定、發行版本，以及任何會動到真實資料的操作，都一定要維護者明確同意。
 7. **CI：** push 之後，所有 CI 工作都必須通過。如果有失敗，要先查出原因並說明清楚，才會再做其他修改（[docs/TESTING.md](docs/TESTING.md) 第 8 節）。

@@ -138,7 +138,8 @@ Keep it that way: a test that could reach the real services or real data is a bu
 - **Secrets stay secret.**
   - Webhook URLs and passwords never appear in API answers, logs or pages.
   - Only masked forms are shown.
-  - Never commit `.env`, databases or backups.
+  - Never commit `.env`, databases or backups. `.gitignore` already excludes them, together with `logs/`.
+  - Before you commit, check what you're committing: [docs/TESTING.md](docs/TESTING.md), section 10. This is a manual step; CI doesn't scan for secrets.
 - **Exact versions.** Python versions are in `requirements-lock.txt` (and `requirements-dev.txt`); Node.js versions are in `package-lock.json`. Run the audits after an update.
 
 ## 8. License
@@ -188,7 +189,7 @@ This project uses **human-directed, AI-assisted agentic development**.
 4. **Local checks:**
    - the affected suites run, then the full regression set from [docs/TESTING.md](docs/TESTING.md);
    - the opt-in real-Docker tests run when deployment is affected;
-   - every commit is scanned beforehand for real credentials and personal data.
+   - before every commit, the staged changes are checked for the maintainer's real credential values and personal email address (the values are never printed). Before the first push, the full history was also scanned with gitleaks. Neither check runs in CI; contributors can run the same gitleaks scans ([docs/TESTING.md](docs/TESTING.md), section 10).
 5. **Report:** Claude Code reports what changed, the test results, failures and their causes, and anything not tested. A test that wasn't run is reported as not run, never as passed.
 6. **Approval:** the maintainer reviews the report and decides. Merging, pushing, repository settings, releases and anything touching real data happen only with the maintainer's explicit approval.
 7. **CI:** after a push, all CI jobs must pass. A failure is investigated, and its cause explained, before more changes are made ([docs/TESTING.md](docs/TESTING.md), section 8).
