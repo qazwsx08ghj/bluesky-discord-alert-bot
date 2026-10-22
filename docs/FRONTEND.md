@@ -1,4 +1,4 @@
-# The control panel (React, step 9)
+# The control panel (React)
 
 The control panel is a React app in `frontend/`. It talks to Django only through the REST API documented in [API.md](API.md). Users never build it: the Docker image builds it, and Django serves the result at http://127.0.0.1:8000/.
 
@@ -48,25 +48,20 @@ frontend/
   - `frame-ancestors 'none'; object-src 'none'; base-uri 'none'`.
 
   Also `X-Frame-Options: DENY`. The page is `Cache-Control: no-cache`, so a new version appears on the next load. The files are cached for good, because their names change with every build.
-- **Not built?** Only possible in a source checkout run without Docker: `/` then shows a short page explaining `npm ci` and `npm run build`. The API works either way. (The previous page, kept at `/classic/` during step 9, was removed in step 10.)
+- **Not built?** Only possible in a source checkout run without Docker: `/` then shows a short page explaining `npm ci` and `npm run build`. The API works either way.
 - **Where the build is:** `FRONTEND_DIST` (default `frontend/dist`). In Docker, the image's `panel` stage builds it (see the `Dockerfile`).
 
-The API is unchanged: the panel uses exactly the routes and fields in API.md, so a future React Native app can do everything the panel does.
+The panel uses only the routes and fields in [API.md](API.md), so a future React Native app can do everything the panel does.
 
 ## 3. Design
 
-The approved prototype (`prototype/control-panel.html`) is the reference; `src/styles/app.css` carries it over:
-- **Look:** neutral slate background, white surfaces, 1px borders and 8px corners. One Bluesky-blue accent for primary actions, selection and focus. Green, amber and red only for status.
-- **Type and icons:** Inter, bundled with the panel, so no font is fetched from the internet. Lucide icons.
-- **Light and dark:**
-  - colour tokens on `:root`, the dark set under `prefers-color-scheme`, and both again under `[data-theme]`;
-  - Settings → Appearance overrides the computer's setting, and the choice is kept in this browser.
-- **Sizes:**
-  - from 1600 px wide, the recent activity panel sits beside the accounts table;
-  - below 1180 px, each account row stacks, so its buttons stay in view;
-  - below 860 px, the sidebar becomes a top bar.
+The visual system is described in [DESIGN.md](../DESIGN.md): colours, type, layout and window sizes, components and their states, wording and motion. It's implemented in `src/styles/app.css`.
 
-  Tested at 1440×900, 1024×768 and 768×1024.
+When changing the panel, keep these working:
+- **Light and dark:**
+  - the colour tokens are set on `:root`, with the dark set under `prefers-color-scheme`, and both again under `[data-theme]`;
+  - Settings → Appearance overrides the computer's setting, and the choice is kept in this browser.
+- **Window sizes:** tested at 1440×900, 1024×768 and 768×1024.
 - **Keyboard and screen readers:**
   - a skip link;
   - focus moves to the page after navigation;
@@ -75,8 +70,6 @@ The approved prototype (`prototype/control-panel.html`) is the reference; `src/s
   - every control has a visible label or an accessible name;
   - status messages are announced through live regions;
   - motion respects "reduce motion".
-- **States:** every list has loading, empty and error states. Every action shows progress while it runs, then a message saying what happened.
-- **When the bot can't be reached:** a plain-language banner explains what to do, the page dims, and it reconnects by itself.
 
 ## 4. Working on it
 

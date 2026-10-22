@@ -12,7 +12,8 @@ from django.test import SimpleTestCase
 
 ROOT = Path(settings.BASE_DIR)
 PAIRS = [("README.md", "README.zh-TW.md"), ("CONTRIBUTING.md", "CONTRIBUTING.zh-TW.md")]
-DOCS = [*ROOT.glob("*.md"), *(ROOT / "docs").glob("*.md"), *(ROOT / "docker" / "notices").glob("*.md"),
+DOCS = [*ROOT.glob("*.md"), *(ROOT / "docs").glob("*.md"), *(ROOT / "docs" / "history").glob("*.md"),
+        *(ROOT / "docker" / "notices").glob("*.md"),
         ROOT / ".github" / "PULL_REQUEST_TEMPLATE.md"]
 LINK = re.compile(r"!?\[[^\]]*\]\(([^)\s]+)\)")
 FENCE = re.compile(r"^[ \t]*```[^\n]*\n(.*?)^[ \t]*```", re.MULTILINE | re.DOTALL)
@@ -40,6 +41,46 @@ def headings(markdown):
 
 def code_blocks(markdown):
     return [re.sub(r"(?m)^[ \t]+", "", block) for block in FENCE.findall(markdown)]
+
+
+class ArchiveTests(SimpleTestCase):
+    """Historical documents are archived with a banner; current documents don't point at removed things."""
+
+    def test_archived_documents_say_they_are_historical(self):
+        history = ROOT / "docs" / "history"
+        for name in ("API_REVIEW.md", "API_CHANGES_BEFORE_1.0.md", "MIGRATIONS.md"):
+            with self.subTest(doc=name):
+                self.assertIn("Historical document", (history / name).read_text(encoding="utf-8")[:600])
+        self.assertIn("HISTORICAL PROTOTYPE", (history / "prototype" / "control-panel.html").read_text(encoding="utf-8")[:300])
+        review = (history / "API_REVIEW.md").read_text(encoding="utf-8")
+        self.assertIn("All of them were fixed before the first public release", review[:1500])
+        self.assertFalse((ROOT / "prototype").exists())
+        self.assertFalse((ROOT / "docs" / "API_REVIEW.md").exists())
+        self.assertIn("docs/history/", (ROOT / ".dockerignore").read_text(encoding="utf-8").split())
+
+    def test_current_documents_describe_the_current_project(self):
+        for name in ("docs/CHANNELS.md", "docs/SETTINGS.md", "docs/ACTIVITY_AND_STATUS.md", "docs/ACCOUNTS_AND_CHECKS.md",
+                     "docs/FRONTEND.md", "docs/DOCKER.md", "docs/API.md", "DESIGN.md"):
+            with self.subTest(doc=name):
+                self.assertNotRegex(text(name), r"\(step \d+\)|[Ss]ince step \d+|[Uu]ntil step \d+|in step \d+")
+        product = text("PRODUCT.md")
+        for stale in ("templates/index.html", "Watched Accounts", "Custom Discord channel for this account"):
+            self.assertNotIn(stale, product)
+        self.assertNotIn("approved reference is `prototype", text("DESIGN.md"))
+        self.assertIn("1100 px", text("DESIGN.md"))
+        self.assertIn("DESIGN.md", text("docs/FRONTEND.md"))
+        brief = (ROOT / ".impeccable" / "surfaces" / "frontend-src.md").read_text(encoding="utf-8")
+        self.assertIn('primary_target: "frontend/src"', brief)
+        self.assertFalse((ROOT / ".impeccable" / "surfaces" / "prototype-control-panel-html.md").exists())
+
+    def test_feature_notes_and_decisions_are_linked(self):
+        backend = text("docs/BACKEND.md")
+        for note in ("ACCOUNTS_AND_CHECKS.md", "ACTIVITY_AND_STATUS.md", "CHANNELS.md", "SETTINGS.md", "DECISIONS.md"):
+            self.assertIn(note, backend)
+        decisions = text("docs/DECISIONS.md")
+        self.assertGreaterEqual(decisions.count("- *Why:*"), 10)
+        self.assertEqual(decisions.count("- *Why:*"), decisions.count("- *Tradeoff:*"))
+        self.assertEqual(decisions.count("- *Why:*"), decisions.count("- *Details:*"))
 
 
 class LinkTests(SimpleTestCase):

@@ -1,8 +1,8 @@
-# Profile lookup, login test, Check all, and account status (step 6)
+# Profile lookup, login test, Check all, and account status
 
 Code: `bluesky_monitor/profiles.py`, `check_all.py`, `account_status.py`, `poller.py` (`check_accounts`), `bluesky.py` (`try_login`), `config/frontend_views.py` (`test_login`). Tests: `bluesky_monitor/tests_step6.py`, `tests_processes.py` (`CheckAllAcrossProcessesTests`).
 
-One rule for all three new endpoints: **the HTTP status says whether Bluesky could be asked, and `result` says what the answer was.** A negative answer (not found, wrong password) is a `200`, so a search-as-you-type box doesn't log an error for every keystroke. Every body carries `code` and a plain-language `message`, plus `problem` (`{category, title, explanation, fix}`) when there is something to fix.
+One rule for these three endpoints: **the HTTP status says whether Bluesky could be asked, and `result` says what the answer was.** A negative answer (not found, wrong password) is a `200`, so a search-as-you-type box doesn't log an error for every keystroke. Every body carries `code` and a plain-language `message`, plus `problem` (`{category, title, explanation, fix}`) when there is something to fix.
 
 ## `GET /api/bluesky/profile/?handle=…`
 
@@ -66,7 +66,7 @@ Body, both optional: `bluesky_handle`, `bluesky_password`. A blank field means "
 
 Checks every active account and gives a result for each.
 
-**Since step 7 this runs in the background.** The request answers `202` with a job, and the results below appear on the job at `GET /api/check-jobs/{id}/` as each account is done. See `docs/API.md` section 4.6 for the job format, statuses and polling. The rules below are unchanged.
+**It runs in the background.** The request answers `202` with a job, and the results below appear on the job at `GET /api/check-jobs/{id}/` as each account is done. See [API.md](API.md) section 4.6 for the job format, statuses and polling.
 
 **No duplicates:**
 - It runs `poller.check_accounts()`, the same code as the scheduled check, so the same per-account lock, claim-before-send and retry rules apply.
@@ -116,13 +116,15 @@ Each account response also has:
 
 Times are timestamps, never "3 minutes ago" text, so they don't go stale between refreshes. Everything comes from the account row, so listing accounts needs no extra queries.
 
-## What gets announced (decision 1)
+## What gets sent
 
 - **Settings per account:** `announce_posts` (default on), `announce_reposts` (on) and `announce_replies` (off). They can be set when adding or editing an account.
 - **Kinds:** a feed item is a repost when it carries a repost reason, and a reply when `record.reply` is set. A pinned post counts as a post.
 - **Switched-off kinds:** items of a switched-off kind are recorded as `skipped`. Switching a kind on later never sends old items.
-- **Discord wording:** reposts say "X reposted" and name the original author; replies say "New reply from X". Plain posts look exactly as before.
-- **Threads:** a thread's later posts are replies to the first one, so with replies off only the first post of a thread is announced.
+- **Discord wording:** reposts say "X reposted" and name the original author; replies say "New reply from X"; plain posts say "New post from X".
+- **Threads:** a thread's later posts are replies to the first one, so with replies off only the first post of a thread is sent.
+
+Why these defaults: [DECISIONS.md](DECISIONS.md).
 
 ## Handles when adding or editing accounts
 
@@ -131,12 +133,4 @@ Times are timestamps, never "3 minutes ago" text, so they don't go stale between
 - A bare name gets the `.bsky.social` suggestion.
 - Accounts are not looked up on Bluesky when they're added, so adding works even while Bluesky is unreachable. The panel uses the lookup first.
 
-## Database changes (reversible)
-
-- **`bluesky_monitor` 0005, new nullable columns:**
-  - `MonitoredAccount`: `announce_posts`, `announce_reposts`, `announce_replies`, `first_checked_at`, `first_check_posts`, `last_success_at`, `last_error_at`, `last_error_category`
-  - `SeenPost`: `kind`
-- Missing announce values mean the defaults, and posts without a kind are sent as plain posts.
-- **Backfill:** existing accounts get the announce defaults. A working step 5 check becomes `last_success_at`, and a failing one becomes `last_error_*`.
-- **Going back:** since step 10, the older versions' compatibility copies are gone, so an older version can't run on this database. To go back, restore a backup made before the update (`restore.bat`) and run the matching version (docs/DOCKER.md, "If an update goes wrong").
-- The backup taken before this step is in `backups/2026-10-21_before-step-6/`.
+The database changes that introduced these fields: [history/MIGRATIONS.md](history/MIGRATIONS.md).

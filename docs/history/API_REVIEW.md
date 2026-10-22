@@ -1,5 +1,9 @@
 # API review for the new control panel
 
+> **Historical document (written 2026-10-21, before development step 1; section 8 was updated as each step was finished).** This was the plan for rebuilding the backend and the control panel, plus the record of each step as it was done. **It doesn't describe the current implementation.** For that, see [BACKEND.md](../BACKEND.md), [API.md](../API.md) and [DECISIONS.md](../DECISIONS.md). Paths and names here refer to the code as it was then.
+>
+> Section 1 lists problems found in the **pre-release code** at the time, including two security issues (B8, B9). All of them were fixed before the first public release, in steps 1–10 (see section 8), and no released version has them.
+
 Date: 2026-10-21. Scope: the Django/DRF backend as it stands, measured against the approved control panel plan (`prototype/control-panel.html`) and the six extra requirements (first-check clarity, real scheduler health, activity log, named channels, data that survives Docker, no duplicate polling).
 
 Rule for every change below: keep what works, extend in place, keep existing URL paths. Nothing is rewritten unless it is broken.
@@ -7,6 +11,8 @@ Rule for every change below: keep what works, extend in place, keep existing URL
 ---
 
 ## 1. Problems in the current code
+
+*("Current" meant the pre-release code on 2026-10-21. All of these were fixed before the first release; see section 8.)*
 
 These need fixing whatever the frontend looks like. Each was checked against the code and, where possible, the database.
 
@@ -262,7 +268,7 @@ The old `templates/index.html` and `index` view are kept until the React app rep
   - Docker: a `panel` build stage (Node.js 22, `npm ci --ignore-scripts`) builds it; the image that runs has no Node.js.
   - Tests: 50 frontend integration tests (fake API), 14 browser tests against the real app with fake Bluesky and Discord (`config/testing/demo_server.py`), Django tests for serving and file safety, and `@docker` browser checks in the real-container tests.
   - Not done here: storing `did`/`avatar_url` on accounts (the table shows initials; the add drawer shows the real avatar), the paged posts endpoint, and removing `/classic/` (planned with the other step 10 clean-ups).
-- **Step 10 (done):** legacy removal, release readiness. See `docs/API.md` section 7, `docs/DOCKER.md` and `docs/SETTINGS.md`.
+- **Step 10 (done):** legacy removal, release readiness. See `docs/API.md` section 7 at the time (now [API_CHANGES_BEFORE_1.0.md](API_CHANGES_BEFORE_1.0.md)), `docs/DOCKER.md` and `docs/SETTINGS.md`.
   - **Removed:**
     - the `.env` copy of saved settings (`SETTINGS_ENV_MIRROR_PATH`, `botconfig/envfile.py`, `export_env_settings`);
     - the rollback columns (`bluesky_monitor` 0007 and `botconfig` 0002 drop them after giving any orphaned URL a channel; both can be undone);

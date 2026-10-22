@@ -2,43 +2,22 @@
 
 The only thing a Windows user installs is **Docker Desktop**. Everything else is double-clicking a `.bat` file.
 
-## 1. For users
+## 1. The scripts
 
-### First time
-1. Install Docker Desktop from https://www.docker.com/products/docker-desktop/ and open it once. Wait until it says "Engine running".
-2. In Docker Desktop's settings, keep **"Start Docker Desktop when you sign in"** on. That's what brings the bot back after a computer restart.
-3. Double-click **`setup.bat`**. It:
-   1. checks Docker Desktop, and starts it if needed;
-   2. builds the bot (a release download fetches it instead), which takes a few minutes the first time;
-   3. **offers to bring over an earlier, non-Docker install** in the same folder. It copies `db.sqlite3` (accounts, channels, history) and the `.env` settings. The old files are only read, never changed.
-   4. starts the bot, waits until the control panel answers, and opens http://127.0.0.1:8000.
+**Users:** installing, everyday use and troubleshooting are in the [README](../README.md) ([繁體中文](../README.zh-TW.md)). This section describes what the scripts do underneath.
 
-> **Coming from the non-Docker version:** close its black `start.bat` window before running `setup.bat`. If it's still running, setup stops with a message, because two copies would announce every post twice.
-
-### Every day
-
-| File | What it does |
-|---|---|
-| `start.bat` | Starts the bot if it isn't running, and opens the control panel. Runs the setup if this is the first time. |
-| `stop.bat` | Stops the bot. Nothing is deleted; it stays stopped, also after a restart, until `start.bat`. |
-| `update.bat` | Backs up, gets the new version, restarts with it, and checks it works. See section 3. |
-| `backup.bat` | Saves a backup copy into the `backups` folder next to the scripts. |
-| `restore.bat` | Puts a backup back. See section 3. |
-
-**You can close the black window.** The bot keeps running inside Docker Desktop, and comes back by itself after a crash, a Docker Desktop restart or a computer restart.
-
-### When something goes wrong
-Every script explains problems in plain words and never deletes anything.
-
-| Message | What to do |
-|---|---|
-| Docker Desktop isn't installed | Install it (link above), then run the script again. |
-| Docker Desktop isn't running yet | The script starts Docker Desktop itself and waits up to 3 minutes. If that isn't enough, open Docker Desktop, wait for "Engine running", and try again. |
-| Docker Desktop is open, but it isn't responding | Docker Desktop's engine sometimes stops answering, for example after sleep or an update. The script offers to restart Docker Desktop (Y, or automatically after 60 seconds). It uses `docker desktop restart` where available; on older versions it ends Docker Desktop and all its helper processes and starts it again. It restarts once at most. |
-| Your Docker Desktop is too old | Update Docker Desktop. |
-| Set to "Windows containers" | Right-click the whale icon, choose "Switch to Linux containers…". |
-| Another program is using port 8000 | Close the old bot window, or set another port in `docker\compose.env` (`ALERTBOT_PORT=8080`). |
-| The control panel didn't answer in time | A report is saved to `logs\problem-report.txt` (passwords and webhook links are hidden). Share it when asking for help. |
+- **`setup.bat`:**
+  1. checks Docker Desktop, and starts it if needed;
+  2. builds the bot from source, or downloads the image in a release download;
+  3. offers to bring over an earlier, non-Docker install in the same folder. It copies `db.sqlite3` (accounts, channels, history) and imports the `.env` settings; the old files are only read. If the old bot is still running, setup stops with a message, because two copies would send every post twice;
+  4. starts the bot, waits until the control panel answers, and opens http://127.0.0.1:8000.
+- **`start.bat`** starts the bot if it isn't running (running the setup the first time), then opens the panel. **`stop.bat`** stops it; it stays stopped, even after a restart, until `start.bat`. **`update.bat`, `backup.bat` and `restore.bat`:** see section 3.
+- **Coming back by itself:** the services restart after a crash, a Docker Desktop restart or a computer restart. The last needs Docker Desktop's "Start Docker Desktop when you sign in".
+- **Problems:**
+  - every script explains them in plain words and never deletes anything;
+  - if the panel doesn't answer in time, a report goes to `logs\problem-report.txt`, with passwords and webhook links hidden.
+- **Docker Desktop checks:** installed, running (started and waited for up to 3 minutes), recent enough, and set to Linux containers.
+- **When Docker Desktop's engine stops answering** (for example after sleep or an update), the script offers to restart it: Y, or automatically after 60 seconds. It uses `docker desktop restart` where available; on older versions it ends Docker Desktop and all its helper processes and starts it again. It restarts once at most.
 
 ## 2. What runs, and where the data is
 
@@ -106,8 +85,8 @@ Your data and the backups are untouched; nothing in the update deletes anything.
   - There's no proxy in between, so nothing rewrites either. The Docker tests check Host, Origin, CSRF and JSON-only requests against the real containers.
 - **`DEBUG` is off**, set in `docker-compose.yml`.
 - **The image holds no secrets:** no `.env`, database or backups (`.dockerignore`, plus a check in the `Dockerfile`). It runs as user `bot`, not root, and the code isn't writable by the bot.
-- **The control panel is built inside the image** (step 9). A `panel` stage installs the exact Node.js packages from `frontend/package-lock.json` (`npm ci --ignore-scripts`) and builds the React app. Only the built files are copied into the image that runs; it has no Node.js. The page is served with a strict Content Security Policy (see [FRONTEND.md](FRONTEND.md)).
-- **Docker uses only `docker\compose.env`**, which holds no secrets. The scripts always pass it with `--env-file`, so Docker never reads the folder's old `.env`. Nothing writes `.env` (the copy kept for older versions was removed in step 10); setup only reads an old `.env` once, to import it.
+- **The control panel is built inside the image.** A `panel` stage installs the exact Node.js packages from `frontend/package-lock.json` (`npm ci --ignore-scripts`) and builds the React app. Only the built files are copied into the image that runs; it has no Node.js. The page is served with a strict Content Security Policy (see [FRONTEND.md](FRONTEND.md)).
+- **Docker uses only `docker\compose.env`**, which holds no secrets. The scripts always pass it with `--env-file`, so Docker never reads the folder's old `.env`. Nothing writes `.env`; setup only reads an old `.env` once, to import it.
 - **Container logs** go through the same filter that hides webhook tokens. Docker keeps at most 3 files of 10 MB.
 
 ## 5. For developers
@@ -117,30 +96,17 @@ Your data and the backups are untouched; nothing in the update deletes anything.
   docker compose --env-file docker\compose.env -f docker-compose.yml -f docker-compose.build.yml up -d --build
   docker compose -p alertbot logs -f
   ```
-- **Without Docker:** `dev\setup-without-docker.bat` and `dev\start-without-docker.bat` (the earlier venv scripts). Don't run them together with the Docker version. Without Node.js these show the previous control panel; run `npm ci` and `npm run build` in `frontend\` for the new one.
+- **Without Docker:** `dev\setup-without-docker.bat` and `dev\start-without-docker.bat` (the earlier venv scripts). Don't run them together with the Docker version. Without a built panel, `/` shows a page explaining how to build it: run `npm ci` and `npm run build` in `frontend\`.
 - **The control panel:** see [FRONTEND.md](FRONTEND.md) for `npm run dev`, the demo server and the frontend tests.
-- **Dependencies:** the image installs the exact versions in `requirements-lock.txt` plus gunicorn (`requirements-docker.txt`). After upgrading a package in the venv, run `venv\Scripts\pip freeze > requirements-lock.txt` and the tests.
-- **Tests:**
-
-  | Command | What it covers |
-  |---|---|
-  | `venv\Scripts\python manage.py test` | Everything except real containers. On Windows it also runs the real `.bat` scripts against a fake `docker` (`config/tests_deploy.py`). |
-  | `set RUN_DOCKER_TESTS=1` then `manage.py test config.tests_docker` | Builds the image and runs the scripts against real Docker (about 1–5 minutes). |
-
-  The real-container tests use:
-  - a temporary copy of the project, holding only fake data and fake credentials;
-  - their own Docker project, volume, image tag and port;
-  - no active account, so nothing contacts Bluesky or Discord.
-
-  They never touch the `alertbot` project or its volume.
+- **Dependencies:** the image installs the exact versions in `requirements-lock.txt` plus gunicorn (`requirements-docker.txt`). Update `requirements-lock.txt` by hand: `pip freeze` would also list the developer tools from `requirements-dev.txt`, which don't belong in the image. Then run the tests, and regenerate the license notices (CONTRIBUTING.md, section 8).
+- **Tests:** how to run them, including the opt-in real-container tests and how they're isolated from the real install: [TESTING.md](TESTING.md).
 
 ## 6. Tested with
 
-The Docker and release acceptance tests, and what hasn't been tested yet: [TESTING.md](TESTING.md), sections 7 and 9.
+What has and hasn't been tested, including the Docker and release acceptance tests: [TESTING.md](TESTING.md), sections 7 and 9.
 
-- Windows 11, Docker Desktop 4.25 (Docker Engine 24, Compose v2.23) in step 8, and Docker Desktop 4.96.1 (Docker Engine 29.9, Compose v5.6) in step 10.
-- The real-container tests (`config/tests_docker.py`) cover: setup with an import, local-only port, DEBUG off, Host/Origin/CSRF/JSON protection, the React panel in a browser, crashed services coming back, restart/rebuild/recreate keeping data, update with backup and a new image, a migration backed up on start, removed containers keeping the volume, stop, and restore (also undoing a restore).
-- Checked by hand in step 10: recovery after a full Docker Desktop restart, the upgrade of a step 9 install with `update.bat`, a folder with a Chinese name, the release download with a registry standing in for ghcr.io, and the import of a copy of a real first-version install with networking switched off.
+- Windows 11 with Docker Desktop 4.25 (Docker Engine 24, Compose v2.23), and later Docker Desktop 4.96.1 (Docker Engine 29.9, Compose v5.6).
+- Checked by hand: recovery after a full Docker Desktop restart, upgrading an earlier install with `update.bat`, a folder with a Chinese name, and importing a copy of a real first-version install with networking switched off.
 
 ## 7. Releases (prebuilt images)
 

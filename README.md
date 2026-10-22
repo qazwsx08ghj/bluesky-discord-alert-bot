@@ -157,6 +157,12 @@ The scripts explain problems in plain words, and they never delete your data.
 **"Docker Desktop is open, but it isn't responding"**
 → Answer **Y** and the script restarts Docker Desktop. If it keeps happening, restart the computer and install Docker Desktop's updates.
 
+**"Your Docker Desktop is too old"**
+→ Update Docker Desktop (Docker Desktop → Check for updates), then run the script again.
+
+**Docker Desktop is set to "Windows containers"**
+→ Right-click the whale icon next to the clock and choose **Switch to Linux containers…**.
+
 **"Another program is already using port 8000"**
 → If an older version of this bot is running in a black window, close it (two copies would send everything twice). Otherwise open `docker\compose.env` in Notepad, change `ALERTBOT_PORT=8000` to another number such as `8080`, and use `http://127.0.0.1:8080`.
 

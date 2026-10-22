@@ -28,6 +28,16 @@ Without Docker (`dev\start-without-docker.bat`), `manage.py runserver` starts th
 | `botconfig` | `store` (settings saved in the database) · `secrets` (masking) · commands: `prepare_data`, `backup_db`, `restore_db`, `import_env_settings`, `api_contract` |
 | `config` | `settings` · `urls` · `security` (CSRF, Origin and `Sec-Fetch-Site` checks, JSON-only bodies, host names) · `frontend` (serving the panel) · `frontend_views` (settings, login test, status, profile lookup, check jobs) · `health` · `openapi` (the contract) |
 
+### Feature notes
+
+How the main features behave, and why:
+- [ACCOUNTS_AND_CHECKS.md](ACCOUNTS_AND_CHECKS.md): profile lookup, login test, Check All, account status, what gets sent;
+- [ACTIVITY_AND_STATUS.md](ACTIVITY_AND_STATUS.md): the activity log, problem categories, status, retention;
+- [CHANNELS.md](CHANNELS.md): named Discord channels, routing, safe deletion;
+- [SETTINGS.md](SETTINGS.md): settings in the database, the one-time import, backups before migrating.
+
+The main architectural decisions and their tradeoffs: [DECISIONS.md](DECISIONS.md). How things got this way: [history/](history/README.md).
+
 ## 3. The API contract
 
 `config/openapi.py` describes every endpoint for [drf-spectacular](https://drf-spectacular.readthedocs.io/) (a development tool, in `requirements-dev.txt` only):

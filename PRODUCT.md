@@ -2,67 +2,88 @@
 
 <!-- impeccable:product-schema 1 -->
 
+> Internal product brief for maintainers and the design tooling (it pairs with [DESIGN.md](DESIGN.md)). Users should read the [README](README.md); developers, [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Platform
 
 web
 
 ## Stack
 
-In place since step 9:
-
-- **Frontend:** React, kept logically separate from the backend.
-- **Backend:** Django + Django REST Framework. Django exposes REST APIs only, shaped so a future React Native client can reuse them.
-- **Packaging:** Docker, with a multi-stage build that compiles the React frontend and installs Python dependencies. Node.js and Python live only inside containers.
-- **Deployment target:** Windows with Docker Desktop and Docker Compose. Users install Docker Desktop and nothing else.
-- **Start command:** `setup.bat` / `start.bat` (Docker Compose underneath); users never type Docker commands.
-- **Persistence:** Docker volumes keep the database and configuration (credentials, webhook, poll interval) across container restarts.
-- Setup must work on Windows without anyone configuring a development environment by hand.
+- **Frontend:** a React control panel (`frontend/`), built into static files and served by Django. It talks to Django only through the REST API.
+- **Backend:** Django + Django REST Framework, plus a background checker (APScheduler) as a separate service. The REST API is shaped so a future React Native client can reuse it, and it's described by an OpenAPI contract (`docs/openapi.yaml`).
+- **Packaging:** one Docker image. A multi-stage build compiles the panel with Node.js; the image that runs has no Node.js.
+- **Deployment target:** Windows with Docker Desktop. Users install Docker Desktop and nothing else.
+- **Start and manage:** `setup.bat`, `start.bat`, `stop.bat`, `update.bat`, `backup.bat` and `restore.bat` (Docker Compose underneath). Users never type commands.
+- **Persistence:** one Docker volume holds the SQLite database (accounts, channels, settings, history), the backups and the generated secret key. Updates and restarts keep it.
+- **Releases:** a prebuilt image and a small download (the scripts plus a Compose file), so nothing is built on users' computers.
 
 ## Users
 
-Non-technical Discord server owners and moderators on Windows. They follow the README step by step, have never edited code, and may not know what a terminal, webhook or app password is until the guide explains it. They set the bot up once, then return occasionally to add, pause or reroute watched accounts.
+Non-technical Discord server owners and moderators on Windows. They follow the README step by step, have never edited code, and may not know what a terminal, webhook or App Password is until the guide explains it. They set the bot up once, then come back now and then to add, pause or reroute accounts, or to fix a problem the panel points out.
 
 ## Product Purpose
 
-The Bluesky → Discord Alert Bot watches any public Bluesky accounts the owner picks (artists, news outlets, creators) and posts each new post into a Discord channel as an announcement embed linking back to the post. The control panel is the only place the owner configures it.
+The Bluesky → Discord Alert Bot watches any public Bluesky accounts the owner picks (artists, news outlets, creators) and sends each new post to a Discord channel as an embed linking back to the post. The control panel is the only place the owner configures it.
 
 Success on the control panel, in priority order:
 
-1. **First-time setup and day-to-day account management are equally important.** Connecting the Bluesky login and Discord webhook and getting a test message through should be free of confusion; adding, pausing, checking and routing accounts should be quick.
-2. **Seeing that it works**, where possible: the bot is running, when it last checked, what was recently sent, and any errors.
+1. **First-time setup and day-to-day account management are equally important.**
+   - Connecting the Bluesky login and a Discord channel, then getting a test message through, should be free of confusion.
+   - Adding, pausing, checking and routing accounts should be quick.
+2. **Seeing that it works:**
+   - whether the bot is running, and when it last checked;
+   - what was recently sent;
+   - any problem, with its fix.
 
 ## Positioning
 
-A self-hosted, no-code bridge from Bluesky to Discord: the owner runs it on their own Windows machine, watches accounts they don't own, and manages everything from a local web page instead of config files or bot commands.
+A self-hosted, no-code bridge from Bluesky to Discord. The owner runs it on their own Windows computer, follows accounts they don't own, and manages everything from a local web page instead of config files or bot commands. It's free and open source (MIT).
 
 ## Operating Context
 
-- Runs locally; the control panel is opened at `http://127.0.0.1:8000/` while the bot is running. Closing or stopping the bot stops alerts.
-- Setup flow the owner goes through: create a Bluesky **App Password** on their own account (the "login key", separate from the watched accounts), create a **Discord webhook** in channel settings, enter both in Settings, send a test message, then add accounts to watch.
-- Polling runs on an interval (default 5 minutes, configurable) via APScheduler.
-- The first check of a newly added account silently records recent posts without announcing them, so Discord is not flooded. Owners can find this confusing ("nothing appeared"), and the UI should explain it.
-- Each watched account can override the default webhook to post to a different Discord channel.
+- **Local only:** the panel is at `http://127.0.0.1:8000/` and has no login, so it only accepts connections from this computer. The bot runs while Docker Desktop runs.
+- **First run:** the panel's Setup walks through four steps:
+  1. connect the owner's own Bluesky login with an **App Password** (tested before saving);
+  2. add a Discord channel with its **Webhook URL**, which becomes the default channel;
+  3. send a test message;
+  4. add the first account.
+- **Checking:** on an interval (default 5 minutes, 1–60), by one checker. **Check now** and **Check all now** are available at any time; Check all runs in the background.
+- **The first check** of a new account records its existing posts without sending them, so Discord isn't flooded. Owners can find this confusing ("nothing appeared"), and the panel explains it.
+- **Routing:** each account sends either to the default channel or to a named channel picked for it. It sends posts and reposts by default, and replies only if switched on.
+- **Downtime:** long downtime can miss posts (polling, not catch-up). This is accepted (see [docs/DECISIONS.md](docs/DECISIONS.md)).
 
 ## Capabilities and Constraints
 
 Confirmed functionality (from code):
 
-- Watched accounts: add (handle, optional display name, optional per-account webhook), list, pause/resume, remove, "Check Now" per account, "Check All Now". (`/api/accounts/`)
-- Named Discord channels with a single default. (`/api/webhooks/`)
-- Settings: Bluesky handle, app password (write-only; the API reports only whether one is set), poll interval. (`/api/settings/`)
-- Send a test message to a Discord channel. (`/api/webhooks/{id}/test/`)
-- Discord embeds use Bluesky blue `0x0085FF` and link to the post on bsky.app.
+- **Accounts:** add with a Bluesky profile lookup, edit, pause and resume, remove, per-account post types (posts, reposts, replies) and channel, Check now, Check all now. (`/api/accounts/`, `/api/bluesky/profile/`, `/api/check-jobs/`)
+- **Named Discord channels:** one default, a test message per channel, and deletion that never strands an account. (`/api/webhooks/`)
+- **Settings:**
+  - the Bluesky handle;
+  - the App Password, which is write-only (the API reports only whether one is set);
+  - a login test;
+  - the check interval.
+
+  (`/api/settings/`)
+- **Status and activity:** bot status, an activity log, and problems with a plain-language fix. (`/api/status/`, `/api/activity/`)
+- **Data safety:** automatic backups before every update and before database migrations; `backup.bat` and `restore.bat`.
+- **Discord embeds:** Bluesky blue `0x0085FF`, titled "New post from X", "X reposted" or "New reply from X", linking to the post on bsky.app.
 
 Constraints:
 
-- Secrets (app password, webhook URLs, Django `SECRET_KEY`) must never be echoed back or exposed beyond the local machine.
-- Terminology to keep consistent with the README: "Watched Accounts", "Settings", "App Password", "Webhook URL", "Check Now", "Pause / Resume", "Custom Discord channel for this account".
-- Copy is written for non-technical readers: plain language, explain why a step is needed.
+- **Secrets stay secret:** the App Password, webhook URLs and Django's secret key are never echoed back or exposed beyond the local machine. Webhook URLs are shown masked.
+- **Terminology:**
+  - **The panel uses:** "Setup", "Accounts" (and "Watched accounts" as the table heading), "Activity", "Settings", "App Password", "Webhook URL", "default channel", "Check now", "Check all now", "Pause" / "Resume". It says "announce" for sending posts to Discord ("Where announcements go").
+  - **The documentation says** "notification" in English and 「通知」 in Traditional Chinese.
+  - Keep each consistent within its own context, and align them if the panel's copy is revised.
+- **Copy** is written for non-technical readers: plain language, and it explains why a step is needed.
+- **Languages:** the panel is in English only for now. The user documentation is in English and Traditional Chinese (Taiwan).
 
 Open decisions:
 
-- How the bot reports running status, last check time, recent sends and errors (the backend does not yet expose these; part of goal 2 above).
-- README currently has duplicated and contradictory steps (`.env` editing vs. the Settings tab, setup.bat ordering) and will need rewriting for the Docker flow.
+- Translating the panel (internationalisation) is a possible future feature.
+- A mobile client is possible later; the API is ready for it, but nothing is planned.
 
 ## Brand Commitments
 
@@ -72,14 +93,14 @@ Open decisions:
 
 ## Evidence on Hand
 
-- `README.md`: full setup guide and troubleshooting, the canonical source for user-facing wording.
-- `templates/index.html`: current control panel (tabs for Watched Accounts and Settings).
-- No screenshots, testimonials, user counts or public listings exist. Do not invent them.
+- **`README.md` / `README.zh-TW.md`:** the setup guide and troubleshooting, the canonical source for user-facing wording.
+- **`frontend/`:** the shipped control panel. `docs/screenshots/` are taken from it with made-up demo data.
+- **What doesn't exist:** no testimonials, user counts or public listings. Don't invent them.
 
 ## Product Principles
 
 1. **Nobody should need a terminal after setup.** Every routine task happens in the control panel or a one-click script.
 2. **Explain before asking.** Each credential or field says what it is, where to get it, and why the bot needs it.
-3. **Prove it's connected.** Give the owner a way to confirm each piece works (test message, check now, status) instead of hoping.
+3. **Prove it's connected.** Give the owner a way to confirm each piece works (login test, test message, check now, status) instead of hoping.
 4. **Safe with secrets.** Credentials are write-only in the UI and stay on the owner's machine.
 5. **API first.** The UI only talks to Django through REST, so a future mobile client gets the same capabilities.
