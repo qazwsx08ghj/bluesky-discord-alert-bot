@@ -4,11 +4,13 @@ import {
   useContext,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type ButtonHTMLAttributes,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { CircleAlert, CircleCheck, Info, TriangleAlert, X, type LucideIcon } from "lucide-react";
 import { avatarColor, initials } from "../lib/people";
 
@@ -268,12 +270,87 @@ export interface MenuItem {
   disabled?: boolean;
 }
 
-/** A "more actions" menu. Arrow keys move between items, Escape closes it and returns focus. */
+/** Where an open menu goes, in viewport pixels (position: fixed). */
+type MenuPlace = { top: number; left: number; side: "below" | "above" };
+
+const MENU_GAP = 4; // between the button and the menu
+const MENU_EDGE = 8; // kept free at the window's edges
+
+/** Below the button, right edges lined up; above it if there's no room below; always inside the window. */
+export function placeMenu(button: DOMRect, menu: { width: number; height: number }, view: { width: number; height: number }): MenuPlace {
+  let side: MenuPlace["side"] = "below";
+  let top = button.bottom + MENU_GAP;
+  if (top + menu.height > view.height - MENU_EDGE) {
+    const above = button.top - MENU_GAP - menu.height;
+    if (above >= MENU_EDGE) {
+      side = "above";
+      top = above;
+    } else {
+      top = Math.max(MENU_EDGE, view.height - MENU_EDGE - menu.height); // fits neither way: as low as it can be
+    }
+  }
+  const left = Math.min(Math.max(button.right - menu.width, MENU_EDGE), Math.max(MENU_EDGE, view.width - MENU_EDGE - menu.width));
+  return { top, left, side };
+}
+
+/** Is any part of the element visible, inside the window and every area around it that cuts content off? */
+function inSight(element: HTMLElement, view: { width: number; height: number }): boolean {
+  const rect = element.getBoundingClientRect();
+  const outside = (box: { top: number; bottom: number; left: number; right: number }) =>
+    rect.bottom < box.top || rect.top > box.bottom || rect.right < box.left || rect.left > box.right;
+  if (outside({ top: 0, left: 0, bottom: view.height, right: view.width })) return false;
+  for (let parent = element.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
+    const style = getComputedStyle(parent);
+    if (/(auto|scroll|hidden|clip)/.test(style.overflowX + style.overflowY) && outside(parent.getBoundingClientRect())) return false;
+  }
+  return true;
+}
+
+/** A "more actions" menu. Arrow keys move between items, Escape closes it and returns focus.
+ *
+ * The open menu is rendered outside the page's layout (a portal into the body, or into the open
+ * <dialog> the button is in) and placed with position: fixed next to its button. Scroll areas such
+ * as the accounts table (overflow-x: auto, which also clips vertically) can therefore never cut it
+ * off or grow a scrollbar for it. It follows its button when anything scrolls or the window
+ * changes size, and closes when the button scrolls out of sight. */
 export function Menu({ label, items, icon }: { label: string; items: MenuItem[]; icon: LucideIcon }) {
   const [open, setOpen] = useState(false);
+  const [place, setPlace] = useState<MenuPlace | null>(null);
   const button = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const menuId = useId();
+
+  const reposition = useCallback(() => {
+    const trigger = button.current;
+    const menu = list.current;
+    if (!trigger || !menu) return;
+    const view = { width: document.documentElement.clientWidth || window.innerWidth, height: window.innerHeight };
+    if (!inSight(trigger, view)) {
+      setOpen(false); // its button scrolled out of sight (of the window, or of the table's scroll area)
+      return;
+    }
+    setPlace(placeMenu(trigger.getBoundingClientRect(), { width: menu.offsetWidth, height: menu.offsetHeight }, view));
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPlace(null);
+      return;
+    }
+    reposition();
+    let frame = 0;
+    const later = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(reposition);
+    };
+    window.addEventListener("scroll", later, true); // true: also scrolling inside the table or a drawer
+    window.addEventListener("resize", later);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", later, true);
+      window.removeEventListener("resize", later);
+    };
+  }, [open, reposition]);
 
   const focusItem = (index: number) => {
     const entries = list.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not([disabled])');
@@ -281,9 +358,18 @@ export function Menu({ label, items, icon }: { label: string; items: MenuItem[];
     entries[(index + entries.length) % entries.length].focus();
   };
 
+  // The first item gets focus once the menu is placed (it is hidden, so not focusable, until then).
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!open) focused.current = false;
+    else if (place && !focused.current) {
+      focused.current = true;
+      focusItem(0);
+    }
+  }, [open, place]);
+
   useEffect(() => {
     if (!open) return;
-    focusItem(0);
     const onPointer = (event: PointerEvent) => {
       if (!list.current?.contains(event.target as Node) && !button.current?.contains(event.target as Node)) setOpen(false);
     };
@@ -311,7 +397,9 @@ export function Menu({ label, items, icon }: { label: string; items: MenuItem[];
       setOpen(false);
       button.current?.focus();
     } else if (event.key === "Tab") {
+      // The menu sits outside the page's order, so Tab goes on from the button, as if from the menu.
       setOpen(false);
+      button.current?.focus();
     }
   };
 
@@ -337,8 +425,18 @@ export function Menu({ label, items, icon }: { label: string; items: MenuItem[];
       >
         <Icon {...ICON} />
       </button>
-      {open ? (
-        <div className="menu" role="menu" id={menuId} aria-label={label} ref={list} onKeyDown={onKeyDown}>
+      {open
+        ? createPortal(
+        <div
+          className="menu"
+          role="menu"
+          id={menuId}
+          aria-label={label}
+          ref={list}
+          onKeyDown={onKeyDown}
+          data-side={place?.side}
+          style={place ? { top: place.top, left: place.left } : { top: 0, left: 0, visibility: "hidden" }}
+        >
           {items.map((item) => (
             <button
               key={item.label}
@@ -357,8 +455,10 @@ export function Menu({ label, items, icon }: { label: string; items: MenuItem[];
               {item.label}
             </button>
           ))}
-        </div>
-      ) : null}
+        </div>,
+        button.current?.closest("dialog[open]") ?? document.body,
+      )
+        : null}
     </>
   );
 }
