@@ -191,6 +191,14 @@ The scripts explain problems in plain words, and they never delete your data.
 
 Your old files are only read, never changed. Don't start the old version again, or every post would be sent twice.
 
+## Known limitations
+
+- **Windows and Docker Desktop are required.** The one-click scripts are for Windows 10 and 11.
+- **The control panel is in English, and opens only on the computer running the bot.** You can't reach it from a phone or another computer. That's on purpose: the panel has no login.
+- **Long downtime can miss posts.** The bot checks every few minutes. After a long break (the computer off, or Docker Desktop closed), it catches up on each account's newest 100 posts; anything older from that break is skipped.
+- **Recovery after restarting Windows hasn't been verified yet.** The bot is designed to start again by itself (step 1.6 above), but this hasn't been tested yet. After a restart, open the control panel to check that it's running; if it isn't, double-click `start.bat`.
+- **ARM computers:** the bot is built for ARM processors too, but has only been tested under emulation, not on real ARM hardware.
+
 ---
 
 ## For developers

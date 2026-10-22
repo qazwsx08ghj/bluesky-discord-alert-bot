@@ -83,6 +83,21 @@ class ArchiveTests(SimpleTestCase):
         self.assertEqual(decisions.count("- *Why:*"), decisions.count("- *Details:*"))
 
 
+class KnownLimitationsTests(SimpleTestCase):
+    """Users are told plainly what isn't supported or verified yet, in both languages."""
+
+    def test_both_readmes_disclose_the_limits(self):
+        en, zh = text("README.md"), text("README.zh-TW.md")
+        self.assertIn("## Known limitations", en)
+        self.assertIn("## 目前的限制", zh)
+        for phrase in ("Windows and Docker Desktop are required", "is in English", "Long downtime can miss posts",
+                       "hasn't been verified yet", "only been tested under emulation"):
+            self.assertIn(phrase, en)
+        for phrase in ("需要 Windows 和 Docker Desktop", "只有英文介面", "可能會漏掉一些貼文", "還沒驗證過", "只在模擬環境中測試過"):
+            self.assertIn(phrase, zh)
+        self.assertLess(en.index("## Known limitations"), en.index("## For developers"))
+
+
 class LinkTests(SimpleTestCase):
     def test_every_relative_link_and_image_exists(self):
         for doc in DOCS:
