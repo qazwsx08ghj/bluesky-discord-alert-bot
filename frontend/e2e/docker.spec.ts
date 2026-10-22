@@ -38,7 +38,7 @@ test.describe("@docker the built panel", () => {
     expect((await (await request.get("/api/settings/")).json()).poll_interval_minutes).toBe(Number(other));
     await select.selectOption(before);
     await page.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(page.getByText(new RegExp(`Saved\. The bot now checks every ${before} minute`))).toBeVisible();
+    await expect(page.getByText(new RegExp(`Saved\\. The bot now checks every ${before} minute`))).toBeVisible();
 
     await page.getByRole("button", { name: "Add channel" }).click();
     const dialog = page.getByRole("dialog", { name: "Add a Discord channel" });

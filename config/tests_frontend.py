@@ -180,6 +180,22 @@ class SourceTreeTests(TestCase):
                 self.assertNotIn("dangerouslySetInnerHTML", text)
                 self.assertNotIn("localStorage.setItem(\"alertbot-password", text)
 
+    def test_regexes_built_from_template_strings_keep_their_escapes(self):
+        """In a JavaScript template string, `\\.` loses its backslash, so `new RegExp(`a\\.b`)` matches
+        "a" + any character + "b". Escapes for the regex need a double backslash (`\\\\.`)."""
+        import re
+
+        literal = re.compile(r"new RegExp\(`([^`]*)`")
+        lost_escape = re.compile(r"(?<!\\)\\(?![\\$`])")  # a single backslash that the template string eats
+        checked = 0
+        for path in [*(self.root / "src").rglob("*.ts*"), *(self.root / "e2e").rglob("*.ts")]:
+            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                for match in literal.finditer(line):
+                    checked += 1
+                    with self.subTest(file=f"{path.name}:{number}"):
+                        self.assertIsNone(lost_escape.search(match.group(1)), match.group(1))
+        self.assertGreater(checked, 0, "the check found the regexes it is meant to check")
+
     def test_dependencies_are_pinned_exactly(self):
         import json
 
