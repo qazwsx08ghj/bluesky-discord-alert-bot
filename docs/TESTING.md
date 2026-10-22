@@ -90,7 +90,7 @@ docker build -t bluesky-alert-bot:local .          # also checks the license not
 | `activity/tests.py` | 68 | Activity log, problems and their fixes, `GET /api/status/` |
 | `bluesky_monitor/tests.py` | 19 | Watched accounts and the poller |
 | `bluesky_monitor/tests_delivery.py` | 19 | Claim-before-send, retries, interrupted sends, reading feeds |
-| `bluesky_monitor/tests_destinations.py` | 62 | Several channels per account: one delivery per channel, independent retries, role mentions and `allowed_mentions`, the @everyone (server ID) guard, Role ID checks, no resending after changes, deleting or moving channels without duplicates, and the database upgrade both ways |
+| `bluesky_monitor/tests_destinations.py` | 62 | Several channels per account: one delivery per channel, independent retries, role mentions and `allowed_mentions`, the `@everyone` (server ID) guard, Role ID checks, no resending after changes, deleting or moving channels without duplicates, and the database upgrade both ways |
 | `bluesky_monitor/tests_jobs.py` | 21 | Check All as a background job |
 | `bluesky_monitor/tests_processes.py` | 11 | Real separate Python processes sharing one SQLite file: locks, no duplicate notifications, also with two channels |
 | `bluesky_monitor/tests_scheduler.py` | 14 | Scheduler lease, restarts, standby takeover |
@@ -103,7 +103,7 @@ docker build -t bluesky-alert-bot:local .          # also checks the license not
 | `config/tests_frontend.py` | 17 | Serving the built panel: headers, CSP, file rules, the notices page |
 | `config/tests_openapi.py` | 19 | Every API operation's real answers against `docs/openapi.yaml` (tag `contract`) |
 | `config/tests_notices.py` | 14 | `THIRD_PARTY_NOTICES.txt` is complete, current and shipped everywhere |
-| `config/tests_docs.py` | 24 | Links, the English and Chinese documents, the archive, templates, the release check |
+| `config/tests_docs.py` | 27 | Links, the English and Chinese documents, the archive, templates, the release check, and no accidental GitHub `@`-mentions |
 | `config/tests_wording.py` | 4 | The panel and backend messages say "notification"; no development-step labels in code or the API contract |
 | `config/tests_deploy.py` | 55 | Docker files, the dev stack's settings, and the real `.bat` scripts under `cmd.exe` with a fake Docker (Windows only), including an older folder's scripts on newer data and naming the folder used before |
 | `config/tests.py`, `tests_step10.py` | 9, 10 | Settings API, removed routes, migrations of legacy data |

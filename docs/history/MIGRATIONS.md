@@ -10,7 +10,7 @@ Before step 4, routing was the account's own `discord_webhook_url`, else the sav
 
 1. The saved default URL becomes the default channel. That URL comes from `BotSettings`, or from `.env` when upgrading straight from step 2. An existing channel with the same URL is reused; otherwise a channel named "Default channel" is created.
 2. Leftover "default" flags on other channels are cleared. Those flags had no effect before, so nothing that used to be sent changes. With no saved default URL, no channel is default, so followers still receive nothing.
-3. Each account with its own URL gets the channel with that URL, created as "Channel for @handle" if there is none. Accounts that shared a URL now share one channel. An explicit URL stays explicit, even if it equals the default.
+3. Each account with its own URL gets the channel with that URL, created as "Channel for `@handle`" if there is none. Accounts that shared a URL now share one channel. An explicit URL stays explicit, even if it equals the default.
 4. Reversible: undoing the migration leaves the old URL columns in place, and they already route correctly.
 
 ### The old columns (removed in step 10)
