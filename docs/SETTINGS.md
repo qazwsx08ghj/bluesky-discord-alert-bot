@@ -11,7 +11,7 @@ Discord channels, including the default one, are separate rows (see [CHANNELS.md
 
 - **The database is the only place they are kept.** Every reader (the checker, the Bluesky login, Discord delivery and the API) asks `botconfig.store` each time, so a saved change applies without a restart: credentials from the next check, the interval within 30 seconds.
 - **Saving** is one conditional UPDATE on a version number, so two saves at once can't lose either change; the later one retries on the newer version. If the database can't be written, nothing changes and the API answers `503 settings_not_saved`.
-- **Nothing writes `.env`.** Until step 10 every save was also copied into `.env`, so older versions could run after a rollback. That copy and its status fields are gone; going back now means restoring a backup (`restore.bat`).
+- **Nothing writes `.env`.** Going back to an older version means restoring a backup made before the update (`restore.bat`).
 
 ## The one-time import from an earlier install
 

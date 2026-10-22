@@ -1,6 +1,6 @@
 # Control panel API
 
-Reference for the React control panel (step 9) and any other client, such as a future React Native app. Written in step 7; it describes the API as it is now.
+Reference for the React control panel and any other client, such as a future React Native app. It describes the API as it is now; how it changed during development is in [history/API_CHANGES_BEFORE_1.0.md](history/API_CHANGES_BEFORE_1.0.md).
 
 **The exact shapes are in [openapi.yaml](openapi.yaml):** an OpenAPI 3.1 contract generated from the code (`python manage.py api_contract --write`). It lists every field, type, value and error, and tests check every answer against it. This page explains the API in words. Where the two differ, the contract is right; please report it. The panel's TypeScript types are generated from the contract. How to change the API: [CONTRIBUTING.md](../CONTRIBUTING.md), section 4.
 
@@ -36,7 +36,7 @@ The panel has no login, so it is protected by where it can be reached from and b
 
 | Layer | What it stops | How |
 |---|---|---|
-| Listens on this computer only | Other devices on the network | `start.bat` runs `runserver 127.0.0.1:8000`. In Docker (step 8), the port is published as `127.0.0.1:8000:8000`. |
+| Listens on this computer only | Other devices on the network | In Docker (`start.bat`), the port is published as `127.0.0.1:8000:8000`. Without Docker, `dev\start-without-docker.bat` runs `runserver 127.0.0.1:8000`. |
 | Local host names only | DNS rebinding (a web page reaching 127.0.0.1 under its own domain name) | `ALLOWED_HOSTS=localhost,127.0.0.1,[::1]`. Any other `Host` gets `400`. Adding another name triggers a startup warning (`alertbot.W001`). |
 | Fetch metadata | Requests from other websites | A change with `Sec-Fetch-Site: cross-site` gets `403 cross_site_request`. `same-site` (e.g. another port) is refused unless its origin is in `CSRF_TRUSTED_ORIGINS`. |
 | Origin check | Requests from other websites, including `Origin: null` | When `Origin` is sent, it must be the panel's own origin or in `CSRF_TRUSTED_ORIGINS`. Otherwise `403 cross_site_request`. |
@@ -231,43 +231,24 @@ GET  /api/check-jobs/?limit=10    → 200  {"results": [{…job…}, …]}  newe
 - A thread in the checker process (the scheduler, or the `runserver` process with `start.bat`) looks for queued jobs every 2 seconds. Only the checker holding the scheduler lease runs them, and it claims each with one conditional database update. Code: `bluesky_monitor/jobs.py`.
 - **Why not Celery or Redis:** the checker process, the database lease and the per-account locks already provide everything a job queue would. A second service to install and keep running would cut against the "Docker Desktop and one click" goal.
 
-## 5. Changes in step 7
+## 5. Addresses outside `/api/` (the control panel)
 
-- **Check All runs in the background.** `POST /api/accounts/check_all/` now answers `202` with a job instead of `200` with the results; the results are on the job. The route was added in step 6 and no client used it yet.
-- **New routes:** `GET /api/check-jobs/`, `/api/check-jobs/latest/`, `/api/check-jobs/{id}/` and `/api/csrf/`.
-- **Changes need the CSRF token.** The old page (`templates/index.html`) sends it. Clients that didn't send it now get `403 csrf_failed`.
-- **Request bodies must be JSON** (`415 json_required` otherwise). Every existing request in the old page already sent JSON.
-- **Error bodies:** DRF errors gain `code` and `message` (`detail` is kept). Unknown `/api/` addresses answer with JSON 404s.
-- **Removed:** `/admin/`, DRF's browsable HTML pages, and the `createsuperuser` step in `setup.bat`.
-- **Defaults:** `DEBUG` is now off unless `.env` says `DEBUG=True`. The default `ALLOWED_HOSTS` also includes `[::1]`.
-
-## 6. Step 9: the React control panel
-
-No API changes. The new panel (`frontend/`, see [FRONTEND.md](FRONTEND.md)) uses the routes above exactly as documented. Django now also answers these addresses, outside `/api/`:
+Django also serves the built control panel (see [FRONTEND.md](FRONTEND.md)):
 
 | Address | What |
 |---|---|
 | `/`, `/setup`, `/accounts`, `/activity`, `/settings` | The panel's page (`GET` and `HEAD` only). Sets the CSRF cookie. Strict `Content-Security-Policy`, `Cache-Control: no-cache`. |
 | `/assets/<file>` | The panel's built scripts, styles and fonts, from `frontend/dist/assets` only. Cached for good (their names change with each build). |
 | `/favicon.svg` | The icon. |
+| `/third-party-notices.txt` | The license notices of the third-party software the bot ships (`THIRD_PARTY_NOTICES.txt`). |
 
-Notes for clients:
-- The panel reads the newest Check All job with `GET /api/check-jobs/?limit=1`, which answers `{"results": []}` instead of a 404 before the first job.
-- Polling: `/api/status/` every 10 s (3 s while a check runs), accounts every 15 s (3 s while one is being checked), a running job every `poll_after_seconds`.
+## 6. Notes for clients
 
-## 7. Changes in step 10 (legacy removed)
-
-The compatibility layers kept for older versions and the old page are gone. Every capability is still there, in the form the panel already used:
-
-| Removed | Use instead |
-|---|---|
-| `POST /api/settings/test-discord/` | `POST /api/webhooks/{id}/test/` |
-| Settings fields `discord_webhook_url`, `has_discord_webhook_url` | `default_channel`; change it with `POST /api/webhooks/{id}/make_default/` |
-| Settings field `env_file_in_sync` and the save `warning` | Nothing: settings live only in the database; `.env` is never written |
-| Account field `discord_webhook_url` (read and write) | `channel_id` / `channel` |
-| Account field `seen_posts` (every post ever noticed, in every list response) | `GET /api/accounts/{id}/posts/`, paged |
-| `/classic/` | The panel at `/` |
-
-- Sending a removed field (`discord_webhook_url`) to the settings or account API is refused with `400` and a message naming the replacement, rather than being silently ignored.
-- `poll_interval_minutes` in `GET /api/settings/` is now a number (it was a string for older clients). Requests accept either.
-- Post history is capped at the newest 1,000 finished posts per account (`SEEN_POSTS_KEPT_PER_ACCOUNT`); posts still waiting to be sent are never removed.
+- **The newest Check All job:** `GET /api/check-jobs/?limit=1` answers `{"results": []}` before the first job, instead of a 404.
+- **How often the panel polls:**
+  - `/api/status/` every 10 s, or 3 s while a check runs;
+  - the accounts every 15 s, or 3 s while one is being checked;
+  - a running job every `poll_after_seconds`.
+- **Removed fields are refused:** sending `discord_webhook_url` to the settings or account API gets `400`, with a message naming the replacement (`channel_id`, or `POST /api/webhooks/{id}/make_default/`). It isn't silently ignored.
+- **`poll_interval_minutes`** is a number in `GET /api/settings/`. Requests accept a number or a numeric string.
+- **Post history** keeps the newest 1,000 finished posts per account (`SEEN_POSTS_KEPT_PER_ACCOUNT`). Posts still waiting to be sent are never removed.

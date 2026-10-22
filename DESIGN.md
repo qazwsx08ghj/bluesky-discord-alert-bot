@@ -1,6 +1,6 @@
 # Design: Bluesky → Discord Alert Bot control panel
 
-The control panel (`frontend/`) is an operating tool: people come to set the bot up, then to check that it works and to manage accounts. The design is the category standard played straight, a calm admin dashboard. It stands out through precise states and plain-language guidance, not through novelty. The approved reference is `prototype/control-panel.html`; the implementation is `frontend/src/styles/app.css`.
+The control panel (`frontend/`) is an operating tool: people come to set the bot up, then to check that it works and to manage accounts. The design is the category standard played straight, a calm admin dashboard. It stands out through precise states and plain-language guidance, not through novelty. **The shipped control panel is the reference:** `frontend/src`, styled by `frontend/src/styles/app.css`. The original static prototype, from which this design was approved, is archived in `docs/history/prototype/`. Behaviour and accessibility details: [docs/FRONTEND.md](docs/FRONTEND.md); product context: [PRODUCT.md](PRODUCT.md).
 
 ## Colour
 
@@ -31,6 +31,7 @@ Tokens live on `:root`, with a dark set under `prefers-color-scheme: dark`, and 
 - **Accounts:** a summary row (status, last check, posts sent, problems), then the accounts table and the recent activity panel, side by side from 1600 px.
 - **Smaller windows:**
   - below 1180 px, each account row stacks and its actions become icon buttons with names;
+  - from 1100 px down, the summary row has two columns, the Settings sections stack their label above their content, and the page margins narrow;
   - below 860 px, the sidebar becomes a top bar;
   - below 560 px, the summary is one column.
 

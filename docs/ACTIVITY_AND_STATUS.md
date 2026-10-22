@@ -1,4 +1,4 @@
-# Activity log and status (step 5)
+# Activity log and status
 
 Code: `activity/` (log, problem categories, retention, status, API). The checker writes its health in `bluesky_monitor/scheduler.py` and `poller.py`. Tests: `activity/tests.py`.
 
@@ -92,13 +92,4 @@ Event types:
 - **Failed feed reads** show only the error type in the console log. The scrubbed detail is in the activity entry.
 - **Tests** run a failed send, a failed check and a failed login with real-looking secrets, then search every stored entry and every `/api/activity/` and `/api/status/` response for them.
 
-## Database changes (reversible)
-
-- New table `activity_activityevent` (`activity` 0001).
-- New nullable columns:
-  - `MonitoredAccount.last_checked_at`, `last_check_ok` and `last_check_category`
-  - `SchedulerState.last_cycle_summary`
-  
-  (`bluesky_monitor` 0004).
-- **Going back:** since step 10, the older versions' compatibility copies are gone, so an older version can't run on this database. To go back, restore a backup made before the update (`restore.bat`) and run the matching version (docs/DOCKER.md, "If an update goes wrong").
-- The backup taken before this step is in `backups/2026-10-21_before-step-5/`.
+The database changes that introduced the activity log: [history/MIGRATIONS.md](history/MIGRATIONS.md).

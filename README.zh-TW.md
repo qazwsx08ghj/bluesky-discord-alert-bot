@@ -159,6 +159,12 @@ Webhook 網址是 Discord 提供的連結，機器人可以透過它在某個頻
 **"Docker Desktop is open, but it isn't responding"（已打開但沒有回應）**
 → 回答 **Y**，指令檔會幫你重新啟動 Docker Desktop。如果一直發生，請重新開機，並安裝 Docker Desktop 的更新。
 
+**"Your Docker Desktop is too old"（Docker Desktop 版本太舊）**
+→ 更新 Docker Desktop（Docker Desktop → Check for updates），再重新執行指令檔。
+
+**Docker Desktop 設定成「Windows containers」**
+→ 在時鐘旁邊的鯨魚圖示上按右鍵，選 **Switch to Linux containers…**（切換到 Linux 容器）。
+
 **"Another program is already using port 8000"（8000 連接埠被其他程式占用）**
 → 如果舊版機器人還開在黑色視窗裡，請把它關掉（兩個同時執行，每篇貼文都會通知兩次）。如果不是，用記事本打開 `docker\compose.env`，把 `ALERTBOT_PORT=8000` 改成別的數字，例如 `8080`，之後改用 `http://127.0.0.1:8080`。
 
