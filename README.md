@@ -147,6 +147,14 @@ The status at the bottom of the sidebar shows whether the bot is running. If som
 
 **The bot runs while Docker Desktop runs.** If Docker Desktop is closed or the computer is off, notifications pause and start again by themselves when Docker Desktop is back.
 
+### Moving to a newer download (test versions)
+
+`update.bat` keeps the version its download is for: the normal (stable) download always gets the newest version. A test version ("rc", for example `1.0.0-rc.2`) is its own download. To move to a newer one:
+
+1. Download the new zip, **Unblock** it (right-click → **Properties**), and **Extract All** into a **new folder**.
+2. Double-click **`update.bat` in the new folder.** It backs up your data first, then installs the new version. Your accounts, settings, channels and history are kept.
+3. From then on, use only the new folder, and **delete the old one.** Its scripts would start the older version again. Your backups stay available: `restore.bat` in the new folder lists them all.
+
 ---
 
 ## Backups and your data
