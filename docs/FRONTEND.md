@@ -107,6 +107,8 @@ The demo server already trusts `http://localhost:5173` for changes. Against a re
 
 ## 5. Tests
 
+Full reference for all of the project's tests, including CI: [TESTING.md](TESTING.md).
+
 | Command (in `frontend/`) | What it covers | Time |
 |---|---|---|
 | `npm test` | 50 integration tests. The whole app in a simulated browser against a fake API that follows API.md, CSRF rules included. Covers setup, accounts, drawer, Check All, settings, channels, offline, CSRF retry, secrets, keyboard and activity. | ~15 s |

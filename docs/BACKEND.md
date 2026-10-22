@@ -68,6 +68,8 @@ Without Docker (`dev\start-without-docker.bat`), `manage.py runserver` starts th
 
 ## 6. Tests
 
+Full reference, including how to run each suite: [TESTING.md](TESTING.md).
+
 `python manage.py test` runs about 450 tests. Most live next to their app (`tests*.py`). Shared fakes:
 - `bluesky_monitor/tests.py`: `FakeSession` and `feed_item`, a fake Bluesky;
 - `discord_alerts`: delivery is patched per test;

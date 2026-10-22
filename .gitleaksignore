@@ -1,0 +1,4 @@
+# Known false positives for gitleaks (docs/TESTING.md, "Secret checks").
+# Both are fake login tokens built in the tests from made-up data ({"sub": "did:plc:bot"}, no real signature).
+71b9c867b3c38b3c2305ff407950e475736182d4:bluesky_monitor/tests_step6.py:jwt:33
+bd7a6ccc4e0312c90c1fa8d6021bce403364feac:activity/tests.py:jwt:38

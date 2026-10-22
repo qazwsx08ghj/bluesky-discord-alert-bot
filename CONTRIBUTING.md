@@ -9,7 +9,7 @@ The project has two halves that meet at one place, the API:
 - **Frontend:** the React control panel in `frontend/`. See [docs/FRONTEND.md](docs/FRONTEND.md).
 - **The contract between them:** [`docs/openapi.yaml`](docs/openapi.yaml), an OpenAPI 3.1 description of every endpoint, generated from the backend code. The frontend's TypeScript types are generated from it. [docs/API.md](docs/API.md) explains the API in words; for the exact fields and types, the contract is authoritative.
 
-You can work on either half without the other's tools.
+You can work on either half without the other's tools. How the project itself is developed, including its use of AI, is described in [section 10](#10-how-this-project-is-developed).
 
 ## 1. Project map
 
@@ -94,6 +94,8 @@ The contract is generated from the code, and the frontend's types from the contr
 
 ## 5. Tests
 
+The full reference is [docs/TESTING.md](docs/TESTING.md): every suite and what it verifies, prerequisites, CI, the release acceptance tests and the known limitations. The most used commands:
+
 | Command | What it checks | Needs |
 |---|---|---|
 | `python manage.py test` | Every backend test: API, checker, delivery, security, serving the panel, the contract, the Windows scripts (on Windows) | Python |
@@ -127,7 +129,7 @@ Keep it that way: a test that could reach the real services or real data is a bu
 | Windows scripts | Windows | the real `.bat` files under cmd.exe, with a fake Docker |
 | Docker | Linux | Compose files, image build (not pushed), image contents, the demo stack's safety |
 
-`release.yml` runs all of them first, and publishes nothing unless every one passes.
+`release.yml` runs all of them first, and publishes nothing unless every one passes. What each job runs, and the latest verified results: [docs/TESTING.md](docs/TESTING.md), section 6.
 
 ## 7. Ground rules
 
@@ -136,7 +138,8 @@ Keep it that way: a test that could reach the real services or real data is a bu
 - **Secrets stay secret.**
   - Webhook URLs and passwords never appear in API answers, logs or pages.
   - Only masked forms are shown.
-  - Never commit `.env`, databases or backups.
+  - Never commit `.env`, databases or backups. `.gitignore` already excludes them, together with `logs/`.
+  - Before you commit, check what you're committing: [docs/TESTING.md](docs/TESTING.md), section 10. This is a manual step; CI doesn't scan for secrets.
 - **Exact versions.** Python versions are in `requirements-lock.txt` (and `requirements-dev.txt`); Node.js versions are in `package-lock.json`. Run the audits after an update.
 
 ## 8. License
@@ -156,3 +159,45 @@ When you add a dependency:
 - **Changelog.** Add a line under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) for anything a user or API client would notice. Internal clean-ups don't need one.
 - **Two languages.** `README.md` and `CONTRIBUTING.md` have Traditional Chinese versions (`*.zh-TW.md`). When you change one, change the other in the same pull request; if you can't write Chinese, say so in the pull request and a maintainer will update it. The tests check that both versions have the same sections, links and commands. Terms are listed in [docs/GLOSSARY.zh-TW.md](docs/GLOSSARY.zh-TW.md). The other documents are in English only.
 - **Security problems** are never reported in public issues: see [SECURITY.md](SECURITY.md).
+
+## 10. How this project is developed
+
+This project uses **human-directed, AI-assisted agentic development**.
+
+**Claude Code (an AI coding agent) does most of the hands-on work:**
+- writing and changing the code;
+- writing and running the automated tests;
+- debugging;
+- writing the documentation.
+
+**The human maintainer directs and decides:**
+- defines what the bot should do and the constraints the work must respect (for example: never touch real user data, keep the one-click Windows install);
+- reviews the proposed approach before larger changes;
+- evaluates the test results;
+- explicitly approves important operations, such as merges, releases, repository settings and migrating real data.
+
+**Not every line of AI-written code has been read by a human.** Confidence in the code comes mainly from:
+- the automated tests: the backend, the API contract, the control panel, browser tests, the Windows scripts and real Docker containers;
+- CI, which runs them on every change;
+- the safety rules in section 7;
+- the maintainer's review of approaches and results.
+
+**How a change gets from idea to `main`:**
+1. **Requirements:** the maintainer states what's wanted and the constraints. For example: don't modify real data, don't push or publish without approval.
+2. **Plan:** for anything larger, Claude Code first presents a plan: the files to change, how it will be tested, and the risks. The maintainer reviews it before work starts.
+3. **Implementation:** the work is done on a separate local branch, with tests written or updated alongside the code.
+4. **Local checks:**
+   - the affected suites run, then the full regression set from [docs/TESTING.md](docs/TESTING.md);
+   - the opt-in real-Docker tests run when deployment is affected;
+   - before every commit, the staged changes are checked for the maintainer's real credential values and personal email address (the values are never printed). Before the first push, the full history was also scanned with gitleaks. Neither check runs in CI; contributors can run the same gitleaks scans ([docs/TESTING.md](docs/TESTING.md), section 10).
+5. **Report:** Claude Code reports what changed, the test results, failures and their causes, and anything not tested. A test that wasn't run is reported as not run, never as passed.
+6. **Approval:** the maintainer reviews the report and decides. Merging, pushing, repository settings, releases and anything touching real data happen only with the maintainer's explicit approval.
+7. **CI:** after a push, all CI jobs must pass. A failure is investigated, and its cause explained, before more changes are made ([docs/TESTING.md](docs/TESTING.md), section 8).
+
+If you find a problem, please report it. For security problems, follow [SECURITY.md](SECURITY.md).
+
+**AI help in your contributions is welcome.**
+- Describe any substantial AI assistance in your pull request (the template asks); a short note is enough.
+- This is not a reason to reject a contribution. Every pull request is reviewed the same way: correctness, security, maintainability, and appropriate tests.
+- You're responsible for what you submit: understand it, test it, and make sure you have the right to contribute it under the MIT License.
+- Never paste secrets or real user data (App Passwords, webhook URLs, `.env` files, databases, problem reports) into an AI tool.

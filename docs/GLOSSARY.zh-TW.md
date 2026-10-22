@@ -1,6 +1,6 @@
 # 用語對照表（English → 繁體中文）
 
-Terms used in the Traditional Chinese (Taiwan) documents, so translations stay consistent. The control panel, the scripts' messages and Docker Desktop are in English: keep their button and menu names in English, with the Chinese meaning in parentheses the first time, e.g. **Check now**（立即檢查）.
+Terms used in the Traditional Chinese (Taiwan) documents, so translations stay consistent. Write naturally for readers in Taiwan: address the reader as 你 (not 您), and prefer everyday words over literal translations. Quote Windows' own messages exactly as Windows shows them (e.g. 「Windows 已保護您的電腦」). The control panel, the scripts' messages and Docker Desktop are in English: keep their button and menu names in English, with the Chinese meaning in parentheses the first time, e.g. **Check now**（立即檢查）.
 
 | English | 繁體中文 | Note |
 |---|---|---|
@@ -8,8 +8,9 @@ Terms used in the Traditional Chinese (Taiwan) documents, so translations stay c
 | bot | 機器人 | |
 | watched account | 追蹤的帳號 | |
 | handle | 帳號名稱 | e.g. `name.bsky.social` |
+| security advisory | 安全性公告 | as GitHub calls it |
 | post / repost / reply | 貼文／轉貼／回覆 | |
-| announcement | 公告 | |
+| notification (to Discord) | 通知 | not 公告 |
 | App Password | 應用程式密碼 | as in Bluesky's own Traditional Chinese interface |
 | sign in / log in | 登入 | |
 | webhook, Webhook URL | Webhook、Webhook 網址 | keep "Webhook" untranslated, as Discord does |

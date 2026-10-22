@@ -89,11 +89,15 @@ class TranslationTests(SimpleTestCase):
 class DockerDesktopNoticeTests(SimpleTestCase):
     def test_users_learn_about_docker_desktops_license_everywhere(self):
         bundle = load("make_release_bundle")
-        for name, content in [("README.md", text("README.md")), ("README.zh-TW.md", text("README.zh-TW.md")),
-                              ("README.txt", bundle.README), ("README.zh-TW.txt", bundle.README_ZH_TW)]:
+        for name, content, sentence in [
+            ("README.md", text("README.md"), "check that you qualify for free use"),
+            ("README.zh-TW.md", text("README.zh-TW.md"), "請先確認是否符合免費使用的資格"),
+            ("README.txt", bundle.README, "check that you qualify"),
+            ("README.zh-TW.txt", bundle.README_ZH_TW, "請先確認是否符合免費使用的資格"),
+        ]:
             with self.subTest(doc=name):
                 self.assertIn(DOCKER_TERMS, content)
-                self.assertIn("250", content)
+                self.assertIn(sentence, content)
 
     def test_downloaded_scripts_warning_is_explained(self):
         self.assertIn("Unblock", text("README.md"))
@@ -107,6 +111,40 @@ class PolicyFileTests(SimpleTestCase):
         for required in ("Latest release", "Report a vulnerability", "within 7 days", "Never include real secrets",
                          "## 繁體中文摘要", "127.0.0.1"):
             self.assertIn(required, policy)
+
+    def test_ai_assisted_development_is_disclosed(self):
+        en, zh = text("CONTRIBUTING.md"), text("CONTRIBUTING.zh-TW.md")
+        self.assertIn("## 10. How this project is developed", en)
+        self.assertIn("human-directed, AI-assisted agentic development", en)
+        self.assertIn("Not every line of AI-written code has been read by a human", en)
+        self.assertIn("This is not a reason to reject a contribution", en)
+        self.assertIn("## 10. 這個專案的開發方式", zh)
+        self.assertIn("並沒有每一行都經過人工逐行審閱", zh)
+        self.assertIn("## AI assistance / AI 協助", text(".github/PULL_REQUEST_TEMPLATE.md"))
+        self.assertNotIn("AI", text("README.md").split("## For developers")[0], "the user guide stays about using the bot")
+
+    def test_testing_reference_is_linked_and_honest_about_limits(self):
+        testing = text("docs/TESTING.md")
+        for linked_from in ("CONTRIBUTING.md", "CONTRIBUTING.zh-TW.md", "docs/BACKEND.md", "docs/FRONTEND.md",
+                            "docs/DOCKER.md", "README.md", "README.zh-TW.md"):
+            self.assertIn("TESTING.md", text(linked_from), linked_from)
+        self.assertIn("**Deferred.**", testing)
+        self.assertIn("under emulation only", testing)
+        self.assertIn("Not tested on real ARM hardware", testing)
+        self.assertIn("Not every line of AI-written code has been read by a human", text("CONTRIBUTING.md"))
+        self.assertIn("CI doesn't scan for secrets", testing)
+        self.assertIn("--pre-commit --staged --redact", testing)
+        self.assertIn("CI doesn't scan for secrets", text("CONTRIBUTING.md"))
+        self.assertIn("CI 不會掃描機密資訊", text("CONTRIBUTING.zh-TW.md"))
+        ignored = [l for l in text(".gitleaksignore").splitlines() if l and not l.startswith("#")]
+        self.assertEqual(len(ignored), 2, "only the two known fake test tokens are ignored")
+        self.assertTrue(all(":jwt:" in l and "/tests" in l for l in ignored))
+        for command in ("python manage.py test --tag contract", "python docker/third_party_notices.py",
+                        "npm run e2e", "set RUN_DOCKER_TESTS=1"):
+            self.assertIn(command, testing)
+        ci = text(".github/workflows/ci.yml")
+        for job in ("backend:", "contract:", "frontend:", "browser:", "windows-scripts:", "docker:"):
+            self.assertIn(f"\n  {job}\n", ci, "TESTING.md describes exactly these six CI jobs")
 
     def test_changelog_matches_the_panel_version(self):
         changelog = text("CHANGELOG.md")

@@ -5,14 +5,14 @@ body:
   - type: textarea
     id: problem
     attributes:
-      label: What are you trying to do? / 您想做什麼？
+      label: What are you trying to do? / 你想做什麼？
       description: The situation or problem, rather than a specific solution. / 請描述情境或問題，而不是特定的解法。
     validations:
       required: true
   - type: textarea
     id: idea
     attributes:
-      label: Your idea (optional) / 您的想法（選填）
+      label: Your idea (optional) / 你的想法（選填）
   - type: textarea
     id: alternatives
     attributes:
