@@ -152,7 +152,7 @@ Non-technical users should get the **release download**, so nothing is built on 
 3. **`.github/workflows/release.yml` runs:**
    1. `docker/release_check.py` checks that the tag, `package.json` and `CHANGELOG.md` agree. A release needs a dated changelog entry and no `OWNER/REPOSITORY` placeholders.
    2. Every CI job runs (`ci.yml`).
-   3. The image is built for `linux/amd64` and `linux/arm64`, and pushed as `ghcr.io/<owner>/<repo>:1.2.0` and `:stable`.
+   3. The image is built for `linux/amd64` and `linux/arm64`, and pushed as `ghcr.io/<owner>/<repo>:1.2.0` and `:stable`. **ARM (`linux/arm64`) has been tested under emulation only, not on real ARM hardware.**
    4. `BlueskyDiscordAlertBot-stable.zip` is attached to the GitHub release. The release notes are the version's changelog section.
 4. **The zip** (`docker/make_release_bundle.py`) contains only:
    - the six scripts and `docker/scripts/common.bat`;

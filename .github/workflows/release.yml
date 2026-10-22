@@ -1,4 +1,5 @@
-# Publish a release: the Docker image (for Intel/AMD and ARM computers) and the small download
+# Publish a release: the Docker image (built for Intel/AMD and ARM; ARM is tested under emulation
+# only, not yet on real ARM hardware) and the small download
 # for non-technical users. Runs when a version tag is pushed:
 #   v1.2.0        a release: the image gets :1.2.0 and :stable (what users' update.bat downloads)
 #   v1.2.0-rc.1   a pre-release, for testing: only :1.2.0-rc.1, never :stable; its download uses
