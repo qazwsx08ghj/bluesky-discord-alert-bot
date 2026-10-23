@@ -36,7 +36,7 @@ PART 1. DOCKER IMAGE (Python packages)
   click 8.5.0 (BSD-3-Clause)
   cryptography 50.0.2 (Apache-2.0 OR BSD-3-Clause)
   Django 5.2.18 (BSD-3-Clause)
-  djangorestframework 3.17.2 (BSD-3-Clause)
+  djangorestframework 3.18.3 (BSD-3-Clause)
   dnspython 2.9.0 (ISC)
   gunicorn 23.0.0 (MIT License)
   h11 0.16.0 (MIT License)
@@ -1133,11 +1133,11 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ==============================================================================
-djangorestframework 3.17.2
+djangorestframework 3.18.3
 License: BSD-3-Clause
 ==============================================================================
 
---- djangorestframework-3.17.2.dist-info/licenses/LICENSE.md ---
+--- djangorestframework-3.18.3.dist-info/licenses/LICENSE.md ---
 
 # License
 

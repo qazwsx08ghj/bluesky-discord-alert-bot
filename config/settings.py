@@ -136,6 +136,11 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.AllowAny"],
     "EXCEPTION_HANDLER": "config.security.api_exception_handler",
+    # Keep the documented error shape for list fields: one object per item, e.g.
+    # {"destinations": [{}, {"role_id": ["…"]}]} (docs/API.md, docs/openapi.yaml). DRF 3.18 changed
+    # the default to {"destinations": {"1": {...}}}; this setting keeps the old shape until DRF 3.20,
+    # which removes it. Moving to the new shape changes the API, so it needs its own decision.
+    "LIST_SERIALIZER_ERRORS_AS_DICT": False,
 }
 
 

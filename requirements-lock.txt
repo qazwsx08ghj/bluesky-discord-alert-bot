@@ -12,7 +12,7 @@ charset-normalizer==3.5.2
 click==8.5.0
 cryptography==50.0.2
 Django==5.2.18
-djangorestframework==3.17.2
+djangorestframework==3.18.3
 dnspython==2.9.0
 h11==0.16.0
 httpcore==1.0.9
