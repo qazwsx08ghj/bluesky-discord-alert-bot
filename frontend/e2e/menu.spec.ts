@@ -52,6 +52,17 @@ async function expectFullyVisible(page: Page) {
   expect(await page.locator('.scroll [role="menu"]').count(), "not inside the table's scroll area").toBe(0);
 }
 
+/** The Accounts page has finished loading: nothing shows a loading placeholder or is marked busy,
+ * and Recent activity shows its entries (or says there are none). Measure page sizes only after
+ * this: the activity list arrives on its own and makes the page taller, sooner or later. */
+async function pageLoaded(page: Page) {
+  const recent = page.getByRole("region", { name: "Recent activity" });
+  await expect(recent.locator(".feed > li").first().or(recent.getByText("Nothing yet")).or(
+    recent.getByText("Couldn't load the activity"))).toBeVisible();
+  await expect(page.locator(".skel")).toHaveCount(0);
+  await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+}
+
 /** A tiny step for scroll and resize handlers (they wait for the next frame). */
 const settle = (page: Page) => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
 
@@ -61,6 +72,7 @@ test("the last account's menu floats above the table, whole, without scrollbars"
   await page.goto("/accounts");
   const last = rows(page).last();
   await expect(last).toBeVisible();
+  await pageLoaded(page);
   const before = await scrollSizes(page);
   await triggerIn(last).click();
   await expectFullyVisible(page);
@@ -69,6 +81,28 @@ test("the last account's menu floats above the table, whole, without scrollbars"
   const button = await box(triggerIn(last));
   expect(Math.abs(menu.x + menu.width - (button.x + button.width)), "right edges line up").toBeLessThanOrEqual(1);
   await w.expectClean();
+});
+
+test("the same holds when the activity list loads late (as on a slow computer)", async ({ page }) => {
+  // The activity answer is held back until the table is on screen, so the page grows only after
+  // the table has appeared: the order seen on GitHub's slower machines.
+  let release!: () => void;
+  const tableShown = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/api/activity/**", async (route) => {
+    await tableShown;
+    await route.continue();
+  });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/accounts");
+  const last = rows(page).last();
+  await expect(last).toBeVisible();
+  await expect(page.getByRole("region", { name: "Recent activity" }).locator(".skel").first()).toBeVisible();
+  release();
+  await pageLoaded(page);
+  const before = await scrollSizes(page);
+  await triggerIn(last).click();
+  await expectFullyVisible(page);
+  expect(await scrollSizes(page), "opening the menu adds no scrollbar").toEqual(before);
 });
 
 test("near the bottom of the window it opens above its button", async ({ page }) => {
@@ -90,6 +124,7 @@ test("near the bottom of the window it opens above its button", async ({ page })
 test("near the right edge of a phone-sized window it stays inside", async ({ page }) => {
   await page.setViewportSize({ width: 400, height: 800 });
   await page.goto("/accounts");
+  await pageLoaded(page);
   for (const index of [0, -1]) {
     const row = index === 0 ? rows(page).first() : rows(page).last();
     const trigger = triggerIn(row);
@@ -141,6 +176,7 @@ test("it follows its button when the page scrolls or the window changes size", a
 test("it follows its button when the table itself scrolls sideways", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/accounts");
+  await pageLoaded(page);
   // A wider table than the page (as with long names), so its scroll area scrolls sideways.
   // (Set on the element: the panel's security policy refuses added style tags.)
   await page.locator("table.acc-table").evaluate((el: HTMLElement) => (el.style.minWidth = "1800px"));
