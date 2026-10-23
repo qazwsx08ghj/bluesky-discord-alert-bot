@@ -4,6 +4,10 @@
     python manage.py prepare_data --import-from /import  # setup.bat: bring over an old install
 
 In order, stopping at the first problem so the database is never changed half-way:
+0. If it is going to import or migrate, take the exclusive data lock (botconfig/datalock.py):
+   wait until no other part of the bot is using the database, for at most
+   DATA_LOCK_WAIT_SECONDS. If it stays busy, nothing is changed and it exits with code 75;
+   Docker then starts the web service again.
 1. Create the data folders and, once per install, a random SECRET_KEY_FILE.
 2. --import-from: copy the old install's db.sqlite3 into place, but only if there is no
    database yet. The old file is only read, never changed. Its .env settings are brought
@@ -27,6 +31,9 @@ from django.core.management import call_command
 from django.core.management.base import BaseCommand
 from django.db import connections
 
+from botconfig import datalock
+from botconfig.sqlite_files import remove_journal_files, standalone_copy
+
 
 def write_secret_key(path: Path) -> bool:
     """Create the key file once (only readable by the bot). Returns True if it was created."""
@@ -41,39 +48,57 @@ def write_secret_key(path: Path) -> bool:
 
 
 def copy_database(source: Path, target: Path) -> None:
-    """A consistent copy, checked before it is put in place. The source is only read.
+    """A consistent, self-contained copy, checked before it is put in place. The source is only read.
 
     The old folder is mounted read-only, and SQLite can't open a database in WAL mode
     there (it needs to write next to it). So the file and its -wal/-shm journal are first
     copied into a scratch folder, opened there (SQLite applies the journal), and then
-    copied into place with the backup API.
+    copied with the backup API into one file with no journal (sqlite_files.standalone_copy).
+    Journal files left next to the target's name are removed before the copy takes its
+    place, so they can never be applied to it.
     """
     target.parent.mkdir(parents=True, exist_ok=True)
-    scratch = target.parent / "import-scratch"
+    scratch = target.parent / f"{target.name}.scratch"
     shutil.rmtree(scratch, ignore_errors=True)
     scratch.mkdir()
     tmp = target.with_name(target.name + ".importing")
-    tmp.unlink(missing_ok=True)
     try:
         for suffix in ("", "-wal", "-shm"):
             part = Path(f"{source}{suffix}")
             if part.is_file():
                 shutil.copyfile(part, scratch / f"old.sqlite3{suffix}")
-        src, dst = sqlite3.connect(str(scratch / "old.sqlite3")), sqlite3.connect(str(tmp))
         try:
-            src.backup(dst)
-            check = dst.execute("PRAGMA integrity_check").fetchone()[0]
-        except sqlite3.DatabaseError:
-            check = "unreadable"
+            src = sqlite3.connect(str(scratch / "old.sqlite3"))
+        except sqlite3.Error:
+            src = None
+        try:
+            check = standalone_copy(src, tmp) if src is not None else "unreadable"
         finally:
-            dst.close()
-            src.close()
+            if src is not None:
+                src.close()
         if check != "ok":
             tmp.unlink(missing_ok=True)
             raise SystemExit("The old database is damaged (integrity check failed), so it wasn't imported.")
+        remove_journal_files(target)
         os.replace(tmp, target)
     finally:
+        tmp.unlink(missing_ok=True)
+        remove_journal_files(tmp)
         shutil.rmtree(scratch, ignore_errors=True)
+
+
+def needs_changing(import_from, db: Path) -> bool:
+    """Will prepare_data change the database as a whole (import, or migrations)? Only reads."""
+    if import_from or not db.exists():
+        return True  # (without opening it: that would create an empty file)
+    from botconfig.management.commands.backup_db import pending_migrations
+
+    try:
+        return bool(pending_migrations())
+    except Exception:  # no database yet, or unreadable: migrate decides, under the lock
+        return True
+    finally:
+        connections.close_all()
 
 
 class Command(BaseCommand):
@@ -93,18 +118,27 @@ class Command(BaseCommand):
         if key_file and write_secret_key(Path(key_file)):
             self.stdout.write("Created this install's secret key.")
 
-        if import_from:
-            self._import(Path(import_from), db)
+        lock = datalock.DataLock(exclusive=True, db_path=db)
+        if needs_changing(import_from, db) and not lock.acquire(timeout=datalock.wait_seconds()):
+            self.stderr.write("Another part of the bot is still using the database, so it wasn't updated "
+                              "(nothing was changed). Docker starts the bot again in a moment.")
+            raise SystemExit(datalock.BUSY_EXIT)
+        try:
+            if import_from:
+                self._import(Path(import_from), db)
 
-        from botconfig import compat
+            from botconfig import compat
 
-        newer = compat.unknown_migrations()
-        connections.close_all()
-        if newer:
-            self.stderr.write(compat.explanation(newer))
-            raise SystemExit(compat.NEWER_DATA_EXIT)
-        call_command("backup_db", if_pending=True, stdout=self.stdout)
-        call_command("migrate", fake_initial=True, interactive=False, verbosity=0)
+            newer = compat.unknown_migrations()
+            connections.close_all()
+            if newer:
+                self.stderr.write(compat.explanation(newer))
+                raise SystemExit(compat.NEWER_DATA_EXIT)
+            call_command("backup_db", if_pending=True, stdout=self.stdout)
+            call_command("migrate", fake_initial=True, interactive=False, verbosity=0)
+            connections.close_all()
+        finally:
+            lock.release()
         self.stdout.write("The database is up to date.")
 
         from botconfig import store

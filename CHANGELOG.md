@@ -11,6 +11,19 @@ Every version is updated with `update.bat`, which backs up your data first.
 
 ## [Unreleased]
 
+### Added
+- **`restore.bat` says what a restore would undo before it changes anything:** accounts, channels and settings changed since the backup (by name; never links or passwords), posts noticed since then, and notifications that may then be sent again. If anything would be lost, `RESTORE` must be typed to go ahead. A backup made by a newer version is refused before anything changes.
+- **The database is changed as a whole only when nothing else uses it:** the running bot holds a data lock that a migration or restore needs for itself. Before a restore, the scripts also check that no container (from any folder) still uses the data.
+- **Docker Compose 2.23.0 (Docker Desktop 4.25) or later is required;** the scripts explain an older one instead of failing part-way.
+
+### Changed
+- **Stopping the checker is clean:** the Discord notification it is sending finishes and is saved, nothing new starts, a running Check All saves what it did, and it never waits more than 20 seconds. `update.bat` stops the old checker this way before the new version updates the database.
+- **Backups are checked before they count:** one self-contained file, integrity-checked, and the copy in the `backups` folder compared with it. The backup taken before an update that changed the database is kept, however often `update.bat` or `backup.bat` runs afterwards.
+
+### Fixed
+- **A restore left two empty files** (`db.sqlite3.restore-check-wal`, `-shm`) in the data; journal files are now never left behind, and never applied to a file they don't belong to.
+- **The documentation promised that a post is never sent twice.** That isn't possible with a Discord webhook: a notification interrupted by a crash or a lost answer may be sent again. The docs now say exactly when.
+
 ## [1.0.0] - Unreleased
 
 The first public release. Compared with the earlier "black-window" version, the bot now runs in Docker Desktop and is set up and managed from a control panel in the browser.

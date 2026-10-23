@@ -64,5 +64,12 @@ def unknown_migrations(using=DEFAULT_DB_ALIAS) -> list:
                   if app in labels and (app, migration) not in known)
 
 
+def unknown_in(applied) -> list:
+    """Like unknown_migrations(), for the (app, name) pairs recorded in a database copy."""
+    labels = {config.label for config in apps.get_app_configs()}
+    known = known_migrations()
+    return sorted(f"{app}.{name}" for app, name in applied if app in labels and (app, name) not in known)
+
+
 def explanation(found) -> str:
     return f"{TITLE}.\n{MESSAGE}\n(Not known to this version: {', '.join(found)})"

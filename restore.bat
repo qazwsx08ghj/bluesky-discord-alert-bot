@@ -1,6 +1,8 @@
 @echo off
 rem Put back a backup of the bot's data: accounts, settings, channels and history.
 rem The current data is backed up first, so a restore can itself be undone.
+rem Before anything changes, it says what the restore would undo. If that includes anything you
+rem set up or any notification history, RESTORE must be typed to go on.
 setlocal
 title Bluesky Discord Alert Bot - Restore a backup
 set "COMMON=%~dp0docker\scripts\common.bat"
@@ -35,9 +37,26 @@ echo.
 echo  This puts back %FILE%.
 echo  The bot's current accounts, settings and history are replaced by the ones in that backup.
 echo  A backup of the current data is made first, so you can go back.
+echo.
+echo  Checking what that would change (nothing is changed yet)...
+call "%COMMON%" :restore_report "%FILE%"
+set "REPORT=%errorlevel%"
+if "%REPORT%"=="10" goto :confirm_loss
+if "%REPORT%"=="3" goto :newer_backup
+if not "%REPORT%"=="0" goto :unusable
 if defined ALERTBOT_ASSUME_YES goto :go
 choice /c YN /m " Continue"
 if errorlevel 2 goto :cancelled
+goto :go
+
+:confirm_loss
+echo.
+echo  To put the backup back anyway, type RESTORE in capital letters and press Enter.
+echo  Anything else cancels, and nothing is changed.
+set "TYPED="
+if defined ALERTBOT_RESTORE_CONFIRM set "TYPED=%ALERTBOT_RESTORE_CONFIRM%"
+if not defined ALERTBOT_RESTORE_CONFIRM set /p "TYPED= Type RESTORE to continue: "
+if not "%TYPED%"=="RESTORE" goto :cancelled
 :go
 
 echo.
@@ -47,6 +66,7 @@ call "%COMMON%" :backup before-restore || goto :failed
 echo.
 echo [3/4] Stopping the bot and putting back %FILE%...
 call "%COMMON%" :stop || goto :failed
+call "%COMMON%" :ensure_data_free || goto :failed_stopped
 call "%COMMON%" :restore_file "%FILE%" || goto :failed_stopped
 
 echo.
@@ -81,6 +101,19 @@ exit /b 0
 
 :bad_choice
 echo  There is no backup number %CHOICE%. Nothing was changed.
+call "%COMMON%" :pause_end
+exit /b 1
+
+:newer_backup
+echo.
+echo  That backup was made by a newer version of the bot than the one in this folder, so this
+echo  version can't use it. Nothing was changed. Use restore.bat in the newer version's folder.
+call "%COMMON%" :pause_end
+exit /b 1
+
+:unusable
+echo.
+echo  That backup can't be put back (the reason is above). Nothing was changed.
 call "%COMMON%" :pause_end
 exit /b 1
 

@@ -40,8 +40,8 @@ A quick reference to the main product and architecture decisions: what was decid
 - *Details:* `bluesky_monitor/poller.py`.
 
 **7. A post is claimed before it's sent, once per account.**
-- *Why:* a post must never be sent twice, even with two checks running at once or after a restart. The database enforces one record per (account, post).
-- *Tradeoff:* if the process dies mid-send, the post waits about 2 minutes before it's sent again. A duplicate is possible in exactly one case: the process dies after Discord accepted the message but before it was marked sent. Even then, it can happen only once.
+- *Why:* two checks running at once, or a restart, must not send a post twice. The database enforces one record per (account, post), and one delivery per channel.
+- *Tradeoff:* exactly-once delivery isn't possible with a Discord webhook, which can't recognise a repeated message. If the process dies mid-send, or Discord's answer is lost, the post waits about 2 minutes and is sent again; if Discord had stored it, it appears twice (once per channel at most). A clean stop finishes the send in progress first, so this needs a crash, a kill or a network failure. Restoring an older backup can also repeat posts; `restore.bat` says so first.
 - *Details:* [BACKEND.md](BACKEND.md), section 1.
 
 **8. One checker at a time, coordinated through the database; SQLite in WAL mode; no Celery or Redis.**
@@ -103,3 +103,9 @@ A quick reference to the main product and architecture decisions: what was decid
 - *How:* the database's migrations tell which version updated it last. The scripts stop before replacing the running bot, the web start shows a warning page instead of backing up or migrating, and the checker waits.
 - *Tradeoff:* 1.0.0-rc.1 doesn't have the check and can't be given it; the instructions say to delete the old folder after an update.
 - *Details:* [DOCKER.md](DOCKER.md), "Older versions and newer data".
+
+**19. The database is changed as a whole only when nothing else uses it: a kernel lock plus a check by the scripts.**
+- *How:* the running web service and checker hold a shared flock on a file in the data volume; a migration or restore needs it exclusive. Before a restore, the scripts also check that no container uses the volume. The checker stops cleanly: the send in progress finishes, and the wait is limited.
+- *Why:* SQLite can't stop another process from writing during a migration, and a restore replaces the file under any process that still has it open. A lock file alone could go stale; a kernel lock ends with its process. The Docker check also covers versions without the lock (1.0.0-rc.2 and older).
+- *Tradeoff:* on Windows without Docker (the development setup), there is no flock and the lock does nothing.
+- *Details:* [DOCKER.md](DOCKER.md), "Data safety".

@@ -12,7 +12,7 @@ How it runs, with no extra services (no Celery, no Redis):
   jobs, and it claims a job with one conditional UPDATE, so a job runs exactly once.
 - The job calls check_all.run(), which uses the same per-account locks and post claims
   as the scheduled check: an account being checked elsewhere is reported as
-  already_checking, and no post is ever sent twice.
+  already_checking, and two checks never send the same post to a channel twice.
 - Progress and each account's result are written to the row as they happen, so a page
   refresh, or another browser, shows the same state.
 
@@ -32,7 +32,7 @@ from django.db import close_old_connections
 from django.utils import timezone
 
 from activity import log as activity, problems
-from . import check_all, locks
+from . import check_all, locks, shutdown
 from .models import CheckJob, SchedulerState
 
 logger = logging.getLogger(__name__)
@@ -81,7 +81,8 @@ def run_pending(instance_id: str) -> int:
     close_old_connections()
     tidy()
     ran = 0
-    while CheckJob.objects.filter(status=CheckJob.QUEUED).exists() and locks.holds_scheduler_lease(instance_id):
+    while not shutdown.requested() and CheckJob.objects.filter(status=CheckJob.QUEUED).exists() \
+            and locks.holds_scheduler_lease(instance_id):
         job = claim_next(instance_id)
         if job is None:
             break

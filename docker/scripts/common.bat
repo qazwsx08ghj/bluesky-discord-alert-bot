@@ -56,6 +56,8 @@ if errorlevel 1 goto :msg_no_docker
 :check_compose
 %ALERTBOT_DOCKER% compose version >nul 2>&1
 if errorlevel 1 goto :msg_no_compose
+call :compose_new_enough
+if errorlevel 1 goto :msg_old_compose
 %ALERTBOT_DOCKER% info >nul 2>&1
 if not errorlevel 1 goto :engine_ok
 rem Not answering. If Docker Desktop isn't open, start it and wait. If it is open, it may just
@@ -149,6 +151,33 @@ exit /b 1
 echo.
 echo  Your Docker Desktop is too old for this bot.
 echo  Open Docker Desktop, install its latest update, then double-click this file again.
+exit /b 1
+
+rem Docker Compose 2.23.0 or later (Docker Desktop 4.25 or later): the oldest version the scripts
+rem are tested with. Sets COMPOSE_VERSION. An answer that can't be read doesn't stop anything.
+:compose_new_enough
+set "COMPOSE_VERSION="
+for /f "usebackq delims=" %%V in (`%ALERTBOT_DOCKER% compose version --short 2^>nul`) do set "COMPOSE_VERSION=%%V"
+if not defined COMPOSE_VERSION exit /b 0
+set "CV_MAJOR="
+set "CV_MINOR="
+for /f "tokens=1,2 delims=.-+ " %%A in ("%COMPOSE_VERSION:v=%") do (
+  set "CV_MAJOR=%%A"
+  set "CV_MINOR=%%B"
+)
+echo.%CV_MAJOR%| findstr /r /x "[0-9][0-9]*" >nul || exit /b 0
+echo.%CV_MINOR%| findstr /r /x "[0-9][0-9]*" >nul || exit /b 0
+if %CV_MAJOR% gtr 2 exit /b 0
+if %CV_MAJOR% lss 2 exit /b 1
+if %CV_MINOR% geq 23 exit /b 0
+exit /b 1
+
+:msg_old_compose
+echo.
+echo  Your Docker Desktop is too old for this bot: it has Docker Compose %COMPOSE_VERSION%,
+echo  and the bot needs Docker Compose 2.23.0 or later (Docker Desktop 4.25 or later).
+echo  Open Docker Desktop, install its latest update, then double-click this file again.
+echo  Nothing was changed.
 exit /b 1
 
 :msg_engine_down
@@ -403,6 +432,63 @@ exit /b 1
 %COMPOSE% run --rm --no-deps -v "%BOT_DIR%\backups:/restore:ro" web restore "/restore/%~1"
 if errorlevel 1 goto :msg_restore_failed
 exit /b 0
+
+rem What putting a backup back would undo. Changes nothing, so the bot may keep running meanwhile.
+rem Exit code 0: nothing would be lost; 10: something would be (restore.bat asks for RESTORE);
+rem 3: the backup is from a newer version; anything else: it can't be used (the reason is shown).
+:restore_report
+%COMPOSE% run --rm --no-deps -v "%BOT_DIR%\backups:/restore:ro" web restore --report "/restore/%~1"
+exit /b %errorlevel%
+
+rem Before a backup is put back: nothing may be using the bot's data any more. The bot's own
+rem containers are stopped by then, but a container started from another folder (by an older
+rem version's scripts, say) could still have the data open and write to it during the restore.
+rem Only looks; nothing is stopped here. The restore itself also refuses while the data is in use.
+:ensure_data_free
+set "USERS="
+for /f "usebackq delims=" %%N in (`%ALERTBOT_DOCKER% ps --filter "volume=%VOLUME%" --format "{{.Names}}" 2^>nul`) do call :add_user "%%N"
+if not defined USERS exit /b 0
+echo.
+echo  Something else is still using the bot's data, so the backup wasn't put back:
+echo     %USERS%
+echo  It is probably the bot started from another folder. Stop it there (with stop.bat in that
+echo  folder, or in Docker Desktop), then run restore.bat again. Nothing was changed.
+exit /b 1
+
+:add_user
+if defined USERS (set "USERS=%USERS%, %~1") else (set "USERS=%~1")
+exit /b 0
+
+
+rem -- update.bat: stop the old checker before the new version updates the database -------------
+rem The new version's web service applies the database update when it starts. The old checker
+rem must not write to the database meanwhile. Versions with the data lock wait for that by
+rem themselves, but 1.0.0-rc.2 and older don't. The checker finishes the notification it is
+rem sending first. If the version doesn't change, nothing is stopped.
+:stop_checker_if_replacing
+set "CHECKER="
+set "RUNNING_IMAGE="
+set "NEW_IMAGE="
+for /f "usebackq delims=" %%C in (`%COMPOSE% ps -q checker 2^>nul`) do set "CHECKER=%%C"
+if not defined CHECKER exit /b 0
+for /f "usebackq delims=" %%I in (`%ALERTBOT_DOCKER% inspect --format "{{.Image}}" %CHECKER% 2^>nul`) do set "RUNNING_IMAGE=%%I"
+set "IMAGE_REF=%CFG_IMAGE%"
+if not defined IMAGE_REF set "IMAGE_REF=%ALERTBOT_LOCAL_IMAGE%"
+if not defined IMAGE_REF set "IMAGE_REF=bluesky-alert-bot:local"
+for /f "usebackq delims=" %%I in (`%ALERTBOT_DOCKER% image inspect --format "{{.Id}}" "%IMAGE_REF%" 2^>nul`) do set "NEW_IMAGE=%%I"
+if not defined RUNNING_IMAGE exit /b 0
+if not defined NEW_IMAGE exit /b 0
+if /i "%RUNNING_IMAGE%"=="%NEW_IMAGE%" exit /b 0
+echo  Stopping the checker first (it finishes any notification it is sending)...
+%COMPOSE% stop checker
+if errorlevel 1 goto :msg_checker_not_stopped
+exit /b 0
+
+:msg_checker_not_stopped
+echo.
+echo  The checker couldn't be stopped, so the update didn't go on. Your data is unchanged.
+echo  Run update.bat again in a moment.
+exit /b 1
 
 :msg_restore_failed
 echo.

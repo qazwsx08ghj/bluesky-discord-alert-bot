@@ -101,11 +101,12 @@ class DockerDeploymentTests(SimpleTestCase):
                                       f"DISCORD_WEBHOOK_URL={FAKE_WEBHOOK}\nPOLL_INTERVAL_MINUTES=5\n", encoding="utf-8")
 
     # -- helpers ----------------------------------------------------------------------------------
-    def script(self, name, **extra):
+    def script(self, name, ok=True, **extra):
         res = subprocess.run(["cmd", "/d", "/c", str(self.dir / name)], cwd=self.dir, env={**self.env, **extra},
                              stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="ascii",
                              errors="replace", timeout=900)
-        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        if ok:
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
         return res.stdout
 
     def dc(self, *args, check=True):
@@ -271,6 +272,7 @@ class DockerDeploymentTests(SimpleTestCase):
             f.write("# new version" + chr(10))
         out = self.script("update.bat")
         self.assertIn("The update is complete", out)
+        self.assertIn("Stopping the checker first", out, "the old checker stops before the new version starts")
         exported = list((self.dir / "backups").glob("db-before-update-*.sqlite3"))
         self.assertEqual(len(exported), 1, "a copy of the pre-update backup is in the Windows folder")
         self.assertTrue(any(b.startswith("db-before-update-") for b in self.backups()))
@@ -321,14 +323,39 @@ class DockerDeploymentTests(SimpleTestCase):
         self.assertEqual(status, 201)
         self.assertEqual(self.handles(), ["after-backup.bsky.social", "new.bsky.social", "old.bsky.social"])
 
-        out = self.script("restore.bat", ALERTBOT_RESTORE_CHOICE=str(self.restore_number("db-before-update-")))
+        number = str(self.restore_number("db-before-update-"))
+        out = self.script("restore.bat", ALERTBOT_RESTORE_CHOICE=number)
+        self.assertIn("1 account added since the backup would be removed: after-backup.bsky.social", out)
+        self.assertIn("Cancelled. Nothing was changed.", out, "a restore that loses data needs RESTORE typed")
+        self.assertEqual(self.handles(), ["after-backup.bsky.social", "new.bsky.social", "old.bsky.social"])
+
+        out = self.script("restore.bat", ALERTBOT_RESTORE_CHOICE=number, ALERTBOT_RESTORE_CONFIRM="RESTORE")
         self.assertIn("Done. The bot is running with the data from db-before-update-", out)
         self.assertEqual(self.handles(), ["new.bsky.social", "old.bsky.social"], "the backup's accounts")
         self.assertEqual(self.request("GET", "/api/settings/")[1]["bluesky_handle"], "fake.bsky.social")
 
-        out = self.script("restore.bat", ALERTBOT_RESTORE_CHOICE=str(self.restore_number("db-before-restore-")))
+        out = self.script("restore.bat", ALERTBOT_RESTORE_CHOICE=str(self.restore_number("db-before-restore-")),
+                          ALERTBOT_RESTORE_CONFIRM="RESTORE")
+        self.assertIn("1 account deleted since the backup would come back: after-backup.bsky.social", out)
         self.assertIn("data from db-before-restore-", out)
         self.assertEqual(self.handles(), ["after-backup.bsky.social", "new.bsky.social", "old.bsky.social"],
                          "the restore was undone with the backup it made first")
         self.wait_until(lambda: self.request("GET", "/api/status/")[1]["scheduler"]["state"] in ("running", "checking"),
                         what="the checker after the restore")
+
+    def test_9c_restore_is_refused_while_another_folder_uses_the_data(self):
+        # Like the bot started from an older folder under another project name, using the same data.
+        other = f"{self.project}-other-folder"
+        subprocess.run(["docker", "run", "-d", "--name", other, "-v", f"{self.project}_bot-data:/data",
+                        "--entrypoint", "sleep", "bluesky-alert-bot:test", "600"], check=True, capture_output=True,
+                       timeout=120)
+        try:
+            before = self.handles()
+            out = self.script("restore.bat", ok=False, ALERTBOT_RESTORE_CONFIRM="RESTORE",
+                              ALERTBOT_RESTORE_CHOICE=str(self.restore_number("db-before-update-")))
+            self.assertIn("Something else is still using the bot's data, so the backup wasn't put back", out)
+            self.assertIn(other, out)
+            self.wait_until(self.healthy, what="the bot running again with its own data")
+            self.assertEqual(self.handles(), before, "nothing was put back")
+        finally:
+            subprocess.run(["docker", "rm", "-f", other], capture_output=True, timeout=120)

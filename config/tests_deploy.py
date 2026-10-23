@@ -233,6 +233,7 @@ class ScriptHarness(SimpleTestCase):
 
 
 CHECK_COMPAT = "run --rm --no-deps web python manage.py check_compat"
+CHECKER_ID = "ps -q checker"  # update.bat: is a checker running (to stop it before the database update)?
 NEWER = "This folder has an OLDER version of the bot than the one that last used your data"
 
 
@@ -358,6 +359,33 @@ class WindowsScriptTests(ScriptHarness):
         self.assertEqual(code, 1)
         self.assertIn("Docker Desktop is too old", out)
 
+    def test_docker_compose_older_than_2_23_is_refused_by_every_script(self):
+        for name in SCRIPTS:
+            with self.subTest(script=name):
+                code, out, calls = self.run_script(name, FAKE_COMPOSE_VERSION="2.22.9")
+                self.assertEqual(code, 1, out)
+                self.assertIn("it has Docker Compose 2.22.9", out)
+                self.assertIn("needs Docker Compose 2.23.0 or later", out)
+                self.assertEqual([c for c in calls if c.startswith("docker compose -p")], [], "nothing is run")
+
+    def test_docker_compose_versions_that_are_new_enough(self):
+        for version in ("2.23.0", "v2.23.0", "2.24.6-desktop.1", "2.100.0", "3.0.0", "5.6.0"):
+            with self.subTest(version=version):
+                code, out, _ = self.run_script("start.bat", FAKE_COMPOSE_VERSION=version)
+                self.assertEqual(code, 0, out)
+
+    def test_old_docker_compose_versions(self):
+        for version in ("2.22.0", "v2.19.1", "1.29.2", "2.9.0"):
+            with self.subTest(version=version):
+                code, out, _ = self.run_script("start.bat", FAKE_COMPOSE_VERSION=version)
+                self.assertEqual(code, 1, out)
+
+    def test_an_unreadable_docker_compose_version_doesnt_block(self):
+        for version in ("dev", "unknown-build"):
+            with self.subTest(version=version):
+                code, out, _ = self.run_script("start.bat", FAKE_COMPOSE_VERSION=version)
+                self.assertEqual(code, 0, out)
+
     def test_windows_containers_mode_is_explained(self):
         code, out, _ = self.run_script("setup.bat", FAKE_OSTYPE="windows")
         self.assertEqual(code, 1)
@@ -444,12 +472,35 @@ class WindowsScriptTests(ScriptHarness):
             f'run --rm --no-deps -v "{self.dir}\\backups:/export" web backup --label before-update --export /export',
             "build --pull",
             CHECK_COMPAT,
+            CHECKER_ID,
             "up -d",
         ])
         self.assertTrue((self.dir / "backups").is_dir())
         self.assertIn("The update is complete", out)
         self.assertEqual(calls[-1], 'docker image prune -f --filter "label=org.opencontainers.image.title=Bluesky '
                                     'Discord Alert Bot"', "old images of this bot are removed after a good update")
+
+    def test_update_to_a_new_version_stops_the_old_checker_before_restarting(self):
+        code, out, calls = self.run_script("update.bat", FAKE_CHECKER_ID="c0ffee", FAKE_RUNNING_IMAGE="sha256:old",
+                                           FAKE_NEW_IMAGE="sha256:new")
+        self.assertEqual(code, 0, out)
+        steps = self.compose_calls(calls)
+        self.assertEqual(steps[-3:], [CHECKER_ID, "stop checker", "up -d"])
+        self.assertIn("Stopping the checker first", out)
+        self.assertIn('docker image inspect --format "{{.Id}}" "bluesky-alert-bot:local"', calls)
+
+    def test_update_without_a_new_version_stops_nothing(self):
+        code, out, calls = self.run_script("update.bat", FAKE_CHECKER_ID="c0ffee", FAKE_RUNNING_IMAGE="sha256:same",
+                                           FAKE_NEW_IMAGE="sha256:same")
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("stop checker", self.compose_calls(calls))
+
+    def test_a_checker_that_cant_be_stopped_stops_the_update(self):
+        code, out, calls = self.run_script("update.bat", FAKE_CHECKER_ID="c0ffee", FAKE_RUNNING_IMAGE="sha256:old",
+                                           FAKE_NEW_IMAGE="sha256:new", FAKE_FAIL_ON="stop checker")
+        self.assertEqual(code, 1)
+        self.assertIn("The checker couldn't be stopped, so the update didn't go on", out)
+        self.assertNotIn("up -d", self.compose_calls(calls), "the new version isn't started")
 
     def test_update_stops_if_the_backup_fails(self):
         code, out, calls = self.run_script("update.bat", FAKE_FAIL_ON="backup")
@@ -499,6 +550,8 @@ class WindowsScriptTests(ScriptHarness):
         self.assertIn("2. db-manual-20261020-100000-000001.sqlite3", out)
         self.assertEqual(self.compose_calls(calls), [
             f'run --rm --no-deps -v "{self.dir}\\backups:/export" web backups',
+            f'run --rm --no-deps -v "{self.dir}\\backups:/restore:ro" web restore --report "/restore/'
+            'db-before-update-20261021-090000-000001.sqlite3"',
             f'run --rm --no-deps -v "{self.dir}\\backups:/export" web backup --label before-restore --export /export',
             "stop",
             f'run --rm --no-deps -v "{self.dir}\\backups:/restore:ro" web restore "/restore/'
@@ -506,6 +559,67 @@ class WindowsScriptTests(ScriptHarness):
             "up -d",
         ])
         self.assertIn("Done. The bot is running with the data from db-before-update-", out)
+        self.assertIn("Nothing you set up and no notification history would be lost", out)
+        volume_check = [c for c in calls if c.startswith("docker ps --filter")]
+        self.assertEqual(volume_check, ['docker ps --filter "volume=alertbot_bot-data" --format "{{.Names}}"'],
+                         "after stopping, it checks that nothing else uses the data")
+        self.assertLess(calls.index(volume_check[0]), next(i for i, c in enumerate(calls) if 'web restore "/restore' in c))
+
+    # -- restore: what it would undo, and who else uses the data ---------------------------------
+    def restore_calls(self, calls):
+        return [c for c in self.compose_calls(calls) if 'web restore "/restore' in c]
+
+    def test_a_restore_that_loses_data_needs_restore_typed(self):
+        self.make_backups("db-manual-20261020-100000-000001.sqlite3")
+        code, out, calls = self.run_script("restore.bat", ALERTBOT_RESTORE_CHOICE="1", FAKE_REPORT="loss")
+        self.assertEqual(code, 0, out)
+        self.assertIn("2 posts the bot noticed since the backup would be forgotten", out, "the report is shown")
+        self.assertIn("type RESTORE in capital letters", out)
+        self.assertIn("Cancelled. Nothing was changed.", out, "yes-to-everything doesn't count as RESTORE")
+        self.assertEqual(self.restore_calls(calls), [])
+        self.assertNotIn("stop", self.compose_calls(calls))
+
+    def test_lower_case_or_other_words_cancel(self):
+        self.make_backups("db-manual-20261020-100000-000001.sqlite3")
+        for typed in ("restore", "Restore", "yes", "RESTORE please"):
+            with self.subTest(typed=typed):
+                code, out, calls = self.run_script("restore.bat", ALERTBOT_RESTORE_CHOICE="1", FAKE_REPORT="loss",
+                                                   ALERTBOT_RESTORE_CONFIRM=typed)
+                self.assertIn("Cancelled. Nothing was changed.", out)
+                self.assertEqual(self.restore_calls(calls), [])
+
+    def test_typing_restore_puts_the_backup_back(self):
+        self.make_backups("db-manual-20261020-100000-000001.sqlite3")
+        code, out, calls = self.run_script("restore.bat", ALERTBOT_RESTORE_CHOICE="1", FAKE_REPORT="loss",
+                                           ALERTBOT_RESTORE_CONFIRM="RESTORE")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(self.restore_calls(calls)), 1)
+        self.assertIn("Done. The bot is running with the data from db-manual-", out)
+
+    def test_a_backup_from_a_newer_version_is_refused_before_anything_changes(self):
+        self.make_backups("db-manual-20261020-100000-000001.sqlite3")
+        code, out, calls = self.run_script("restore.bat", ALERTBOT_RESTORE_CHOICE="1", FAKE_REPORT="newer")
+        self.assertEqual(code, 1)
+        self.assertIn("made by a newer version of the bot", out)
+        self.assertEqual([c for c in self.compose_calls(calls) if "report" not in c and not c.endswith("backups")], [])
+
+    def test_a_backup_that_cant_be_used_is_refused_before_anything_changes(self):
+        self.make_backups("db-manual-20261020-100000-000001.sqlite3")
+        code, out, calls = self.run_script("restore.bat", ALERTBOT_RESTORE_CHOICE="1", FAKE_REPORT="bad")
+        self.assertEqual(code, 1)
+        self.assertIn("this backup is damaged", out)
+        self.assertIn("can't be put back (the reason is above). Nothing was changed.", out)
+        self.assertNotIn("stop", self.compose_calls(calls))
+
+    def test_data_still_used_by_another_folder_blocks_the_restore(self):
+        self.make_backups("db-manual-20261020-100000-000001.sqlite3")
+        code, out, calls = self.run_script("restore.bat", ALERTBOT_RESTORE_CHOICE="1",
+                                           FAKE_VOLUME_USERS="oldbot-checker-1")
+        self.assertEqual(code, 1)
+        self.assertIn("Something else is still using the bot's data, so the backup wasn't put back", out)
+        self.assertIn("oldbot-checker-1", out)
+        self.assertEqual(self.restore_calls(calls), [], "nothing is put back while the data is in use")
+        self.assertEqual(self.compose_calls(calls)[-1], "up -d", "the bot is started again with its own data")
 
     def test_restore_with_an_unknown_number_changes_nothing(self):
         self.make_backups("db-manual-20261020-100000-000001.sqlite3")
@@ -574,7 +688,7 @@ class ReleaseBundleTests(ScriptHarness):
         self.assertEqual(code, 0, out)
         steps = self.compose_calls(calls)
         self.assertTrue(steps[0].startswith("run --rm --no-deps"))
-        self.assertEqual(steps[1:], ["pull", CHECK_COMPAT, "up -d"])
+        self.assertEqual(steps[1:], ["pull", CHECK_COMPAT, CHECKER_ID, "up -d"])
         self.assertFalse(any("build" in c for c in calls))
 
     def test_bad_image_names_are_refused(self):

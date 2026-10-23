@@ -2,12 +2,14 @@
 # Starts one part of the bot inside its container. See docs/DOCKER.md.
 #
 #   web         prepare the data (secret key, backup before migrations, migrations), then the control panel;
-#               a warning page instead if a newer version updated the data (botconfig/compat.py)
+#               a warning page instead if a newer version updated the data (botconfig/compat.py).
+#               gunicorn holds the shared data lock while it runs (config/gunicorn_conf.py)
 #   checker     wait until the database is ready (and not from a newer version), then the checker
 #   import-old  setup.bat: bring over the data of an earlier install mounted at /import (read-only)
 #   backup      update.bat / backup.bat: copy the database (backup_db options follow)
 #   backups     restore.bat: copy every backup in the volume to /export (existing files are kept)
-#   restore     restore.bat: put a backup back (the bot must be stopped); the file follows
+#   restore     restore.bat: put a backup back (the bot must be stopped); the file follows.
+#               "restore --report <file>" only says what that would undo (the bot may run)
 #   anything else is run as a command, e.g. "python manage.py check"
 set -eu
 cd /app
@@ -24,6 +26,7 @@ case "${1:-web}" in
       exit "$status"
     fi
     exec gunicorn config.wsgi:application \
+      --config config/gunicorn_conf.py \
       --bind 0.0.0.0:8000 \
       --workers "${WEB_WORKERS:-2}" \
       --threads 4 \
