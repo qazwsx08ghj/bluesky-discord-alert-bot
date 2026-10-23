@@ -109,3 +109,9 @@ A quick reference to the main product and architecture decisions: what was decid
 - *Why:* SQLite can't stop another process from writing during a migration, and a restore replaces the file under any process that still has it open. A lock file alone could go stale; a kernel lock ends with its process. The Docker check also covers versions without the lock (1.0.0-rc.2 and older).
 - *Tradeoff:* on Windows without Docker (the development setup), there is no flock and the lock does nothing.
 - *Details:* [DOCKER.md](DOCKER.md), "Data safety".
+
+**20. Releases are trusted through hardened GitHub Releases, with no extra signing keys (Design 1).**
+- *How:* each release has a manifest that pins the image by digest and lists the hashes of its files. Updaters read it only from an immutable release of this repository, over HTTPS to GitHub. They refuse anything invalid or inconsistent, never install an older version, and skip versions listed in `release/withdrawn.json`. Publishing happens only after the maintainer's approval.
+- *Why:* signing keys would add key handling and recovery work, and could lock every install out if a key were lost. They protect against little that GitHub's own protections (immutable releases, rulesets, a protected environment) don't already cover for a one-maintainer project.
+- *Tradeoff:* the maintainer's GitHub account is the root of trust. Hashes prove integrity, not who published; see RELEASES.md, "Integrity is not authenticity".
+- *Details:* [RELEASES.md](RELEASES.md).
