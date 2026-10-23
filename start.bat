@@ -14,6 +14,7 @@ if errorlevel 1 goto :first_time
 call "%COMMON%" :check_port || goto :failed
 call "%COMMON%" :check_compat || goto :failed
 echo  Starting the bot...
+call "%COMMON%" :prepare_start || goto :failed
 call "%COMMON%" :up || goto :failed
 call "%COMMON%" :wait_ready || goto :failed
 call "%COMMON%" :open_browser

@@ -13,6 +13,8 @@ How a post moves (see SeenPost and PostDelivery for the states):
    Every delivery has its own attempts: a failing channel never holds up or repeats another.
 4. Interrupted sends: a delivery left in "sending" longer than SEND_STALE_SECONDS (the
    process died mid-send) is picked up again by the next delivery.
+5. Stopping (shutdown.py): once the checker is asked to stop, no new send is started and no
+   new account is checked. A send already in progress finishes and its result is saved.
 
 Nothing is lost: every unsent delivery stays in the database until it is sent, gives up or
 is cancelled (its channel was removed from the account). Duplicates can only happen if a
@@ -45,6 +47,7 @@ from django.utils import timezone
 from activity import log as activity, problems
 from activity.models import ActivityEvent
 from discord_alerts import channels, mentions, sender
+from . import shutdown
 from .bluesky import BlueskyLoginError, BlueskyUnavailable, SharedSession
 from .locks import acquire_account_lock, release_account_lock
 from .models import POST, REPLY, REPOST, MonitoredAccount, PostDelivery, SeenPost
@@ -293,6 +296,9 @@ def deliver_pending(account: MonitoredAccount) -> int:
     window_start = now - timedelta(hours=settings.SEND_RETRY_WINDOW_HOURS)
     failing, sent_posts, touched = set(), set(), set()
     for delivery in list(_due_for_delivery(account, now)):
+        if shutdown.requested():
+            logger.info("Stopping: the rest of %s's notifications wait for the next start", account.handle)
+            break  # nothing new is claimed, so nothing is left half sent
         if delivery.channel_id in failing:
             continue
         post, channel = delivery.post, delivery.channel
@@ -479,6 +485,9 @@ def check_accounts(accounts, *, should_continue=None, deadline=None, session=Non
     session = session or _new_session()
     stopped = None  # (reason, category) once the remaining accounts can't be checked
     for account in accounts:
+        if stopped is None and shutdown.requested():
+            logger.info("Stopping this check: the checker is shutting down")
+            summary.result, stopped = "interrupted", ("stopped", "")
         if stopped is None and should_continue is not None and not should_continue():
             logger.warning("Stopping this check cycle: the checker lease was lost")
             summary.result, stopped = "interrupted", ("stopped", "")

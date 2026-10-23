@@ -70,7 +70,7 @@ The opt-in real-Docker tests build images and start containers (about 5 minutes)
 
 ```
 set RUN_DOCKER_TESTS=1
-python manage.py test config.tests_docker config.tests_dev_stack
+python manage.py test config.tests_docker config.tests_docker_safety config.tests_dev_stack
 ```
 
 Docker files only:
@@ -105,9 +105,12 @@ docker build -t bluesky-alert-bot:local .          # also checks the license not
 | `config/tests_notices.py` | 14 | `THIRD_PARTY_NOTICES.txt` is complete, current and shipped everywhere |
 | `config/tests_docs.py` | 27 | Links, the English and Chinese documents, the archive, templates, the release check, and no accidental GitHub `@`-mentions |
 | `config/tests_wording.py` | 4 | The panel and backend messages say "notification"; no development-step labels in code or the API contract |
-| `config/tests_deploy.py` | 55 | Docker files, the dev stack's settings, and the real `.bat` scripts under `cmd.exe` with a fake Docker (Windows only), including an older folder's scripts on newer data and naming the folder used before |
+| `config/tests_deploy.py` | 78 | Docker files, the dev stack's settings, and the real `.bat` scripts under `cmd.exe` with a fake Docker (Windows only), including an older folder's scripts on newer data, naming the folder used before, the restore report, typed RESTORE and a report that is no longer true, data still used by another container, Docker failing to answer (nothing is changed), stopping the running bot before another version starts, and the Docker Compose 2.23.0 minimum (old, unreadable and missing versions stop) |
+| `bluesky_monitor/tests_shutdown.py` | 15 | Stopping the checker: the send in progress finishes, nothing new starts, Check All saves what it did, the wait is limited. Five of them stop a real checker process with SIGTERM during a fake send (Linux and macOS only; they run in CI) |
+| `botconfig/tests_data_safety.py` | 40 | The data lock between real processes (Linux and macOS only), journal files never applied to the wrong file and none left behind, checked backups and exports, which backups are kept, and the restore report (what it says, exit codes, secrets never shown) |
+| `config/tests_docker_safety.py` | 6 | Opt-in, with **real containers** from an image built from the folder: a restore refused while the web service runs in its own container, a migration waiting for a checker in another one, no stale lock after `docker kill`, a restore confirmed on a report that is no longer true, `docker stop` during a fake send, and the duplicate after `docker kill` that can't be prevented |
 | `config/tests.py`, `tests_step10.py` | 9, 10 | Settings API, removed routes, migrations of legacy data |
-| `config/tests_docker.py` | 11 | Opt-in, with **real containers** driven by the real scripts. It covers: `setup.bat` importing an earlier install, `start.bat`, `update.bat` backing up first, `stop.bat` and `restore.bat`; local-only access and CSRF in Docker; crash recovery; data kept across restarts, rebuilds and recreation; and the `@docker` browser checks. (`backup.bat` is covered by the fake-Docker script tests only.) |
+| `config/tests_docker.py` | 13 | Opt-in, with **real containers** driven by the real scripts. It covers: `setup.bat` importing an earlier install, `start.bat`, `update.bat` backing up first, stopping the old version, and refusing while a real 1.0.0-rc.2 checker from another folder uses the data, `stop.bat` and `restore.bat` (with its report and RESTORE, and refused while another container uses the data); local-only access and CSRF in Docker; crash recovery; data kept across restarts, rebuilds and recreation; and the `@docker` browser checks. (`backup.bat` is covered by the fake-Docker script tests only.) |
 | `config/tests_dev_stack.py` | 6 | Opt-in: the demo stack has no mounts, credentials or internet, and Discord is fake |
 
 **Control panel:**

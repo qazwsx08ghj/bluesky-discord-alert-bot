@@ -16,7 +16,7 @@ The only thing a Windows user installs is **Docker Desktop**. Everything else is
 - **Problems:**
   - every script explains them in plain words and never deletes anything;
   - if the panel doesn't answer in time, a report goes to `logs\problem-report.txt`, with passwords and webhook links hidden.
-- **Docker Desktop checks:** installed, running (started and waited for up to 3 minutes), recent enough, and set to Linux containers.
+- **Docker Desktop checks:** installed, running (started and waited for up to 3 minutes), recent enough (Docker Compose 2.23.0 or later, which comes with Docker Desktop 4.25; an older one, or a version that can't be read, is explained and nothing is run), and set to Linux containers.
 - **When Docker Desktop's engine stops answering** (for example after sleep or an update), the script offers to restart it: Y, or automatically after 60 seconds. It uses `docker desktop restart` where available; on older versions it ends Docker Desktop and all its helper processes and starts it again. It restarts once at most.
 
 ## 2. What runs, and where the data is
@@ -33,7 +33,7 @@ The only thing a Windows user installs is **Docker Desktop**. Everything else is
 | Path | What |
 |---|---|
 | `/data/db.sqlite3` | Accounts, Bluesky login, channels, settings, activity history, Check All results |
-| `/data/backups/` | Automatic backups: before every migration (`db-auto-*`), before every update (`db-before-update-*`) and before every restore (`db-before-restore-*`), plus manual ones (`db-manual-*`); the newest 5 of each kind |
+| `/data/backups/` | Automatic backups: before every migration (`db-auto-*`), before every update (`db-before-update-*`) and before every restore (`db-before-restore-*`), plus manual ones (`db-manual-*`); the newest 5 of each kind, plus the newest of each earlier database version (see "Where backups are") |
 | `/data/secret_key` | Django's secret key, generated once per install, readable only by the bot |
 | `/data/cache/` | Shared cache for the web workers (lookups, login-test limit) |
 
@@ -55,14 +55,18 @@ The only thing a Windows user installs is **Docker Desktop**. Everything else is
 `update.bat` does, in order:
 1. **Backup:** `backup_db --label before-update`, inside the volume plus a copy in `backups\`. If this fails, nothing else happens.
 2. **New version:** a release download pulls the published image (`docker compose pull`); a source folder rebuilds (`docker compose build --pull`). If this fails, the current version keeps running.
-3. **Restart:** `docker compose up -d` recreates the containers with the new image, keeping the same volume. On start, `web` backs up again if the update brings database changes, then migrates.
+3. **Restart:**
+   - if the running bot isn't exactly this version (or Docker can't tell), it is stopped first (`docker compose stop`; the checker finishes the notification it is sending). Then no container may still use the data volume (see "Data safety"). If one does, or Docker can't say, the stopped containers are started again as they were and the update stops there. `start.bat` and `setup.bat` do the same before they start a version that isn't running;
+   - `docker compose up -d` recreates the containers with the new image, keeping the same volume. On start, `web` takes the data lock (see "Data safety"), backs up again if the update brings database changes, then migrates.
 4. **Check:** waits for `/api/health/`, then opens the panel.
 5. **Tidy up:** only after a successful update, removes this bot's old images that nothing uses any more (`docker image prune` limited to images labelled "Bluesky Discord Alert Bot"; never volumes). Without this, every update would leave about 260 MB behind.
 
 If nothing changed since the last update, Docker rebuilds or downloads the same image and leaves the running bot as it is.
 
 ### Where backups are
-- **Inside Docker,** in the data volume (`/data/backups`): `db-before-update-*` (`update.bat`), `db-manual-*` (`backup.bat`), `db-before-restore-*` (`restore.bat`), and `db-auto-*` (made by the web start whenever migrations are waiting, so an update makes two backups). The newest 5 of each kind are kept.
+- **Inside Docker,** in the data volume (`/data/backups`): `db-before-update-*` (`update.bat`), `db-manual-*` (`backup.bat`), `db-before-restore-*` (`restore.bat`), and `db-auto-*` (made by the web start whenever migrations are waiting, so an update makes two backups).
+- **Which are kept:** the newest 5 of each kind, and, older than those, the newest backup of each earlier database version (up to 5). So the backup taken just before an update that changed the database stays, however often `update.bat` or `backup.bat` runs afterwards: it is the one the older version can go back to.
+- **Every backup is checked before it counts:** it is one self-contained file (no journal file beside it), written under a temporary name and renamed only after SQLite's integrity check passed. The copy in `backups\` is compared with it (SHA-256) before it gets its name, so a half-written copy never looks like a backup.
 - **In the `backups` folder** next to the script that made it: a copy of each script-made backup. These copies are never removed by the bot.
 - `restore.bat` first copies every backup from the volume into its own `backups` folder, so a new download's folder lists the backups made from an older folder too.
 
@@ -103,10 +107,33 @@ The bot stops working until the newer folder's `start.bat` is used again. The us
 
 ### Restoring a backup (`restore.bat`)
 1. Copies every backup inside Docker into the `backups` folder (existing files are kept), and lists them all, newest first.
-2. You type the number of the backup to put back, and confirm.
-3. Backs up the current data first (`db-before-restore-*`), so a restore can itself be undone with `restore.bat`.
-4. Stops the bot and puts the backup back (`manage.py restore_db`). The backup is checked first: it must open, pass SQLite's integrity check and be this bot's database; otherwise nothing changes. The old database's journal files are removed so they can't be replayed onto the restored file.
-5. Starts the bot. If the backup comes from an older version, it is migrated on start (with a backup first, as always).
+2. You type the number of the backup to put back.
+3. **It says what the restore would undo** (`restore_db --report`; nothing is changed yet, and the bot keeps running). A checked copy of the backup is brought up to this version's database layout, then compared with the data now (`botconfig/datastate.py`):
+   - things you set up: accounts added, deleted or changed since the backup (by name), Discord channels (by name, never their links), where accounts send, and the bot's settings (never the password);
+   - history: posts noticed since the backup (forgotten by a restore, so the next check finds them again and sends them: notifications already sent can appear twice in Discord), and notifications sent, failed or cancelled since;
+   - not counted as a loss: bookkeeping the bot redoes by itself (last check times, retries in progress). Activity entries since the backup are mentioned, but don't count on their own.
+4. **Confirm:** if nothing would be lost, Y/N as before. If anything would be lost, `RESTORE` must be typed in capital letters; anything else cancels with nothing changed (`ALERTBOT_ASSUME_YES` doesn't count). A backup made by a newer version is refused (this version can't use it), and so is a damaged one.
+5. Stops the bot, then checks that **no container uses the data volume any more** (`docker ps --filter volume=...`). One started from another folder, for example, would still write to the database. If one does, or if Docker can't answer, nothing is put back, the bot is started again, and the message says why.
+6. Backs up the current data (`db-before-restore-*`), now that it can't change any more, so a restore can itself be undone with `restore.bat`.
+7. Puts the backup back (`manage.py restore_db --expect <code>`): the backup is checked again, then the exclusive data lock must be free (no part of the bot running; see "Data safety"). **With the lock held, the comparison of step 3 is made again.** If it differs from the report you confirmed (the report's code doesn't match), because something that counts changed in between (a post noticed, a notification sent, an account changed), nothing is put back: it shows what the restore would undo now, starts the bot again, and asks you to run `restore.bat` again. Otherwise the old database's journal files are removed (so they can't be applied to the restored file) and the checked copy replaces the database in one step. No other file is left behind.
+8. Starts the bot. If the backup comes from an older version, it is migrated on start (with a backup first, as always).
+
+### Data safety
+- **The data lock** (`botconfig/datalock.py`): while the bot runs, the web service (gunicorn's main process, `config/gunicorn_conf.py`) and the checker each hold a shared lock on `/data/.data-access.lock`. Changing the database as a whole needs the exclusive lock:
+  - a migration at start (`prepare_data`) waits for it up to `DATA_LOCK_WAIT_SECONDS` (180), e.g. until the old checker has stopped during an update. If the data stays busy, it changes nothing and exits (code 75), and Docker starts it again;
+  - a restore refuses at once (after 15 seconds) while any part of the bot runs;
+  - a starting checker or web service waits while a migration or restore holds it.
+
+  It is a kernel lock (flock): it ends with its process however that ends (stopped, killed, crashed), so there are no stale locks. Every container on the volume shares Docker's Linux kernel, so the containers see each other's locks. It is one of two safeguards: the scripts also check that no container uses the volume before a restore, and before starting a version that may update the database. That check also covers 1.0.0-rc.2 and older, which don't take the lock. It fails closed: if Docker can't say which containers use the volume, nothing is changed.
+- **Stopping the checker** (`docker compose stop`, `stop.bat`, updates and restores; `bluesky_monitor/shutdown.py`):
+  1. no new check, Discord send or Check All job starts;
+  2. the send in progress finishes and its result is saved, so nothing is left in "sending". A running check or Check All stops at the next account and saves what it did (the rest are "not reached", checked next time);
+  3. it waits for this at most `CHECKER_STOP_TIMEOUT_SECONDS` (20), below Docker's 30-second limit. Then it exits anyway (code 75) and logs how many notifications were being sent. A second stop signal exits at once.
+- **What can't be promised: exactly-once delivery.** A Discord webhook has no way to recognise a repeated message, and the bot can't ask Discord afterwards whether a message arrived. So a notification can appear twice in one channel when:
+  - the checker is killed during a send (the time limit above, a crash, power loss), or Discord stored a message but its answer was lost or late. The delivery stays in "sending" and is sent again after `SEND_STALE_SECONDS` (120);
+  - a backup is restored (posts noticed after it are found again). `restore.bat` says so before it asks.
+
+  Otherwise each post goes to each channel at most once, and a notification that keeps failing is given up after `SEND_RETRY_WINDOW_HOURS` (24). `config/tests_docker_safety.py` shows both: a clean `docker stop` during a send, and the duplicate after `docker kill`.
 
 ## 4. Security inside Docker
 
@@ -138,6 +165,7 @@ The bot stops working until the newer folder's `start.bat` is used again. The us
 What has and hasn't been tested, including the Docker and release acceptance tests: [TESTING.md](TESTING.md), sections 7 and 9.
 
 - Windows 11 with Docker Desktop 4.25 (Docker Engine 24, Compose v2.23), and later Docker Desktop 4.96.1 (Docker Engine 29.9, Compose v5.6).
+- **Docker Compose 2.23.0 is the oldest supported version;** the scripts refuse older ones with a message. The Compose commands the scripts use were checked with Compose 2.23.0, 2.24.3, 2.24.6 and 5.6.0 (each against Docker Engine 29.9). Compose 2.19 failed on one of them.
 - Checked by hand: recovery after a full Docker Desktop restart, upgrading an earlier install with `update.bat`, a folder with a Chinese name, and importing a copy of a real first-version install with networking switched off.
 
 ## 7. Releases (prebuilt images)

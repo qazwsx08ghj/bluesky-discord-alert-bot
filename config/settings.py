@@ -187,6 +187,12 @@ SCHEDULER_OVERDUE_GRACE_SECONDS = int(os.getenv("SCHEDULER_OVERDUE_GRACE_SECONDS
 # A standalone checker (`run_scheduler`, the Docker checker service) exits if its own
 # heartbeat hasn't run for this long, so Docker restarts it. 0 turns the watchdog off.
 SCHEDULER_WATCHDOG_SECONDS = int(os.getenv("SCHEDULER_WATCHDOG_SECONDS", "300"))
+# When the checker is asked to stop, it finishes the Discord send in progress for at most this
+# long, then exits anyway (bluesky_monitor/shutdown.py). Keep it below the checker's
+# stop_grace_period in docker-compose.yml (30 s), after which Docker kills it.
+CHECKER_STOP_TIMEOUT_SECONDS = float(os.getenv("CHECKER_STOP_TIMEOUT_SECONDS", "20"))
+# How long a migration, or a part of the bot that is starting, waits for the data while another
+# one uses it (botconfig/datalock.py reads DATA_LOCK_WAIT_SECONDS itself; default 180).
 
 # Profile lookup, login test, "Check all"
 BLUESKY_PUBLIC_API_URL = os.getenv("BLUESKY_PUBLIC_API_URL", "https://public.api.bsky.app")  # read-only, no login

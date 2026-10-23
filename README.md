@@ -169,7 +169,7 @@ The status at the bottom of the sidebar shows whether the bot is running. If som
 - A backup is made **automatically** before every update.
 - **`backup.bat`** makes one whenever you like, in the **`backups`** folder next to the scripts.
 - **Backups contain your App Password and webhook URLs.** Keep that folder private.
-- **To go back to a backup,** double-click `restore.bat` and type the backup's number.
+- **To go back to a backup,** double-click `restore.bat` and type the backup's number. It first says what going back would undo. If you would lose anything (an account or channel you added or changed, settings, or posts noticed since that backup), you must type `RESTORE` to go ahead; anything else cancels.
 
 ---
 

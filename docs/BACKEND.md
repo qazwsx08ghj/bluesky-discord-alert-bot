@@ -14,7 +14,7 @@ The same code runs as two processes. In Docker, they are the two services in `do
 They share one SQLite database (WAL mode, `bluesky_monitor/db.py`). Coordination goes through the database:
 - **the scheduler lease** (`SchedulerState`): one checker at a time;
 - **per-account locks** (`bluesky_monitor/locks.py`): a scheduled check and Check now never check the same account at once;
-- **post claims:** every post is recorded once per account in `SeenPost`, unique on (account, post), before it is sent. A post is never sent twice, even across processes and restarts.
+- **post claims:** every post is recorded once per account in `SeenPost`, unique on (account, post), before it is sent, with one `PostDelivery` per channel. Two checks, processes or restarts never send a post to a channel twice. The one exception can't be avoided with a Discord webhook: a process killed during a send (or a lost answer from Discord) leaves the delivery in "sending", and it is sent again later, which may repeat it. See [DOCKER.md](DOCKER.md), "Data safety".
 
 Without Docker (`dev\start-without-docker.bat`), `manage.py runserver` starts the checker inside the web process (`bluesky_monitor/apps.py`). Docker sets `SCHEDULER_IN_WEB=0`, so the web service never starts one.
 
@@ -73,7 +73,11 @@ The main architectural decisions and their tradeoffs: [DECISIONS.md](DECISIONS.m
 
 ## 5. Data safety
 
-- **Start-up** (`prepare_data`): if migrations are waiting, back up first (`backup_db --if-pending`), then migrate.
+- **Start-up** (`prepare_data`): if migrations are waiting, take the exclusive data lock (`botconfig/datalock.py`), back up first (`backup_db --if-pending`), then migrate.
+- **The data lock:** the running web service and checker hold it shared; a migration or restore needs it exclusive. A kernel lock (flock), so it never outlives its process.
+- **Stopping the checker** (`bluesky_monitor/shutdown.py`): the send in progress finishes, nothing new starts, and the wait is limited (`CHECKER_STOP_TIMEOUT_SECONDS`).
+- **Database copies** (`botconfig/sqlite_files.py`): backups and restore copies are single self-contained files; a journal file is never applied to a file it doesn't belong to.
+- **Before a restore** (`restore_db --report`, `botconfig/datastate.py`): what it would undo, in plain words; `restore.bat` asks for RESTORE when something would be lost.
 - `backup.bat` / `restore.bat` call `backup_db` / `restore_db`:
   - a restore checks the backup;
   - it backs up the current data first.

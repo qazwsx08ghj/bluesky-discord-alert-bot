@@ -56,6 +56,8 @@ if errorlevel 1 goto :msg_no_docker
 :check_compose
 %ALERTBOT_DOCKER% compose version >nul 2>&1
 if errorlevel 1 goto :msg_no_compose
+call :compose_new_enough
+if errorlevel 1 goto :msg_old_compose
 %ALERTBOT_DOCKER% info >nul 2>&1
 if not errorlevel 1 goto :engine_ok
 rem Not answering. If Docker Desktop isn't open, start it and wait. If it is open, it may just
@@ -149,6 +151,41 @@ exit /b 1
 echo.
 echo  Your Docker Desktop is too old for this bot.
 echo  Open Docker Desktop, install its latest update, then double-click this file again.
+exit /b 1
+
+rem Docker Compose 2.23.0 or later (Docker Desktop 4.25 or later): the oldest version the scripts
+rem are tested with. Sets COMPOSE_VERSION. A version that can't be read or understood (it must look
+rem like 2.23.0, v2.23.0 or 2.24.6-desktop.1) counts as not supported: nothing is run.
+:compose_new_enough
+set "COMPOSE_VERSION="
+set "COMPOSE_UNREADABLE=1"
+set "CV_MAJOR="
+set "CV_MINOR="
+for /f "usebackq delims=" %%V in (`%ALERTBOT_DOCKER% compose version --short 2^>nul`) do set "COMPOSE_VERSION=%%V"
+if not defined COMPOSE_VERSION exit /b 1
+echo.%COMPOSE_VERSION%| findstr /r /x /c:"v*[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*[-+.a-zA-Z0-9]*" >nul || exit /b 1
+for /f "tokens=1,2 delims=.-+ " %%A in ("%COMPOSE_VERSION:v=%") do (
+  set "CV_MAJOR=%%A"
+  set "CV_MINOR=%%B"
+)
+if not defined CV_MINOR exit /b 1
+set "COMPOSE_UNREADABLE="
+if %CV_MAJOR% gtr 2 exit /b 0
+if %CV_MAJOR% lss 2 exit /b 1
+if %CV_MINOR% geq 23 exit /b 0
+exit /b 1
+
+:msg_old_compose
+echo.
+if not defined COMPOSE_UNREADABLE (
+  echo  Your Docker Desktop is too old for this bot: it has Docker Compose %COMPOSE_VERSION%,
+  echo  and the bot needs Docker Compose 2.23.0 or later ^(Docker Desktop 4.25 or later^).
+) else (
+  echo  The version of Docker Compose on this computer couldn't be read, so it isn't known whether
+  echo  it works with this bot. It needs Docker Compose 2.23.0 or later ^(Docker Desktop 4.25 or later^).
+)
+echo  Open Docker Desktop, install its latest update, then double-click this file again.
+echo  Nothing was changed.
 exit /b 1
 
 :msg_engine_down
@@ -399,10 +436,131 @@ echo.
 echo  The bot couldn't be stopped, so nothing was restored. Your data is unchanged.
 exit /b 1
 
+rem Puts the backup back, but only if the comparison made again with the bot stopped gives the same
+rem result as the report that was confirmed (%~2, its IMPACT code). Exit code 11: the data changed
+rem since that report; nothing was put back.
 :restore_file
-%COMPOSE% run --rm --no-deps -v "%BOT_DIR%\backups:/restore:ro" web restore "/restore/%~1"
+%COMPOSE% run --rm --no-deps -v "%BOT_DIR%\backups:/restore:ro" web restore --expect "%~2" "/restore/%~1"
+if errorlevel 12 goto :msg_restore_failed
+if errorlevel 11 goto :msg_restore_changed
 if errorlevel 1 goto :msg_restore_failed
 exit /b 0
+
+:msg_restore_changed
+echo.
+echo  Your data changed after you confirmed (what is different is shown above), so the backup
+echo  wasn't put back and nothing was changed. Run restore.bat again to see what it would undo now.
+exit /b 1
+
+rem What putting a backup back would undo. Changes nothing, so the bot may keep running meanwhile.
+rem Exit code 0: nothing would be lost; 10: something would be (restore.bat asks for RESTORE);
+rem 3: the backup is from a newer version; anything else: it can't be used (the reason is shown).
+rem Sets IMPACT: the report's code, which the restore checks again (:restore_file).
+:restore_report
+set "IMPACT="
+set "REPORT_FILE=%TEMP%\alertbot-report-%RANDOM%%RANDOM%.txt"
+%COMPOSE% run --rm --no-deps -v "%BOT_DIR%\backups:/restore:ro" web restore --report "/restore/%~1" > "%REPORT_FILE%" 2>&1
+set "REPORT_RESULT=%errorlevel%"
+findstr /v /b /c:"IMPACT=" "%REPORT_FILE%"
+for /f "usebackq tokens=1,* delims==" %%A in ("%REPORT_FILE%") do if "%%A"=="IMPACT" set "IMPACT=%%B"
+del "%REPORT_FILE%" >nul 2>&1
+if "%REPORT_RESULT%"=="0" if not defined IMPACT exit /b 1
+if "%REPORT_RESULT%"=="10" if not defined IMPACT exit /b 1
+exit /b %REPORT_RESULT%
+
+rem Before the database is changed as a whole (a restore, or a start that may update it): nothing
+rem may be using the bot's data. The bot's own containers are stopped by then, but a container
+rem started from another folder (by an older version's scripts, say) could still have the data
+rem open and write to it. 1.0.0-rc.2 and older don't take the data lock, so this check is what
+rem protects against them. Only looks; nothing is stopped here. If Docker can't answer, it is
+rem not known whether the data is in use, and nothing is done.
+rem (ALERTBOT-OK is printed only if Docker answered: no answer means "unknown", not "nothing".)
+:ensure_data_free
+set "USERS="
+set "DOCKER_ANSWERED="
+for /f "usebackq delims=" %%N in (`%ALERTBOT_DOCKER% ps --filter "volume=%VOLUME%" --format "{{.Names}}" 2^>nul ^&^& echo ALERTBOT-OK`) do (
+  if "%%N"=="ALERTBOT-OK" (set "DOCKER_ANSWERED=1") else (call :add_user "%%N")
+)
+if not defined DOCKER_ANSWERED goto :msg_data_use_unknown
+if not defined USERS exit /b 0
+echo.
+echo  Something else is still using the bot's data, so the backup wasn't put back:
+echo     %USERS%
+echo  It is probably the bot started from another folder. Stop it there (with stop.bat in that
+echo  folder, or in Docker Desktop), then run restore.bat again. Nothing was changed.
+exit /b 1
+
+:add_user
+if defined USERS (set "USERS=%USERS%, %~1") else (set "USERS=%~1")
+exit /b 0
+
+:msg_data_use_unknown
+echo.
+echo  Docker couldn't say whether anything else is using the bot's data right now, so nothing
+echo  was changed. Wait a moment and try again. If this keeps happening, restart Docker Desktop.
+exit /b 1
+
+
+rem -- Before start, setup and update start this folder's version --------------------------------
+rem Starting another version than the one running can update the database (its web service
+rem migrates it on start). Nothing else may use the data meanwhile, and 1.0.0-rc.2 and older
+rem don't take the data lock. So unless the bot is already running exactly this folder's version:
+rem  1. the bot's own containers are stopped first (the checker finishes the notification it is
+rem     sending), then
+rem  2. no other container may use the data volume (:ensure_data_free); if one does, the stopped
+rem     containers are started again as they were, and nothing else is done.
+rem Whatever Docker can't answer counts against going on: nothing is started or changed.
+:prepare_start
+call :running_version || goto :msg_data_use_unknown_running
+if defined SAME_VERSION exit /b 0
+if not defined OWN_RUNNING goto :prepare_check_free
+echo  Stopping the running bot first (it finishes any notification it is sending)...
+%COMPOSE% stop
+if errorlevel 1 goto :msg_bot_not_stopped
+:prepare_check_free
+call :ensure_data_free
+if not errorlevel 1 exit /b 0
+if defined OWN_RUNNING %COMPOSE% start >nul 2>&1
+exit /b 1
+
+rem Sets OWN_RUNNING (the bot's own containers are running) and SAME_VERSION (all of them run the
+rem image this folder would start). Exit code 1 if Docker can't say which containers run.
+:running_version
+set "OWN_RUNNING="
+set "SAME_VERSION="
+set "ALL_SAME=1"
+set "NEW_IMAGE="
+set "IMAGE_REF=%CFG_IMAGE%"
+if not defined IMAGE_REF set "IMAGE_REF=%ALERTBOT_LOCAL_IMAGE%"
+if not defined IMAGE_REF set "IMAGE_REF=bluesky-alert-bot:local"
+for /f "usebackq delims=" %%I in (`%ALERTBOT_DOCKER% image inspect --format "{{.Id}}" "%IMAGE_REF%" 2^>nul`) do set "NEW_IMAGE=%%I"
+set "DOCKER_ANSWERED="
+for /f "usebackq delims=" %%C in (`%COMPOSE% ps -q 2^>nul ^&^& echo ALERTBOT-OK`) do (
+  if "%%C"=="ALERTBOT-OK" (set "DOCKER_ANSWERED=1") else (call :own_container %%C)
+)
+if not defined DOCKER_ANSWERED exit /b 1
+if defined OWN_RUNNING if defined ALL_SAME if defined NEW_IMAGE set "SAME_VERSION=1"
+exit /b 0
+
+:own_container
+set "OWN_RUNNING=1"
+set "IMG="
+for /f "usebackq delims=" %%I in (`%ALERTBOT_DOCKER% inspect --format "{{.Image}}" %1 2^>nul`) do set "IMG=%%I"
+if not defined IMG set "ALL_SAME="
+if /i not "%IMG%"=="%NEW_IMAGE%" set "ALL_SAME="
+exit /b 0
+
+:msg_data_use_unknown_running
+echo.
+echo  Docker couldn't say whether the bot is running right now, so nothing was started or
+echo  changed. Wait a moment and try again. If this keeps happening, restart Docker Desktop.
+exit /b 1
+
+:msg_bot_not_stopped
+echo.
+echo  The running bot couldn't be stopped, so this version wasn't started. Your data is
+echo  unchanged. Try again in a moment.
+exit /b 1
 
 :msg_restore_failed
 echo.

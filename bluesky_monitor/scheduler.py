@@ -13,6 +13,18 @@ the next one is due.
 
 "Check all" requests from the panel are queued as CheckJob rows. A small thread
 (JobWorker) in the checker runs them in the background; see jobs.py.
+
+Stopping (run_forever, on SIGTERM or Ctrl+C), see shutdown.py:
+1. No new check, send or Check All job starts. The send in progress finishes and is saved;
+   a running check or Check All stops at the next account and saves what it did.
+2. The checker waits for that, for at most CHECKER_STOP_TIMEOUT_SECONDS (below Docker's
+   30-second stop limit), then releases the lease and its data lock, and exits.
+3. If the work isn't done in time, it exits anyway (code 75) and says how many notifications
+   were being sent: those are sent again after SEND_STALE_SECONDS and may arrive twice.
+A second stop signal exits at once.
+
+The standalone checker also holds the shared data lock (botconfig/datalock.py) while it
+runs, so the database can't be migrated or restored under it.
 """
 import atexit
 import logging
@@ -36,15 +48,16 @@ from django.utils import timezone
 from activity import log as activity, retention
 from . import retention as post_retention
 from activity.models import ActivityEvent
-from botconfig import compat
+from botconfig import compat, datalock
 from botconfig.secrets import scrub
-from . import locks
-from .models import SchedulerState
+from . import locks, shutdown
+from .models import PostDelivery, SchedulerState
 
 logger = logging.getLogger(__name__)
 
 INSTANCE_ID = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
 POLL_JOB_ID = "poll_bluesky"
+STOP_TIMEOUT_EXIT = 75  # the work in progress didn't finish within CHECKER_STOP_TIMEOUT_SECONDS
 
 _scheduler = None
 _worker = None
@@ -69,8 +82,11 @@ class JobWorker(threading.Thread):
 
         try:
             while not self.stopping.wait(settings.CHECK_JOB_POLL_SECONDS):
+                if shutdown.requested():
+                    break
                 try:
-                    jobs.run_pending(self.instance_id)
+                    with shutdown.busy():
+                        jobs.run_pending(self.instance_id)
                 except Exception:  # keep looking for jobs; the problem is in the log
                     logger.exception("Running Check all jobs failed")
         finally:
@@ -87,10 +103,12 @@ def _start_worker(instance_id: str):
         _worker.start()
 
 
-def _stop_worker():
+def _stop_worker(timeout: float = 0):
     global _worker
     if _worker is not None:
         _worker.stop()
+        if timeout > 0:
+            _worker.join(timeout)
         _worker = None
 
 
@@ -129,8 +147,16 @@ def apply_interval(scheduler=None) -> bool:
 def heartbeat(instance_id: str = INSTANCE_ID) -> bool:
     """Take or renew the lease, and pick up a changed check interval.
 
-    Returns True while this instance is the active checker.
+    Returns True while this instance is the active checker. Does nothing once the checker is
+    stopping (it must not take the lease back after letting it go).
     """
+    if shutdown.requested():
+        return False
+    with shutdown.busy():
+        return _heartbeat(instance_id)
+
+
+def _heartbeat(instance_id: str) -> bool:
     close_old_connections()
     held = locks.acquire_scheduler_lease(instance_id)
     _note_lease(instance_id, held)
@@ -173,7 +199,14 @@ class Watchdog(threading.Thread):
 
 
 def run_cycle(instance_id: str = INSTANCE_ID) -> bool:
-    """One check of every active account. Returns False if skipped (no lease)."""
+    """One check of every active account. Returns False if skipped (no lease, or stopping)."""
+    if shutdown.requested():
+        return False
+    with shutdown.busy():
+        return _run_cycle(instance_id)
+
+
+def _run_cycle(instance_id: str) -> bool:
     from .poller import poll_all_active_accounts
 
     close_old_connections()
@@ -245,6 +278,7 @@ def start():
     global _scheduler
     if _scheduler is not None:
         return
+    shutdown.reset()
     _scheduler = _build(BackgroundScheduler, INSTANCE_ID)
     _scheduler.start()
     _mark_started(INSTANCE_ID)
@@ -268,6 +302,7 @@ def stop():
     global _scheduler
     if _scheduler is None:
         return
+    shutdown.request()
     _stop_worker()
     try:
         _scheduler.shutdown(wait=False)
@@ -276,14 +311,69 @@ def stop():
         _release(INSTANCE_ID)
 
 
+def hold_data_lock() -> "datalock.DataLock":
+    """The shared data lock, held while the standalone checker runs (see botconfig/datalock.py).
+
+    Waits up to DATA_LOCK_WAIT_SECONDS while a migration or restore holds the data. Then the
+    database must be ready for this version; otherwise the checker exits (code 75) and Docker
+    starts it again, through wait_for_database.
+    """
+    from botconfig.management.commands.backup_db import pending_migrations
+
+    lock = datalock.DataLock(exclusive=False)
+    if not lock.acquire(timeout=datalock.wait_seconds()):
+        logger.error("The database is being updated or restored; the checker starts again in a moment")
+        raise SystemExit(datalock.BUSY_EXIT)
+    try:
+        not_ready = compat.unknown_migrations() or pending_migrations()
+    finally:
+        connection.close()
+    if not_ready:
+        lock.release()
+        logger.error("The database isn't ready for this version; the checker starts again in a moment")
+        raise SystemExit(datalock.BUSY_EXIT)
+    return lock
+
+
+def _sends_in_progress() -> int:
+    try:
+        return PostDelivery.objects.filter(status=PostDelivery.SENDING).count()
+    except Exception:  # shutting down; the number is only for the log
+        return -1
+
+
+def stop_gracefully(timeout: float) -> bool:
+    """Stop starting work, wait up to timeout seconds for the work in progress. True if it finished."""
+    shutdown.request()
+    deadline = time.monotonic() + timeout
+    if _scheduler is not None:
+        try:
+            _scheduler.shutdown(wait=False)
+        except Exception:  # already stopped
+            pass
+    finished = shutdown.wait_idle(max(0.0, deadline - time.monotonic()))
+    _stop_worker(timeout=max(0.1, deadline - time.monotonic()))
+    return finished
+
+
 def run_forever():
     """Run the checker in the foreground until stopped (used by `manage.py run_scheduler`)."""
     global _scheduler
+    shutdown.reset()
+    lock = hold_data_lock()
     _scheduler = _build(BlockingScheduler, INSTANCE_ID)
 
     def _shutdown(signum, _frame):
-        logger.info("Received signal %s; shutting down the checker", signum)
-        _scheduler.shutdown(wait=False)
+        if shutdown.requested():
+            logger.warning("Asked again to stop; stopping now without waiting")
+            logging.shutdown()
+            os._exit(STOP_TIMEOUT_EXIT)
+        logger.info("Received signal %s; finishing the work in progress, then stopping", signum)
+        shutdown.request()
+        try:
+            _scheduler.shutdown(wait=False)
+        except Exception:  # not started yet: run_forever doesn't start it once a stop was asked for
+            pass
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, _shutdown)
@@ -295,11 +385,25 @@ def run_forever():
         _last_heartbeat = time.monotonic()
         watchdog = Watchdog(settings.SCHEDULER_WATCHDOG_SECONDS)
         watchdog.start()
+    finished = True
     try:
-        _scheduler.start()
+        if not shutdown.requested():
+            _scheduler.start()
     finally:
         if watchdog is not None:
             watchdog.stop()
-        _stop_worker()
+        finished = stop_gracefully(settings.CHECKER_STOP_TIMEOUT_SECONDS)
         _scheduler = None
         _release(INSTANCE_ID)
+        sending = _sends_in_progress()
+        if finished:
+            logger.info("The checker stopped cleanly%s", "" if sending <= 0 else
+                        f"; {sending} notification(s) from an earlier interruption are sent again later")
+        lock.release()
+    if not finished:
+        logger.critical(
+            "The checker stopped before its work finished (it took more than %s seconds). %s notification(s) "
+            "were being sent: they are sent again after %s seconds, and may appear twice in Discord.",
+            settings.CHECKER_STOP_TIMEOUT_SECONDS, "Some" if sending < 0 else sending, settings.SEND_STALE_SECONDS)
+        logging.shutdown()
+        os._exit(STOP_TIMEOUT_EXIT)  # the unfinished threads would otherwise keep the process alive
