@@ -154,7 +154,7 @@ Tests never touch real data or real services:
 
 | Job | Runner | Runs |
 |---|---|---|
-| Backend | Linux | `pip-audit` (both requirement files), `manage.py check`, missing-migration check, `test --exclude-tag contract` |
+| Backend | Linux | `pip-audit` (both requirement files), `manage.py check`, missing-migration check, `test --exclude-tag contract`; then the Linux-only data-safety tests again by name (`StopSignalTests`, `DataLockTests`, at `-v 2`), failing if any of them is skipped |
 | API contract and license notices | Linux | `api_contract`, `test --tag contract`, `npm run api:check`, typecheck, `third_party_notices.py --check` |
 | Frontend | Linux | `npm audit --audit-level=moderate`, typecheck, `npm test`, build |
 | Browser tests | Linux | Playwright against the demo server; traces are uploaded when a test fails |

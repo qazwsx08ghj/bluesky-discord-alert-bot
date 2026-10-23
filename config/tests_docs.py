@@ -201,6 +201,9 @@ class PolicyFileTests(SimpleTestCase):
         ci = text(".github/workflows/ci.yml")
         for job in ("backend:", "contract:", "frontend:", "browser:", "windows-scripts:", "docker:"):
             self.assertIn(f"\n  {job}\n", ci, "TESTING.md describes exactly these six CI jobs")
+        for label in ("bluesky_monitor.tests_shutdown.StopSignalTests", "botconfig.tests_data_safety.DataLockTests"):
+            self.assertIn(label, ci, "CI runs the Linux-only data-safety tests by name")
+        self.assertIn('if grep -E "\\.\\.\\. skipped|skipped=" linux-safety-tests.log', ci, "and fails if one is skipped")
 
     def test_changelog_matches_the_panel_version(self):
         changelog = text("CHANGELOG.md")

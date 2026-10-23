@@ -36,6 +36,18 @@ jobs:
         run: python manage.py makemigrations --check --dry-run
       - name: Django tests (the contract tests run in their own job)
         run: python manage.py test --exclude-tag contract
+      # These run above too. Here they run again by name, so the log lists each one, and the step
+      # fails if any of them was skipped: they only work on Linux (SIGTERM, flock), which is why.
+      - name: Linux-only data-safety tests by name (checker stop on SIGTERM, data lock across processes), none skipped
+        shell: bash
+        run: |
+          python manage.py test -v 2 \
+            bluesky_monitor.tests_shutdown.StopSignalTests \
+            botconfig.tests_data_safety.DataLockTests 2>&1 | tee linux-safety-tests.log
+          if grep -E "\.\.\. skipped|skipped=" linux-safety-tests.log; then
+            echo "::error::A Linux-only data-safety test was skipped. These tests must run on Linux."
+            exit 1
+          fi
 
   contract:
     name: API contract and license notices (OpenAPI, generated types, conformance, notices)
