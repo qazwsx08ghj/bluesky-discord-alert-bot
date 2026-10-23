@@ -172,6 +172,8 @@ What has and hasn't been tested, including the Docker and release acceptance tes
 
 Non-technical users should get the **release download**, so nothing is built on their computer.
 
+This section describes publishing as it works today. The release manifest, how an updater chooses a version, withdrawn releases, and the planned publishing flow (approval before anything is pushed or published) are in [RELEASES.md](RELEASES.md).
+
 1. **Prepare the version:**
    - set it in `frontend/package.json`;
    - in `CHANGELOG.md`, move the `[Unreleased]` notes under `## [1.2.0] - YYYY-MM-DD`;
