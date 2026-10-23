@@ -1,17 +1,27 @@
-"""Make the download for non-technical users: the scripts plus a Compose file that uses a
-published image, so nothing is built on their computer.
+"""The Windows deployment files, and the download for non-technical users built from them.
 
     python docker/make_release_bundle.py --image ghcr.io/OWNER/bluesky-discord-alert-bot:1.0.0 --out dist
+    python docker/make_release_bundle.py --image <repo>:1.0.0@sha256:<digest> --from-bundle bundle/windows --out dist
+    python docker/make_release_bundle.py --export /app/bundle/windows     # the image build (Dockerfile)
 
-Creates dist/BlueskyDiscordAlertBot-<version>.zip with:
-    setup.bat  start.bat  update.bat  stop.bat  backup.bat  restore.bat
-    docker-compose.yml  docker/compose.env (ALERTBOT_IMAGE set)  docker/scripts/common.bat
-    README.txt  README.zh-TW.txt  LICENSE  THIRD_PARTY_NOTICES.txt
-update.bat in that folder downloads newer images published under the same tag (use a
-moving tag such as :stable for automatic updates, or a version tag to stay put).
-Used by .github/workflows/release.yml; see docs/DOCKER.md, "Releases".
+The deployment files (bundle_files) are the replaceable, version-matched files: the six
+scripts, docker/scripts/common.bat, docker-compose.yml, README.txt, README.zh-TW.txt, LICENSE
+and THIRD_PARTY_NOTICES.txt. --export writes them, with bundle.json (each file's SHA-256), into
+the image at /app/bundle/windows, where an updater can copy them out with `docker cp`
+(no Git, Python or Node.js needed on Windows).
+
+Never part of the deployment files: docker/compose.env (it pins the image of a release by its
+digest, which can't be known inside that image) and anything local to an install (its port,
+data, backups, logs, .env). The download adds compose.env, with ALERTBOT_IMAGE set.
+
+The download is reproducible: entries sorted, fixed timestamps and permissions, so the same
+files give a byte-identical zip (and the same SHA-256). --from-bundle builds it from files
+copied out of the image, so the download and the image hold exactly the same files.
+Used by .github/workflows/release.yml; see docs/DOCKER.md, "Releases", and docs/RELEASES.md.
 """
 import argparse
+import hashlib
+import json
 import re
 import zipfile
 from pathlib import Path
@@ -77,30 +87,103 @@ update.bat 和 backup.bat 做的備份會放在這裡的 backups 資料夾。
 """
 
 
-def make(image: str, out: Path) -> Path:
-    # [registry[:port]/]name[:tag][@sha256:digest], e.g. ghcr.io/owner/bot:1.0.0 or localhost:5000/bot:stable
-    if not re.fullmatch(r"(?:[a-z0-9.-]+(?::\d+)?/)?[a-z0-9._/-]+(?::[A-Za-z0-9._-]+)?(?:@sha256:[0-9a-f]{64})?", image):
-        raise SystemExit(f"Not a valid image name: {image}")
+BUNDLE_SCHEMA = "alertbot-bundle/1"  # release_meta/bundle.py reads what export() writes
+INDEX = "bundle.json"
+COMPOSE_ENV = "docker/compose.env"
+IMAGE_REF = re.compile(r"(?:[a-z0-9.-]+(?::\d+)?/)?[a-z0-9._/-]+(?::[A-Za-z0-9._-]+)?(?:@sha256:[0-9a-f]{64})?")
+# A fixed timestamp (the earliest a zip can hold) and permissions, so the zip is reproducible.
+ZIP_TIME = (1980, 1, 1, 0, 0, 0)
+
+
+def bundle_files(root: Path = ROOT) -> dict:
+    """The deployment files: relative path (with /) -> exact bytes. Line endings come from
+    .gitattributes (.bat files CRLF, the others LF), so they are the same on every computer."""
+    files = {name: (root / name).read_bytes() for name in FILES}
+    files["README.txt"] = README.replace("\n", "\r\n").encode("utf-8-sig")
+    # With a BOM, so every version of Notepad shows the Chinese text correctly.
+    files["README.zh-TW.txt"] = README_ZH_TW.replace("\n", "\r\n").encode("utf-8-sig")
+    return dict(sorted(files.items()))
+
+
+def index(files: dict) -> dict:
+    return {"schema": BUNDLE_SCHEMA, "platform": "windows",
+            "files": {name: hashlib.sha256(data).hexdigest() for name, data in sorted(files.items())}}
+
+
+def export(dest: Path, root: Path = ROOT) -> dict:
+    """Write the deployment files and bundle.json into dest (the image build). Returns the index."""
+    files = bundle_files(root)
+    for name, data in files.items():
+        target = dest / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+    info = index(files)
+    (dest / INDEX).write_text(json.dumps(info, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+    return info
+
+
+def read_bundle(folder: Path) -> dict:
+    """The deployment files from a folder written by export() (for instance copied out of the
+    image), checked against its bundle.json (release_meta.bundle.verify)."""
+    import sys
+
+    sys.path.insert(0, str(ROOT))
+    from release_meta import MetadataError, bundle
+
+    try:
+        return bundle.read(folder)
+    except MetadataError as exc:
+        raise SystemExit(f"The deployment files can't be used: {exc}") from None
+
+
+def _version_of(image: str) -> str:
     last = image.split("@", 1)[0].rsplit("/", 1)[-1]
-    version = last.rsplit(":", 1)[1] if ":" in last else "latest"
-    out.mkdir(parents=True, exist_ok=True)
-    target = out / f"BlueskyDiscordAlertBot-{version}.zip"
-    env = (ROOT / "docker" / "compose.env").read_text(encoding="utf-8")
+    return last.rsplit(":", 1)[1] if ":" in last else "latest"
+
+
+def compose_env(image: str, root: Path = ROOT) -> bytes:
+    """docker/compose.env of the download: the repository's template with ALERTBOT_IMAGE set."""
+    env = (root / "docker" / "compose.env").read_text(encoding="utf-8")
     env, count = re.subn(r"(?m)^ALERTBOT_IMAGE=.*$", f"ALERTBOT_IMAGE={image}", env)
     assert count == 1, "docker/compose.env must have one ALERTBOT_IMAGE= line"
-    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as zf:
-        for name in FILES:
-            zf.write(ROOT / name, name)
-        zf.writestr("docker/compose.env", env.replace("\r\n", "\n"))
-        zf.writestr("README.txt", README.replace("\n", "\r\n").encode("utf-8-sig"))
-        # With a BOM, so every version of Notepad shows the Chinese text correctly.
-        zf.writestr("README.zh-TW.txt", README_ZH_TW.replace("\n", "\r\n").encode("utf-8-sig"))
+    return env.replace("\r\n", "\n").encode("utf-8")
+
+
+def write_zip(target: Path, files: dict) -> Path:
+    """A reproducible zip: sorted entries, fixed timestamps and permissions, fixed compression."""
+    with zipfile.ZipFile(target, "w") as zf:
+        for name in sorted(files):
+            entry = zipfile.ZipInfo(name, date_time=ZIP_TIME)
+            entry.compress_type = zipfile.ZIP_DEFLATED
+            entry.external_attr = 0o644 << 16
+            entry.create_system = 3  # Unix: the permissions above are read the same everywhere
+            zf.writestr(entry, files[name], compresslevel=9)
     return target
+
+
+def make(image: str, out: Path, from_bundle: Path | None = None) -> Path:
+    # [registry[:port]/]name[:tag][@sha256:digest], e.g. ghcr.io/owner/bot:1.0.0 or localhost:5000/bot:stable
+    if not IMAGE_REF.fullmatch(image):
+        raise SystemExit(f"Not a valid image name: {image}")
+    files = read_bundle(from_bundle) if from_bundle else bundle_files()
+    if COMPOSE_ENV in files:
+        raise SystemExit(f"{COMPOSE_ENV} is never a deployment file")
+    files[COMPOSE_ENV] = compose_env(image)
+    out.mkdir(parents=True, exist_ok=True)
+    return write_zip(out / f"BlueskyDiscordAlertBot-{_version_of(image)}.zip", files)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--image", required=True, help="published image, e.g. ghcr.io/owner/bot:1.0.0")
+    parser.add_argument("--image", help="published image, e.g. ghcr.io/owner/bot:1.0.0 (a release: :1.0.0@sha256:...)")
     parser.add_argument("--out", default="dist", help="output folder")
+    parser.add_argument("--from-bundle", type=Path, help="deployment files copied out of the image (with bundle.json)")
+    parser.add_argument("--export", type=Path, help="write the deployment files and bundle.json here, and stop")
     args = parser.parse_args()
-    print(make(args.image, Path(args.out)))
+    if args.export:
+        info = export(args.export)
+        print(f"{len(info['files'])} deployment files written to {args.export}")
+    elif args.image:
+        print(make(args.image, Path(args.out), from_bundle=args.from_bundle))
+    else:
+        parser.error("--image or --export is needed")

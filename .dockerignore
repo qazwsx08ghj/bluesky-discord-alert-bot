@@ -32,3 +32,13 @@ dev/
 *.bat
 docker-compose*.yml
 docker/compose.env
+
+# ...except the Windows deployment files, which the image carries in /app/bundle/windows
+# (Dockerfile; docs/RELEASES.md, "Inside the image"). docker/compose.env stays out: it is never one.
+!setup.bat
+!start.bat
+!update.bat
+!stop.bat
+!backup.bat
+!restore.bat
+!docker-compose.yml

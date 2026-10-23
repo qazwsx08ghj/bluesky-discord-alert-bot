@@ -18,6 +18,8 @@ Every version is updated with `update.bat`, which backs up your data first.
 
 - **For maintainers: release metadata** (`release_meta/`, `release/withdrawn.json`, [docs/RELEASES.md](docs/RELEASES.md)): the release manifest, its validation, how an updater chooses a version (never older; it installs nothing when the metadata is missing, invalid or inconsistent), and withdrawn releases. Not used by the publishing workflow or by any installed version yet.
 
+- **For maintainers: the image carries its own deployment files** in `/app/bundle/windows` (scripts, Compose file, READMEs, licenses, with their hashes), and describes itself (`describe`: version, migrations, platform, deployment files). The release manifest and `SHA256SUMS` are built from the real build outputs (`python -m release_meta generate`). The download is now reproducible: the same files give a byte-identical zip. The publishing workflow doesn't use this yet.
+
 ### Changed
 - **Stopping the checker is clean:** the Discord notification it is sending finishes and is saved, nothing new starts, a running Check All saves what it did, and it never waits more than 20 seconds. `update.bat` (and `start.bat` or `setup.bat` starting another version) stops the running bot this way before the new version updates the database.
 - **`restore.bat` stops the bot before its safety backup,** so that backup holds exactly the data that is replaced.

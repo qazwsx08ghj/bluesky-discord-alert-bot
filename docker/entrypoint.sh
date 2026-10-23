@@ -10,6 +10,8 @@
 #   backups     restore.bat: copy every backup in the volume to /export (existing files are kept)
 #   restore     restore.bat: put a backup back (the bot must be stopped); the file follows.
 #               "restore --report <file>" only says what that would undo (the bot may run)
+#   describe    this image's version, migrations, platform and deployment files, as JSON (read-only;
+#               the release workflow builds the release manifest from it)
 #   anything else is run as a command, e.g. "python manage.py check"
 set -eu
 cd /app
@@ -57,6 +59,9 @@ case "${1:-web}" in
   restore)
     shift
     exec python manage.py restore_db "$@"
+    ;;
+  describe)
+    exec python manage.py describe_release
     ;;
   *)
     exec "$@"
