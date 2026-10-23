@@ -8,7 +8,8 @@ import sys
 import unittest
 from pathlib import Path
 
-from release_meta import IMAGE, REPOSITORY, UPDATER_PROTOCOL, MetadataError, manifest, select, semver, withdrawn
+from release_meta import (IMAGE, REPOSITORY, UPDATER_PROTOCOL, MetadataError, NeedsNewerUpdater, manifest,
+                          select, semver, withdrawn)
 
 ROOT = Path(__file__).resolve().parent.parent
 H = "a" * 64
@@ -326,22 +327,65 @@ class DecideTests(unittest.TestCase):
         d = self.decide("1.0.0", "stable", old_bad, candidate("1.1.0"), withdrawn_bad, rc_bad, withdrawn_=w)
         self.assertEqual(str(d.target.version), "1.1.0", "withdrawing a broken release unblocks updates")
 
+    def test_a_release_in_a_newer_format_needs_a_newer_updater(self):
+        newer_format = select.Candidate(semver.parse("1.2.0"), problem="the manifest uses alertbot-release/2",
+                                        needs_newer_updater=True)
+        d = self.decide("1.0.0", "stable", candidate("1.1.0"), newer_format)
+        self.assertEqual((d.action, d.reason), ("blocked", "updater_too_old"),
+                         "it isn't read, and no older release is installed instead")
+        self.assertIn("newer format than this updater can read safely", d.message)
+        self.assertIn("Download the newest version", d.message)
+        broken = select.Candidate(semver.parse("1.1.5"), problem="the manifest names another image")
+        self.assertEqual(self.decide("1.0.0", "stable", broken, newer_format).reason, "invalid_release",
+                         "a broken release is reported first")
+        w = withdrawn_list({"version": "1.2.0", "withdrawn_at": "2026-11-02", "reason": "Bad.", "replacement": None})
+        self.assertEqual(str(self.decide("1.0.0", "stable", candidate("1.1.0"), newer_format, withdrawn_=w).target.version),
+                         "1.1.0", "once withdrawn, it no longer blocks")
+
+    def test_an_unknown_schema_version_raises_needs_newer_updater(self):
+        with self.assertRaises(NeedsNewerUpdater):
+            manifest.validate(make_manifest(schema="alertbot-release/2"))
+        with self.assertRaises(MetadataError) as ctx:
+            manifest.validate(make_manifest(schema="other/1"))
+        self.assertNotIsInstance(ctx.exception, NeedsNewerUpdater)
+
     def test_duplicate_versions_block(self):
         self.assertEqual(self.decide("1.0.0", "stable", candidate("1.1.0"), candidate("1.1.0")).reason,
                          "duplicate_release")
 
     def test_stale_withdrawal_list_blocks(self):
         w = withdrawn_list(revision=3)
-        self.assertEqual(self.decide("1.0.0", "stable", candidate("1.1.0"), withdrawn_=w, seen_revision=4).reason,
-                         "withdrawn_stale")
-        for seen in (None, 2, 3):
+        d = self.decide("1.0.0", "stable", candidate("1.1.0"), withdrawn_=w, seen=withdrawn.Seen(4, "f" * 64))
+        self.assertEqual((d.reason, d.remember), ("withdrawn_stale", None), "nothing to store after a refusal")
+        for seen in (None, withdrawn.Seen(2, "f" * 64), withdrawn.Seen(3, w.digest)):
             with self.subTest(seen=seen):
-                self.assertEqual(self.decide("1.0.0", "stable", candidate("1.1.0"), withdrawn_=w,
-                                             seen_revision=seen).action, "update")
+                d = self.decide("1.0.0", "stable", candidate("1.1.0"), withdrawn_=w, seen=seen)
+                self.assertEqual(d.action, "update")
+                self.assertEqual(d.remember, withdrawn.Seen(3, w.digest), "the accepted list is what to store")
+
+    def test_the_same_revision_with_other_contents_blocks(self):
+        w = withdrawn_list({"version": "1.0.1", "withdrawn_at": "2026-11-02", "reason": "Bad.", "replacement": None},
+                           revision=3)
+        accepted_earlier = withdrawn.Seen(3, withdrawn_list(revision=3).digest)  # revision 3, nothing withdrawn
+        d = self.decide("1.0.0", "stable", candidate("1.1.0"), withdrawn_=w, seen=accepted_earlier)
+        self.assertEqual((d.action, d.reason, d.remember), ("blocked", "withdrawn_conflict", None))
+        self.assertIn("same revision (3)", d.message)
+        self.assertIn("Nothing was changed.", d.message)
+
+    def test_up_to_date_and_blocked_checks_also_say_what_to_store(self):
+        w = withdrawn_list(revision=5)
+        self.assertEqual(self.decide("1.1.0", "stable", candidate("1.1.0"), withdrawn_=w).remember, withdrawn.Seen(5, w.digest))
+        bad = select.Candidate(semver.parse("1.2.0"), problem="x")
+        self.assertEqual(self.decide("1.0.0", "stable", bad, withdrawn_=w).remember, withdrawn.Seen(5, w.digest),
+                         "the list itself was fine: remembering it still protects against a later replay")
 
     def test_the_updater_must_be_new_enough(self):
         d = self.decide("1.0.0", "stable", candidate("1.1.0", **{"compatibility.min_updater": UPDATER_PROTOCOL + 1}))
-        self.assertEqual(d.reason, "updater_too_old")
+        self.assertEqual((d.action, d.reason), ("blocked", "updater_too_old"))
+        self.assertIn("Download the newest version from https://github.com/", d.message)
+        d = self.decide("1.0.0", "stable", candidate("1.1.0"),
+                        candidate("1.2.0", **{"compatibility.min_updater": UPDATER_PROTOCOL + 1}))
+        self.assertEqual(d.reason, "updater_too_old", "no quiet fallback to the older release this updater can read")
         d = self.decide("1.0.0", "stable", candidate("1.1.0", **{"compatibility.min_updater": 2}), updater_protocol=2)
         self.assertEqual(d.action, "update")
 
@@ -364,6 +408,29 @@ class DecideTests(unittest.TestCase):
                          "the stone is never skipped, even though 1.2.0 is newer")
         d = self.decide("1.1.0", "stable", *rels)
         self.assertEqual([str(m.version) for m in d.steps], ["1.3.0"], "a stone already passed isn't repeated")
+
+    def test_a_withdrawn_stepping_stone_blocks_instead_of_being_skipped(self):
+        rels = (candidate("1.1.0", **{"compatibility.min_from_version": "1.0.0"}),
+                candidate("1.2.0", **{"compatibility.min_from_version": "1.0.0"}),
+                candidate("1.3.0", **{"compatibility.min_from_version": "1.0.0",
+                                      "compatibility.stepping_stones": ["1.1.0"]}))
+        for replacement in (None, "1.2.0"):
+            with self.subTest(replacement=replacement):
+                w = withdrawn_list({"version": "1.1.0", "withdrawn_at": "2026-11-02", "reason": "Bad.",
+                                    "replacement": replacement})
+                d = self.decide("1.0.0", "stable", *rels, withdrawn_=w)
+                self.assertEqual((d.action, d.reason, d.steps), ("blocked", "no_path", []),
+                                 "1.2.0 is newer, but it isn't the stone; neither is a replacement")
+                self.assertIn("must be reached through 1.1.0, which was withdrawn", d.message)
+        w = withdrawn_list({"version": "1.1.0", "withdrawn_at": "2026-11-02", "reason": "Bad.", "replacement": None})
+        d = self.decide("1.1.0", "stable", *rels, withdrawn_=w)
+        self.assertEqual([str(m.version) for m in d.steps], ["1.3.0"], "an install past the stone isn't affected")
+
+    def test_normal_releases_update_directly(self):
+        # The default for a release: updates from the oldest supported version, no stepping stones.
+        rels = [candidate(v) for v in ("1.0.0-rc.3", "1.0.0", "1.0.1", "1.1.0", "1.2.0")]
+        d = self.decide("1.0.0-rc.1", "prerelease", *rels)
+        self.assertEqual([str(m.version) for m in d.steps], ["1.2.0"], "one step, straight to the newest")
 
     def test_a_stone_reached_through_its_own_path(self):
         rels = (candidate("1.1.0", **{"compatibility.min_from_version": "1.0.0"}),
@@ -401,7 +468,7 @@ class CommandLineTests(unittest.TestCase):
     def test_validate_the_withdrawn_file(self):
         res = self.run_cli("validate-withdrawn", "release/withdrawn.json")
         self.assertEqual(res.returncode, 0, res.stderr)
-        self.assertIn("valid: revision", res.stdout)
+        self.assertIn("valid format: revision", res.stdout)
 
     def test_validate_a_manifest(self):
         import tempfile
@@ -415,6 +482,7 @@ class CommandLineTests(unittest.TestCase):
             res = self.run_cli("validate-manifest", str(good))
             self.assertEqual(res.returncode, 0, res.stderr)
             self.assertIn("@sha256:", res.stdout)
+            self.assertIn("not who published it", res.stdout, "valid format is not authenticity")
             res = self.run_cli("validate-manifest", str(bad))
             self.assertEqual(res.returncode, 1)
             self.assertIn("image.digest is malformed", res.stderr)

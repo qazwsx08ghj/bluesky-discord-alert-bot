@@ -17,6 +17,11 @@ IMAGE = f"ghcr.io/{REPOSITORY}"
 MANIFEST_ASSET = "alertbot-release.json"
 WITHDRAWN_PATH = "release/withdrawn.json"
 
+# Published before release metadata existed: mutable releases with no manifest. They can never be
+# installed by an updater, and are passed over (not treated as broken releases) so that installs of
+# them can still move to newer versions. Fixed here on purpose: nothing downloaded can add to it.
+LEGACY_VERSIONS = frozenset({"1.0.0-rc.1", "1.0.0-rc.2"})
+
 # The updater protocol this code understands. A release whose manifest asks for a higher
 # compatibility.min_updater can't be installed by it (the updater must be updated first).
 UPDATER_PROTOCOL = 1
@@ -24,3 +29,11 @@ UPDATER_PROTOCOL = 1
 
 class MetadataError(Exception):
     """Release metadata is missing, unreadable, invalid or inconsistent. Nothing may be installed."""
+
+
+class NeedsNewerUpdater(MetadataError):
+    """The metadata uses a format this updater doesn't know (a newer schema). It can't be read
+    safely, so nothing may be installed from it; a newer updater has to be installed by hand."""
+
+
+RELEASES_PAGE = f"https://github.com/{REPOSITORY}/releases"

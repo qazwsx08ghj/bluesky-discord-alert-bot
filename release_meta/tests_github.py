@@ -7,7 +7,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from release_meta import MANIFEST_ASSET, REPOSITORY, github, manifest
+from release_meta import MANIFEST_ASSET, REPOSITORY, github, manifest, withdrawn as withdrawn_rules
 from release_meta.tests import H, make_manifest
 
 ZIP = "BlueskyDiscordAlertBot-{v}.zip"
@@ -134,7 +134,29 @@ class CheckTests(unittest.TestCase):
 
     def test_withdrawn_list_older_than_one_seen(self):
         self.publish("1.0.0")
-        self.assertBlocked(self.check(seen_revision=5), "withdrawn_stale", "revision 2")
+        self.assertBlocked(self.check(seen=withdrawn_rules.Seen(5, "f" * 64)), "withdrawn_stale", "revision 2")
+
+    def test_withdrawn_list_changed_without_a_new_revision(self):
+        self.publish("1.0.0")
+        first = self.check()
+        self.assertEqual(first.action, "update")
+        stored = withdrawn_rules.Seen.from_json(first.remember.to_json())  # as the updater would store it
+        self.assertEqual(self.check(seen=stored).action, "update", "the same list again is fine")
+        self.withdrawn({"schema": "alertbot-withdrawn/1", "revision": 2, "updated_at": "2026-12-01", "withdrawn": [
+            {"version": "1.0.0", "withdrawn_at": "2026-12-01", "reason": "Quietly added.", "replacement": None}]})
+        self.assertBlocked(self.check(seen=stored), "withdrawn_conflict", "same revision (2)")
+
+    def test_the_same_list_formatted_differently_is_the_same_list(self):
+        self.publish("1.0.0")
+        stored = self.check().remember
+        body = b'{\n  "withdrawn": [],\n  "updated_at": "2026-12-01",\n  "revision": 2,\n  "schema": "alertbot-withdrawn/1"\n}\n'
+        self.gh.raw(f"/repos/{REPOSITORY}/contents/release/withdrawn.json?ref=main", body)
+        self.assertEqual(self.check(seen=stored).action, "update")
+
+    def test_a_damaged_stored_record_is_refused(self):
+        for bad in ({"revision": 2}, {"revision": 0, "digest": "f" * 64}, {"revision": 2, "digest": "xyz"}, None, []):
+            with self.subTest(bad=bad), self.assertRaises(withdrawn_rules.MetadataError):
+                withdrawn_rules.Seen.from_json(bad)
 
     def test_rate_limited(self):
         self.gh.json(f"/repos/{REPOSITORY}/releases?per_page=100", {"message": "API rate limit exceeded"}, 403)
@@ -183,7 +205,38 @@ class CheckTests(unittest.TestCase):
         self.publish("1.1.0", immutable=False)
         self.withdrawn({"schema": "alertbot-withdrawn/1", "revision": 3, "updated_at": "2026-12-02", "withdrawn": [
             {"version": "1.1.0", "withdrawn_at": "2026-12-02", "reason": "Published by mistake.", "replacement": None}]})
-        self.assertEqual(str(self.check("1.0.0-rc.2", seen_revision=2).target.version), "1.0.0")
+        self.assertEqual(str(self.check("1.0.0-rc.2", seen=withdrawn_rules.Seen(2, "f" * 64)).target.version), "1.0.0")
+
+    def test_a_release_in_a_newer_format_asks_for_a_newer_updater(self):
+        self.publish("1.0.0")
+        self.publish("1.1.0", data=dict(make_manifest("1.1.0"), schema="alertbot-release/2"))
+        self.assertBlocked(self.check(), "updater_too_old", "Download the newest version")
+
+    # -- the move from the legacy test versions -------------------------------------------------------
+    def legacy(self, version):
+        """1.0.0-rc.1 and rc.2 as they really are: mutable releases, a download, no manifest."""
+        self.releases.append({"tag_name": f"v{version}", "draft": False, "immutable": False, "prerelease": True,
+                              "assets": [{"name": ZIP.format(v=version), "size": 30000, "digest": None,
+                                          "browser_download_url": f"{self.gh.base}/legacy/{version}.zip"}]})
+        self.gh.json(f"/repos/{REPOSITORY}/releases?per_page=100", self.releases)
+
+    def test_rc1_and_rc2_installs_can_move_to_the_first_updater_release(self):
+        self.legacy("1.0.0-rc.1")
+        self.legacy("1.0.0-rc.2")
+        self.publish("1.0.0-rc.3", data=make_manifest("1.0.0-rc.3"))  # min_from_version 1.0.0-rc.1
+        for installed in ("1.0.0-rc.1", "1.0.0-rc.2"):
+            with self.subTest(installed=installed):
+                d = self.check(installed, "prerelease")
+                self.assertEqual((d.action, str(d.target.version)), ("update", "1.0.0-rc.3"), d.message)
+        self.assertFalse(any(r.startswith("/legacy/") for r in self.gh.requests), "legacy downloads aren't read")
+
+    def test_only_the_two_known_legacy_versions_are_passed_over(self):
+        # Any other release without a manifest (here an imaginary rc.3 published the old way)
+        # still blocks: the exception is a fixed list in the code, not something downloaded.
+        self.legacy("1.0.0-rc.2")
+        self.legacy("1.0.0-rc.3")
+        self.publish("1.0.0-rc.4")
+        self.assertBlocked(self.check("1.0.0-rc.1", "prerelease"), "invalid_release", "1.0.0-rc.3")
 
     def test_a_redirect_to_another_site_is_refused(self):
         self.publish("1.0.0", manifest_path="http://evil.example/manifest.json")

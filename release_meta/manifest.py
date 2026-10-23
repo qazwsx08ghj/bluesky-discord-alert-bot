@@ -16,7 +16,7 @@ new major id (alertbot-release/2), which this code refuses.
 import re
 from dataclasses import dataclass
 
-from . import IMAGE, MANIFEST_ASSET, REPOSITORY, MetadataError, semver
+from . import IMAGE, MANIFEST_ASSET, REPOSITORY, MetadataError, NeedsNewerUpdater, semver
 
 SCHEMA = "alertbot-release/1"
 SCHEMA_FAMILY = "alertbot-release/"
@@ -74,8 +74,8 @@ def validate(data) -> Manifest:
     schema = _need(data, "schema", str, "manifest")
     if schema != SCHEMA:
         if schema.startswith(SCHEMA_FAMILY):
-            raise MetadataError(f"the manifest uses {schema}, which this version of the updater doesn't know; "
-                                "a newer updater is needed")
+            raise NeedsNewerUpdater(f"the manifest uses {schema}"[:120] + ", which this version of the updater "
+                                    "doesn't know; a newer updater is needed")
         raise MetadataError(f"this isn't a release manifest (schema {schema!r})"[:200])
 
     version = semver.parse(_need(data, "version", str, "manifest"))

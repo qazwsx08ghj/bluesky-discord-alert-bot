@@ -6,6 +6,10 @@
 
 Exit code 0: valid (or, for check, an update is available or it is up to date); 1: invalid or
 blocked, with the reason on stderr.
+
+"valid" means the file's format and internal consistency only (integrity). It says nothing about
+who published it (authenticity): that comes from reading it from an immutable GitHub release of
+this repository, which the check command does. See docs/RELEASES.md, section 1.
 """
 import argparse
 import json
@@ -35,10 +39,11 @@ def main(argv=None) -> int:
     try:
         if args.command == "validate-manifest":
             m = manifest.validate(_load(args.file))
-            print(f"valid: {m.version} ({m.channel}), image {m.image_reference}")
+            print(f"valid format: {m.version} ({m.channel}), image {m.image_reference}")
+            print("(This checks the file only, not who published it: see docs/RELEASES.md, section 1.)")
         elif args.command == "validate-withdrawn":
             w = withdrawn.validate(_load(args.file))
-            print(f"valid: revision {w.revision}, {len(w.entries)} withdrawn version(s)")
+            print(f"valid format: revision {w.revision}, {len(w.entries)} withdrawn version(s), content {w.digest[:16]}")
         else:
             decision = github.check(args.installed, args.channel)
             print(decision.message)

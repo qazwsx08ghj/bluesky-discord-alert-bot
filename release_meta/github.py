@@ -18,7 +18,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import MANIFEST_ASSET, REPOSITORY, WITHDRAWN_PATH, MetadataError, manifest, select, semver, withdrawn
+from . import (LEGACY_VERSIONS, MANIFEST_ASSET, REPOSITORY, WITHDRAWN_PATH, MetadataError, NeedsNewerUpdater,
+               manifest, select, semver, withdrawn)
 
 API = "https://api.github.com"
 # Where a release download may be served from after GitHub's redirect.
@@ -122,7 +123,7 @@ def _record(raw) -> manifest.ReleaseRecord:
 
 def load_candidates(client: Client, newer_than: semver.Version | None = None,
                     require_immutable: bool = True) -> list:
-    """Every published (non-draft) release as a select.Candidate.
+    """Every published (non-draft) release as a select.Candidate, except the LEGACY_VERSIONS.
 
     Manifests are only downloaded for releases newer than newer_than (the others can't be
     chosen anyway). A release whose tag isn't a version tag is ignored; one whose manifest can't
@@ -134,6 +135,8 @@ def load_candidates(client: Client, newer_than: semver.Version | None = None,
         if record.draft or not record.tag.startswith("v") or not semver.is_valid(record.tag[1:]):
             continue
         version = semver.parse(record.tag[1:])
+        if str(version) in LEGACY_VERSIONS:
+            continue  # published before release metadata; never installable, never blocking
         if newer_than is not None and version <= newer_than:
             candidates.append(select.Candidate(version, problem="older than the installed version (not read)"))
             continue
@@ -144,6 +147,8 @@ def load_candidates(client: Client, newer_than: semver.Version | None = None,
             parsed = manifest.validate(client.asset_json(asset["url"], manifest.MAX_BYTES))
             manifest.check_against_release(parsed, record, require_immutable=require_immutable)
             candidates.append(select.Candidate(version, manifest=parsed))
+        except NeedsNewerUpdater as exc:
+            candidates.append(select.Candidate(version, problem=str(exc), needs_newer_updater=True))
         except MetadataError as exc:
             candidates.append(select.Candidate(version, problem=str(exc)))
     return candidates
@@ -153,7 +158,7 @@ def load_withdrawn(client: Client) -> withdrawn.Withdrawn:
     return withdrawn.validate(client.withdrawn_file())
 
 
-def check(installed: str, channel: str, client: Client | None = None, seen_revision: int | None = None,
+def check(installed: str, channel: str, client: Client | None = None, seen: withdrawn.Seen | None = None,
           updater_protocol: int | None = None) -> select.Decision:
     """The whole check: read everything, then decide. Any failure to read is a blocked decision."""
     client = client or Client()
@@ -168,4 +173,4 @@ def check(installed: str, channel: str, client: Client | None = None, seen_revis
         return select.Decision(select.BLOCKED, "metadata_unavailable",
                                f"Couldn't check for updates: {exc}. Nothing was changed.")
     kwargs = {} if updater_protocol is None else {"updater_protocol": updater_protocol}
-    return select.decide(installed, channel, candidates, withdrawn_list, seen_revision=seen_revision, **kwargs)
+    return select.decide(installed, channel, candidates, withdrawn_list, seen=seen, **kwargs)

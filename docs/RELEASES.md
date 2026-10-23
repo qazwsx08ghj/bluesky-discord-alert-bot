@@ -20,7 +20,9 @@ Two different questions, answered by different things:
 
 **What the updater relies on, in order:**
 1. **The address:** the repository and image names are in the code (`release_meta/__init__.py`), never in a downloaded file. Only HTTPS to `api.github.com`, `github.com` and GitHub's download hosts is allowed, redirects included (`release_meta/github.py`).
-2. **The release is immutable:** a release that isn't immutable is refused, so its files can't have been changed after publishing. Releases published before immutable releases were switched on (1.0.0-rc.1 and rc.2) are never chosen; they are older than any version an updater will run anyway.
+2. **The release is immutable:** a release that isn't immutable is refused, so its files can't have been changed after publishing.
+   - **Legacy releases:** 1.0.0-rc.1 and rc.2 were published before release metadata existed. They are mutable and have no manifest, so they are never installed by an updater. They are also **passed over**, not treated as broken: otherwise an rc.1 install would be blocked by rc.2 on its way to the first updater release. This exception is a fixed list in the code (`LEGACY_VERSIONS` in `release_meta/__init__.py`); nothing downloaded can add to it. Any other release without a valid manifest blocks updates (section 3).
+   - **How rc.1 and rc.2 installs move on:** they have no updater, so the first move is by hand (download the new version, run its `update.bat`; the M3 move-over). If that updater runs a check for an rc.1 or rc.2 install, the first updater release is offered, as long as its `min_from_version` is 1.0.0-rc.1 or older.
 3. **Consistency:**
    - the manifest must validate (`release_meta/manifest.py`);
    - it must describe the release it is attached to: tag, pre-release flag, assets, and the sizes and hashes GitHub reports;
@@ -67,6 +69,8 @@ One per release, attached to it. Schema id `alertbot-release/1`. Example (values
 
 **Changes over time:** new fields may be added under the same schema id, and older updaters ignore them. An incompatible change gets `alertbot-release/2` and a higher `min_updater`. An updater that sees a schema it doesn't know refuses it and says a newer updater is needed.
 
+**Direct upgrades are the normal case.** A release sets `min_from_version` to the oldest version it still supports, and leaves `stepping_stones` empty. Then every supported install updates in one step. Use a stepping stone, or a higher `min_from_version`, only when a direct upgrade would be unsafe or incompatible: for example, a data change that only an intermediate version can carry out.
+
 **Against its GitHub release** (`check_against_release`):
 - the tag is `v<version>`;
 - GitHub's pre-release flag matches the channel;
@@ -84,12 +88,14 @@ One per release, attached to it. Schema id `alertbot-release/1`. Example (values
    - Stable channel: final versions only.
    - Pre-release channel: everything, so an RC install moves on to the final release.
    - Order: SemVer 2.0, so `1.0.0-rc.9 < 1.0.0-rc.10 < 1.0.0`.
-4. **Any invalid or inconsistent candidate blocks everything.** There is no fallback to an older release, because one bad release must not be able to steer installs backwards. The fix is to repair the release or withdraw it.
+4. **Any invalid or inconsistent candidate blocks everything.** There is no fallback to an older release, because one bad release must not be able to steer installs backwards. The fix is to repair the release or withdraw it. (The two legacy versions are passed over; see section 1.)
+   - **A release this updater can't read safely** (its manifest uses a newer schema, such as `alertbot-release/2`) also blocks, with its own reason (`updater_too_old`). It isn't read, and no older release is installed instead. The message says to download the newest version by hand from the releases page and run its `update.bat`. That is the safe way to get an updater that understands it.
 5. **No candidates:** up to date. If the installed version is withdrawn, the message says so and why. It is never moved to an older version.
-6. **The target** is the newest candidate. Its `min_updater` must be met.
+6. **The target** is the newest candidate. Its `min_updater` must be met, and so must every step's. Otherwise the result is the same "newer updater needed" block, never a quiet fallback to an older release.
 7. **The path:**
    - If the installed version is older than the target's `min_from_version`, the update goes through intermediate releases.
    - Stepping stones newer than the installed version are always installed on the way, even when a newer intermediate release exists.
+   - **A stepping stone that is withdrawn (or missing) blocks the update.** It is never skipped, and neither a newer release nor the withdrawn entry's `replacement` stands in for it: the target named that exact version. The message names the stone. The fix is a new release whose own `stepping_stones` name a version that is available.
    - Every step is valid, not withdrawn and on the channel.
    - With no path, nothing is installed and the message says a manual update is needed.
 
@@ -113,9 +119,13 @@ One per release, attached to it. Schema id `alertbot-release/1`. Example (values
 |---|---|
 | The file can't be read (network, 404, rate limit) | Installs nothing ("Couldn't check for updates") |
 | The file is malformed or inconsistent | Installs nothing |
-| `revision` is lower than the highest this install has seen | Installs nothing: the list may be stale or replayed (`withdrawn_stale`). The updater (M3) stores the highest revision it has seen. |
+| `revision` is lower than the one this install accepted | Installs nothing: the list may be stale or replayed (`withdrawn_stale`) |
+| The same `revision` as the one this install accepted, but different contents | Installs nothing: it was changed without a new revision, or altered (`withdrawn_conflict`) |
+| The stored record of the accepted list is damaged | Installs nothing (`Seen.from_json` refuses it) |
 | A version is withdrawn after the check but before installing | The updater (M3) reads the list again right before installing, and stops if the target was withdrawn |
 | An install that has never seen the list (first check) | Accepts any valid revision. A replayed old list can't be detected the first time; it can only hide withdrawals, never cause a downgrade, and every release it could offer is still immutable and checked. |
+
+**What an install remembers:** the accepted list's `revision` and its **content identity**: the SHA-256 of its content in a fixed form (sorted keys, no spaces), so reformatting the file doesn't change it (`withdrawn.Seen`). Every decision says what to store (`Decision.remember`): the list it just accepted, which is never older than the stored one. A check refused because of the list itself (`withdrawn_stale`, `withdrawn_conflict`) stores nothing. The updater (M3) keeps this record with the install.
 
 **`revision`:** goes up by 1 on every change and never down. The release workflow step (section 5) will also check this against the previous version of the file. For now it is checked only by the updater and by review.
 
