@@ -12,12 +12,13 @@ Every version is updated with `update.bat`, which backs up your data first.
 ## [Unreleased]
 
 ### Added
-- **`restore.bat` says what a restore would undo before it changes anything:** accounts, channels and settings changed since the backup (by name; never links or passwords), posts noticed since then, and notifications that may then be sent again. If anything would be lost, `RESTORE` must be typed to go ahead. A backup made by a newer version is refused before anything changes.
-- **The database is changed as a whole only when nothing else uses it:** the running bot holds a data lock that a migration or restore needs for itself. Before a restore, the scripts also check that no container (from any folder) still uses the data.
-- **Docker Compose 2.23.0 (Docker Desktop 4.25) or later is required;** the scripts explain an older one instead of failing part-way.
+- **`restore.bat` says what a restore would undo before it changes anything:** accounts, channels and settings changed since the backup (by name; never links or passwords), posts noticed since then, and notifications that may then be sent again. If anything would be lost, `RESTORE` must be typed to go ahead. With the bot stopped, the restore checks again: if anything that counts changed after you confirmed, nothing is put back and you are asked again. A backup made by a newer version is refused before anything changes.
+- **The database is changed as a whole only when nothing else uses it:** the running bot holds a data lock that a migration or restore needs for itself. Before a restore, and before starting a version that may update the database, the scripts also check that no container (from any folder, including 1.0.0-rc.1 and rc.2, which don't take the lock) still uses the data. If Docker can't answer, nothing is changed.
+- **Docker Compose 2.23.0 (Docker Desktop 4.25) or later is required;** the scripts explain an older one, or one whose version can't be read, instead of going ahead.
 
 ### Changed
-- **Stopping the checker is clean:** the Discord notification it is sending finishes and is saved, nothing new starts, a running Check All saves what it did, and it never waits more than 20 seconds. `update.bat` stops the old checker this way before the new version updates the database.
+- **Stopping the checker is clean:** the Discord notification it is sending finishes and is saved, nothing new starts, a running Check All saves what it did, and it never waits more than 20 seconds. `update.bat` (and `start.bat` or `setup.bat` starting another version) stops the running bot this way before the new version updates the database.
+- **`restore.bat` stops the bot before its safety backup,** so that backup holds exactly the data that is replaced.
 - **Backups are checked before they count:** one self-contained file, integrity-checked, and the copy in the `backups` folder compared with it. The backup taken before an update that changed the database is kept, however often `update.bat` or `backup.bat` runs afterwards.
 
 ### Fixed

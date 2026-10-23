@@ -8,6 +8,13 @@ would undo, compared with the data now (botconfig/datastate.py). Exit code 0: no
 set up and no history would be lost; 10: something would be (restore.bat then asks for
 RESTORE to be typed). To compare like with like, a checked copy of the backup is first
 brought up to this version's database layout (the migrations a start would apply anyway).
+Its last line is IMPACT=<code>, a code for that impact on the data as it was then.
+
+--expect <code> (restore.bat passes the code of the report you confirmed): once the bot is
+stopped and the exclusive data lock is held, the comparison is made again. If the code is
+different (the data changed after the report in a way that matters, such as a new post or a
+sent notification), nothing is put back: it shows what the restore would undo now and exits
+with code 11, so the restore is confirmed again on what is true now.
 
 Putting the backup back needs the bot stopped (restore.bat stops it, and has already made a
 backup of the current data). In order, stopping at the first problem so the database is
@@ -23,6 +30,7 @@ No file other than the database is left behind. Migrations are applied by the no
 afterwards (with a backup first, if needed).
 """
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -36,6 +44,7 @@ from botconfig.sqlite_files import applied_migrations, make_standalone, remove_j
 from .prepare_data import copy_database
 
 LOSES_DATA_EXIT = 10
+CHANGED_SINCE_REPORT_EXIT = 11
 RESTORE_LOCK_WAIT_SECONDS = 15
 
 
@@ -55,20 +64,30 @@ class Command(BaseCommand):
         parser.add_argument("backup", help="The backup file (.sqlite3) to put back.")
         parser.add_argument("--report", action="store_true",
                             help="Change nothing; say what restoring this backup would undo.")
+        parser.add_argument("--expect", default="",
+                            help="The IMPACT code of the report that was confirmed; refuse if it changed.")
 
-    def handle(self, *args, backup, report=False, **options):
+    def handle(self, *args, backup, report=False, expect="", **options):
         source = Path(backup)
         if not source.is_file() or source.suffix != ".sqlite3":
             raise CommandError(f"There is no backup called {source.name}.")
         db = Path(settings.DATABASES["default"]["NAME"])
-        staged = db.with_name(db.name + (".restore-report" if report else ".restore-check"))
+        staged = db.with_name(db.name + ".restore-check")
+        compared = db.with_name(db.name + ".restore-report")
         try:
-            self._check(source, staged)
             if report:
-                return self._report(source, staged, db)
-            self._put_back(source, staged, db)
+                self._check(source, compared)
+                impact, code = self._impact(source, compared, db)
+                self._describe(impact)
+                self.stdout.write(f"IMPACT={code}")
+                if impact.loses_data:
+                    raise SystemExit(LOSES_DATA_EXIT)
+                return
+            self._check(source, staged)
+            self._put_back(source, staged, compared, db, expect)
         finally:
             _discard(staged)
+            _discard(compared)
 
     def _check(self, source: Path, staged: Path):
         try:
@@ -85,19 +104,31 @@ class Command(BaseCommand):
                                f"use, so it wasn't restored. Your data is unchanged. (Not known to this version: "
                                f"{', '.join(newer)})", returncode=compat.NEWER_DATA_EXIT)
 
-    def _put_back(self, source: Path, staged: Path, db: Path):
+    def _put_back(self, source: Path, staged: Path, compared: Path, db: Path, expect: str):
         lock = datalock.DataLock(exclusive=True, db_path=db)
         if not lock.acquire(timeout=RESTORE_LOCK_WAIT_SECONDS):
             raise CommandError("The bot is still running (or another restore or update is), so the backup wasn't "
                                "put back. Your data is unchanged. Stop the bot, then try again.")
         try:
+            if expect:
+                # The same comparison again, now that nothing can change the data any more.
+                shutil.copyfile(staged, compared)
+                impact, code = self._impact(source, compared, db)
+                if code != expect:
+                    self.stdout.write("The bot's data changed after the check you confirmed. "
+                                      "What the restore would undo now:")
+                    self._describe(impact)
+                    raise CommandError("So the backup wasn't put back, and your data is unchanged. Run restore.bat "
+                                       "again to confirm what the restore would undo now.",
+                                       returncode=CHANGED_SINCE_REPORT_EXIT)
             remove_journal_files(db)
             os.replace(staged, db)
         finally:
             lock.release()
         self.stdout.write(f"Restored {source.name}.")
 
-    def _report(self, source: Path, staged: Path, db: Path):
+    def _impact(self, source: Path, staged: Path, db: Path):
+        """(Impact, confirmation code) of putting back source; staged is a checked copy of it."""
         # The backup, brought up to this version's layout in a separate process (the same
         # migrations a start applies), so it is compared like with like.
         env = {**os.environ, "DATABASE_PATH": str(staged), "SCHEDULER_IN_WEB": "0"}
@@ -129,7 +160,9 @@ class Command(BaseCommand):
             impact = datastate.compare(now, datastate.snapshot(staged))
         finally:
             _discard(current)
+        return impact, datastate.confirmation_code(now, impact)
 
+    def _describe(self, impact):
         lines = datastate.describe(impact)
         if lines:
             self.stdout.write("Putting this backup back would undo what changed since it was made:")
@@ -143,5 +176,3 @@ class Command(BaseCommand):
                               "list since the backup would be removed.)")
         if impact.sending_now:
             self.stdout.write(f"  ({impact.sending_now} notification(s) are being sent right now.)")
-        if impact.loses_data:
-            raise SystemExit(LOSES_DATA_EXIT)

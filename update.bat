@@ -27,7 +27,7 @@ call "%COMMON%" :previous_folder
 
 echo.
 echo [3/4] Restarting the bot with the new version...
-call "%COMMON%" :stop_checker_if_replacing || goto :failed
+call "%COMMON%" :prepare_start || goto :failed
 call "%COMMON%" :up || goto :failed_after_backup
 
 echo.

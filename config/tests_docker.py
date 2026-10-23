@@ -272,7 +272,7 @@ class DockerDeploymentTests(SimpleTestCase):
             f.write("# new version" + chr(10))
         out = self.script("update.bat")
         self.assertIn("The update is complete", out)
-        self.assertIn("Stopping the checker first", out, "the old checker stops before the new version starts")
+        self.assertIn("Stopping the running bot first", out, "the old version stops before the new one starts")
         exported = list((self.dir / "backups").glob("db-before-update-*.sqlite3"))
         self.assertEqual(len(exported), 1, "a copy of the pre-update backup is in the Windows folder")
         self.assertTrue(any(b.startswith("db-before-update-") for b in self.backups()))
@@ -359,3 +359,35 @@ class DockerDeploymentTests(SimpleTestCase):
             self.assertEqual(self.handles(), before, "nothing was put back")
         finally:
             subprocess.run(["docker", "rm", "-f", other], capture_output=True, timeout=120)
+
+    LEGACY_IMAGE = "ghcr.io/qazwsx08ghj/bluesky-discord-alert-bot:1.0.0-rc.2"
+
+    def test_9d_an_older_bot_still_using_the_data_stops_an_update(self):
+        # A real 1.0.0-rc.2 checker (it doesn't take the data lock), started from "another folder"
+        # under another project name. No network, and every test account is paused.
+        if subprocess.run(["docker", "image", "inspect", self.LEGACY_IMAGE], capture_output=True).returncode != 0:
+            self.skipTest("the 1.0.0-rc.2 image isn't on this computer")
+        self.script("start.bat")
+        handles = self.handles()
+        legacy = f"{self.project}-legacy-rc2"
+        env = ["-e", "DATABASE_PATH=/data/db.sqlite3", "-e", "BACKUP_DIR=/data/backups", "-e", "SCHEDULER_IN_WEB=0",
+               "-e", "SECRET_KEY_FILE=/data/secret_key", "-e", "CACHE_DIR=/data/cache", "-e", "DEBUG=False"]
+        subprocess.run(["docker", "run", "-d", "--name", legacy, "--network", "none", "-v",
+                        f"{self.project}_bot-data:/data", *env, self.LEGACY_IMAGE, "checker"],
+                       check=True, capture_output=True, timeout=120)
+        try:
+            web_before = self.container("web")
+            with open(self.dir / "config" / "__init__.py", "a", encoding="utf-8") as f:
+                f.write("# another new version" + chr(10))
+            out = self.script("update.bat", ok=False)
+            self.assertIn("Something else is still using the bot's data", out)
+            self.assertIn(legacy, out)
+            self.assertNotIn("The update is complete", out)
+            self.assertEqual(self.container("web"), web_before, "the running version wasn't replaced")
+            self.wait_until(self.healthy, what="the bot started again as it was")
+            self.assertEqual(self.request("GET", "/api/health/")[1]["migrations_pending"], 0)
+        finally:
+            subprocess.run(["docker", "rm", "-f", legacy], capture_output=True, timeout=120)
+        out = self.script("update.bat")
+        self.assertIn("The update is complete", out, "once the older bot is gone, the update goes ahead")
+        self.assertEqual(self.handles(), handles)

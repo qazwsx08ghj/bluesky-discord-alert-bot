@@ -125,6 +125,22 @@ def compare(now: dict, backup: dict) -> Impact:
     return impact
 
 
+def confirmation_code(now: dict, impact: Impact) -> str:
+    """A short code for "this impact, on the data as it is now".
+
+    It changes when anything a restore would lose changes: what you set up, the posts noticed,
+    or a notification that was sent, failed or was cancelled. Bookkeeping, retries in progress
+    and the activity log don't change it. restore.bat passes the code of the report you
+    confirmed to the restore, which recomputes it with the bot stopped (restore_db --expect).
+    """
+    gated = {kind: now.get(kind, {}) for kind in SETUP_TABLES}
+    gated["posts"] = sorted(now.get("posts", {}))
+    gated["finished"] = sorted(f"{k}={s}" for k, s in now.get("deliveries", {}).items() if s in FINISHED)
+    gated["impact"] = describe(impact)
+    gated["loses"] = impact.loses_data
+    return hashlib.sha256(json.dumps(gated, sort_keys=True).encode()).hexdigest()[:20]
+
+
 def _plural(n, word, plural=None):
     return f"{n} {word}" if n == 1 else f"{n} {plural or word + 's'}"
 

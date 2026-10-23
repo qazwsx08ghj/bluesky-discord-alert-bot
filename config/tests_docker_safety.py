@@ -152,6 +152,25 @@ class CrossContainerSafetyTests(SimpleTestCase):
         res = self.run_in("checker", ok=False, env={"DATA_LOCK_WAIT_SECONDS": "3"}, timeout=120)
         self.assertEqual(res.returncode, 75, res.stdout + res.stderr)
 
+    def test_a_restore_confirmed_on_a_report_that_is_no_longer_true_is_refused(self):
+        self.run_in("backup", "--label", "manual")
+        backup = self.run_in("sh", "-c", "ls /data/backups/db-manual-*").stdout.strip()
+        add = ("from bluesky_monitor.models import MonitoredAccount; "
+               "MonitoredAccount.objects.create(handle='{}', is_active=False)")
+        self.run_in("python", "manage.py", "shell", "-c", add.format("first.bsky.social"))
+        report = self.run_in("restore", "--report", backup, ok=False)
+        self.assertEqual(report.returncode, 10, report.stdout + report.stderr)
+        code = report.stdout.strip().splitlines()[-1].split("=", 1)[1]
+        self.run_in("python", "manage.py", "shell", "-c", add.format("second.bsky.social"))  # after the report
+        res = self.run_in("restore", "--expect", code, backup, ok=False)
+        self.assertEqual(res.returncode, 11, res.stdout + res.stderr)
+        self.assertIn("2 accounts added since the backup would be removed", res.stdout)
+        handles = self.sql("SELECT handle FROM bluesky_monitor_monitoredaccount")
+        self.assertEqual(sorted(handles), ["first.bsky.social", "second.bsky.social"], "nothing was put back")
+        fresh = self.run_in("restore", "--report", backup, ok=False).stdout.strip().splitlines()[-1].split("=", 1)[1]
+        self.assertIn("Restored", self.run_in("restore", "--expect", fresh, backup).stdout,
+                      "confirmed again on what is true now, it goes ahead")
+
     # -- stopping the checker during a send --------------------------------------------------------
     def checker_with_slow_sends(self, seconds, **env):
         self.run_in("sh", "-c", "rm -f /data/db.sqlite3* && python /app/bluesky_monitor/testing/checker_proc.py "

@@ -60,14 +60,14 @@ if not "%TYPED%"=="RESTORE" goto :cancelled
 :go
 
 echo.
-echo [2/4] Backing up the current data first...
-call "%COMMON%" :backup before-restore || goto :failed
-
-echo.
-echo [3/4] Stopping the bot and putting back %FILE%...
+echo [2/4] Stopping the bot...
 call "%COMMON%" :stop || goto :failed
 call "%COMMON%" :ensure_data_free || goto :failed_stopped
-call "%COMMON%" :restore_file "%FILE%" || goto :failed_stopped
+
+echo.
+echo [3/4] Backing up the current data, then putting back %FILE%...
+call "%COMMON%" :backup before-restore || goto :failed_stopped
+call "%COMMON%" :restore_file "%FILE%" "%IMPACT%" || goto :failed_stopped
 
 echo.
 echo [4/4] Starting the bot again...

@@ -16,7 +16,7 @@ The only thing a Windows user installs is **Docker Desktop**. Everything else is
 - **Problems:**
   - every script explains them in plain words and never deletes anything;
   - if the panel doesn't answer in time, a report goes to `logs\problem-report.txt`, with passwords and webhook links hidden.
-- **Docker Desktop checks:** installed, running (started and waited for up to 3 minutes), recent enough (Docker Compose 2.23.0 or later, which comes with Docker Desktop 4.25; an older one is explained and nothing is run), and set to Linux containers.
+- **Docker Desktop checks:** installed, running (started and waited for up to 3 minutes), recent enough (Docker Compose 2.23.0 or later, which comes with Docker Desktop 4.25; an older one, or a version that can't be read, is explained and nothing is run), and set to Linux containers.
 - **When Docker Desktop's engine stops answering** (for example after sleep or an update), the script offers to restart it: Y, or automatically after 60 seconds. It uses `docker desktop restart` where available; on older versions it ends Docker Desktop and all its helper processes and starts it again. It restarts once at most.
 
 ## 2. What runs, and where the data is
@@ -56,7 +56,7 @@ The only thing a Windows user installs is **Docker Desktop**. Everything else is
 1. **Backup:** `backup_db --label before-update`, inside the volume plus a copy in `backups\`. If this fails, nothing else happens.
 2. **New version:** a release download pulls the published image (`docker compose pull`); a source folder rebuilds (`docker compose build --pull`). If this fails, the current version keeps running.
 3. **Restart:**
-   - if the new version differs from the running one, the checker is stopped first (`docker compose stop checker`). It finishes the notification it is sending, so the old version writes nothing while the new one updates the database. If it can't be stopped, the update stops there;
+   - if the running bot isn't exactly this version (or Docker can't tell), it is stopped first (`docker compose stop`; the checker finishes the notification it is sending). Then no container may still use the data volume (see "Data safety"). If one does, or Docker can't say, the stopped containers are started again as they were and the update stops there. `start.bat` and `setup.bat` do the same before they start a version that isn't running;
    - `docker compose up -d` recreates the containers with the new image, keeping the same volume. On start, `web` takes the data lock (see "Data safety"), backs up again if the update brings database changes, then migrates.
 4. **Check:** waits for `/api/health/`, then opens the panel.
 5. **Tidy up:** only after a successful update, removes this bot's old images that nothing uses any more (`docker image prune` limited to images labelled "Bluesky Discord Alert Bot"; never volumes). Without this, every update would leave about 260 MB behind.
@@ -113,9 +113,9 @@ The bot stops working until the newer folder's `start.bat` is used again. The us
    - history: posts noticed since the backup (forgotten by a restore, so the next check finds them again and sends them: notifications already sent can appear twice in Discord), and notifications sent, failed or cancelled since;
    - not counted as a loss: bookkeeping the bot redoes by itself (last check times, retries in progress). Activity entries since the backup are mentioned, but don't count on their own.
 4. **Confirm:** if nothing would be lost, Y/N as before. If anything would be lost, `RESTORE` must be typed in capital letters; anything else cancels with nothing changed (`ALERTBOT_ASSUME_YES` doesn't count). A backup made by a newer version is refused (this version can't use it), and so is a damaged one.
-5. Backs up the current data first (`db-before-restore-*`), so a restore can itself be undone with `restore.bat`.
-6. Stops the bot, then checks that **no container uses the data volume any more** (`docker ps --filter volume=...`). One started from another folder, for example, would still write to the database. If one does, nothing is put back, the bot is started again, and the message names that container.
-7. Puts the backup back (`manage.py restore_db`): the backup is checked again, then the exclusive data lock must be free (no part of the bot running; see "Data safety"), then the old database's journal files are removed (so they can't be applied to the restored file) and the checked copy replaces the database in one step. No other file is left behind.
+5. Stops the bot, then checks that **no container uses the data volume any more** (`docker ps --filter volume=...`). One started from another folder, for example, would still write to the database. If one does, or if Docker can't answer, nothing is put back, the bot is started again, and the message says why.
+6. Backs up the current data (`db-before-restore-*`), now that it can't change any more, so a restore can itself be undone with `restore.bat`.
+7. Puts the backup back (`manage.py restore_db --expect <code>`): the backup is checked again, then the exclusive data lock must be free (no part of the bot running; see "Data safety"). **With the lock held, the comparison of step 3 is made again.** If it differs from the report you confirmed (the report's code doesn't match), because something that counts changed in between (a post noticed, a notification sent, an account changed), nothing is put back: it shows what the restore would undo now, starts the bot again, and asks you to run `restore.bat` again. Otherwise the old database's journal files are removed (so they can't be applied to the restored file) and the checked copy replaces the database in one step. No other file is left behind.
 8. Starts the bot. If the backup comes from an older version, it is migrated on start (with a backup first, as always).
 
 ### Data safety
@@ -124,7 +124,7 @@ The bot stops working until the newer folder's `start.bat` is used again. The us
   - a restore refuses at once (after 15 seconds) while any part of the bot runs;
   - a starting checker or web service waits while a migration or restore holds it.
 
-  It is a kernel lock (flock): it ends with its process however that ends (stopped, killed, crashed), so there are no stale locks. Every container on the volume shares Docker's Linux kernel, so the containers see each other's locks. It is one of two safeguards: the scripts also check that no container uses the volume before a restore. That check also covers 1.0.0-rc.2 and older, which don't take the lock.
+  It is a kernel lock (flock): it ends with its process however that ends (stopped, killed, crashed), so there are no stale locks. Every container on the volume shares Docker's Linux kernel, so the containers see each other's locks. It is one of two safeguards: the scripts also check that no container uses the volume before a restore, and before starting a version that may update the database. That check also covers 1.0.0-rc.2 and older, which don't take the lock. It fails closed: if Docker can't say which containers use the volume, nothing is changed.
 - **Stopping the checker** (`docker compose stop`, `stop.bat`, updates and restores; `bluesky_monitor/shutdown.py`):
   1. no new check, Discord send or Check All job starts;
   2. the send in progress finishes and its result is saved, so nothing is left in "sending". A running check or Check All stops at the next account and saves what it did (the rest are "not reached", checked next time);

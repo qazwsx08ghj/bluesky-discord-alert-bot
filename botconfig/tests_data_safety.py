@@ -462,6 +462,68 @@ PostDelivery.objects.filter(pk__in=list(PostDelivery.objects.values_list('pk', f
         res = self.manage("restore_db", str(newer), ok=False)
         self.assertEqual(res.returncode, 3, "putting it back is refused too")
 
+    # -- the report you confirmed must still be true when the backup is put back -----------------
+    def code(self, out):
+        [line] = [l for l in out.splitlines() if l.startswith("IMPACT=")]
+        return line.split("=", 1)[1]
+
+    def add_post(self, n):
+        self.shell(f"""
+from types import SimpleNamespace
+from bluesky_monitor import poller
+from bluesky_monitor.models import MonitoredAccount, SeenPost
+item = SimpleNamespace(post=SimpleNamespace(uri='at://did:plc:k/app.bsky.feed.post/{n}', cid='c',
+    record=SimpleNamespace(text='t'), author=SimpleNamespace(handle='kept.bsky.social')))
+poller.claim_post(MonitoredAccount.objects.get(handle='kept.bsky.social'), item, SeenPost.PENDING)
+""")
+
+    def handles(self):
+        return self.shell("from bluesky_monitor.models import MonitoredAccount; "
+                          "print(sorted(MonitoredAccount.objects.values_list('handle', flat=True)))")
+
+    def test_the_code_stays_the_same_while_nothing_that_counts_changes(self):
+        self.add_post(1)
+        _, first = self.report()
+        self.shell("""
+from django.utils import timezone
+from activity.models import ActivityEvent
+from bluesky_monitor.models import MonitoredAccount
+MonitoredAccount.objects.update(last_checked_at=timezone.now())
+ActivityEvent.objects.create(type='check_ok', level='info', message='Checked.')
+""")
+        _, second = self.report()
+        self.assertEqual(self.code(first), self.code(second), "bookkeeping and the activity log don't count")
+
+    def test_the_code_changes_when_a_post_is_noticed_after_the_report(self):
+        _, first = self.report()
+        self.add_post(2)
+        _, second = self.report()
+        self.assertNotEqual(self.code(first), self.code(second))
+
+    def test_a_restore_with_the_confirmed_code_puts_the_backup_back(self):
+        self.shell("from bluesky_monitor.models import MonitoredAccount; "
+                   "MonitoredAccount.objects.create(handle='after.bsky.social')")
+        _, out = self.report()
+        self.manage("restore_db", "--expect", self.code(out), str(self.backup))
+        self.assertNotIn("after.bsky.social", self.handles())
+
+    def test_a_change_after_the_confirmed_report_puts_nothing_back(self):
+        self.shell("from bluesky_monitor.models import MonitoredAccount; "
+                   "MonitoredAccount.objects.create(handle='after.bsky.social')")
+        _, out = self.report()
+        confirmed = self.code(out)
+        self.add_post(3)  # a post noticed after the user read the report
+        before = sha(self.db)
+        res = self.manage("restore_db", "--expect", confirmed, str(self.backup), ok=False)
+        self.assertEqual(res.returncode, 11, res.stdout + res.stderr)
+        self.assertIn("The bot's data changed after the check you confirmed", res.stdout)
+        self.assertIn("1 post the bot noticed since the backup would be forgotten", res.stdout,
+                      "it shows what the restore would undo now")
+        self.assertIn("Run restore.bat again", res.stderr)
+        self.assertEqual(sha(self.db), before, "nothing was put back")
+        self.assertIn("after.bsky.social", self.handles())
+        self.assertEqual(sorted(p.name for p in self.data.iterdir() if "restore" in p.name), [], "nothing left")
+
     def test_a_damaged_backup_is_refused(self):
         bad = self.tmp / "db-manual-bad.sqlite3"
         bad.write_bytes(b"not a database" * 200)

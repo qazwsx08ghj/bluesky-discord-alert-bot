@@ -27,6 +27,7 @@ rem An existing install: is its data from a newer version than this folder's?
 call "%COMMON%" :is_set_up
 if not errorlevel 1 call "%COMMON%" :check_compat || goto :failed
 call "%COMMON%" :previous_folder
+call "%COMMON%" :prepare_start || goto :failed
 call "%COMMON%" :up || goto :failed
 
 echo.

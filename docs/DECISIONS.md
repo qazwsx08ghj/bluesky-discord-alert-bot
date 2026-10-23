@@ -105,7 +105,7 @@ A quick reference to the main product and architecture decisions: what was decid
 - *Details:* [DOCKER.md](DOCKER.md), "Older versions and newer data".
 
 **19. The database is changed as a whole only when nothing else uses it: a kernel lock plus a check by the scripts.**
-- *How:* the running web service and checker hold a shared flock on a file in the data volume; a migration or restore needs it exclusive. Before a restore, the scripts also check that no container uses the volume. The checker stops cleanly: the send in progress finishes, and the wait is limited.
+- *How:* the running web service and checker hold a shared flock on a file in the data volume; a migration or restore needs it exclusive. Before a restore, and before starting a version that may update the database, the scripts also check that no container uses the volume; if Docker can't answer, they stop. The checker stops cleanly: the send in progress finishes, and the wait is limited. A restore compares again under the lock, and goes ahead only if that matches the report that was confirmed.
 - *Why:* SQLite can't stop another process from writing during a migration, and a restore replaces the file under any process that still has it open. A lock file alone could go stale; a kernel lock ends with its process. The Docker check also covers versions without the lock (1.0.0-rc.2 and older).
 - *Tradeoff:* on Windows without Docker (the development setup), there is no flock and the lock does nothing.
 - *Details:* [DOCKER.md](DOCKER.md), "Data safety".
