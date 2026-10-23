@@ -55,6 +55,12 @@ The main architectural decisions and their tradeoffs: [DECISIONS.md](DECISIONS.m
 - objects are closed: an undocumented field fails;
 - a coverage test fails if any operation has no successful answer checked.
 
+**Known compatibility concern: list-field error shape (DRF 3.20).**
+- **Now:** errors for a list field have one entry per item, empty where the item is fine: `{"destinations": [{}, {"role_id": ["…"]}]}`. This is the documented shape (docs/API.md, `docs/openapi.yaml`), and the panel reads it.
+- **Why it needs a setting:** djangorestframework 3.18 changed its default to only the failing items, keyed by position: `{"destinations": {"1": {...}}}`. `REST_FRAMEWORK["LIST_SERIALIZER_ERRORS_AS_DICT"] = False` in `config/settings.py` keeps the documented shape. With it, DRF raises a `RemovedInDRF320Warning`; that's a pending deprecation, hidden by default.
+- **DRF 3.20 removes the setting.** Before upgrading to 3.20, either adopt the new shape or rebuild the list shape in our own code. Adopting it changes the API contract, the error-shape tests and the panel's error handling (`frontend/src/api/client.ts` already accepts both shapes). Decide that as an API change of its own.
+- The API contract tests and `bluesky_monitor/tests_destinations.py` fail if the shape changes without that decision.
+
 ## 4. Settings and secrets
 
 - **Settings** (Bluesky login, check frequency) live in the database (`botconfig/store.py`) and apply at once.
