@@ -34,14 +34,19 @@ def compose_text():
 class DockerFilesTests(SimpleTestCase):
     def test_panel_is_published_on_this_computer_only(self):
         ports = re.findall(r'^\s*-\s*"([^"]+):8000"\s*$', compose_text(), flags=re.M)
-        self.assertEqual(ports, ["127.0.0.1:${ALERTBOT_PORT:-8000}"])
+        # Another address only when docker/compose.env sets ALERTBOT_BIND (./alertbot config, after a warning).
+        self.assertEqual(ports, ["${ALERTBOT_BIND:-127.0.0.1}:${ALERTBOT_PORT:-8000}"])
         self.assertNotIn("0.0.0.0:", compose_text())
+        env = (ROOT / "docker" / "compose.env").read_text(encoding="utf-8")
+        for key in ("ALERTBOT_BIND", "ALERTBOT_ALLOWED_HOSTS", "ALERTBOT_CSRF_TRUSTED_ORIGINS"):
+            self.assertNotIn(f"{key}=", env, "the shipped settings keep the defaults")
 
     def test_services_restart_on_their_own_and_debug_is_off(self):
         text = compose_text()
         self.assertIn("restart: unless-stopped", text)
         self.assertIn('DEBUG: "False"', text)
-        self.assertIn('ALLOWED_HOSTS: "localhost,127.0.0.1,[::1]"', text)
+        self.assertIn('ALLOWED_HOSTS: "${ALERTBOT_ALLOWED_HOSTS:-localhost,127.0.0.1,[::1]}"', text)
+        self.assertIn('CSRF_TRUSTED_ORIGINS: "${ALERTBOT_CSRF_TRUSTED_ORIGINS:-}"', text)
         self.assertNotIn("SETTINGS_ENV_MIRROR_PATH", text, "removed: nothing writes .env")
         for service in ("web:", "checker:"):
             self.assertIn(f"  {service}\n    <<: *bot", text)

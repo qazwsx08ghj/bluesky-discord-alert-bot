@@ -247,7 +247,7 @@ class LocalOnlyTests(TestCase):
     def test_start_scripts_listen_on_this_computer_only(self):
         # Docker: published on 127.0.0.1 only; without Docker: runserver on 127.0.0.1.
         compose = (settings.BASE_DIR / "docker-compose.yml").read_text(encoding="utf-8")
-        self.assertIn('"127.0.0.1:${ALERTBOT_PORT:-8000}:8000"', compose)
+        self.assertIn('"${ALERTBOT_BIND:-127.0.0.1}:${ALERTBOT_PORT:-8000}:8000"', compose)
         script = (settings.BASE_DIR / "dev" / "start-without-docker.bat").read_text(encoding="utf-8")
         self.assertIn("runserver 127.0.0.1:8000", script)
         self.assertNotIn("0.0.0.0", script)

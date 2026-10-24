@@ -30,6 +30,14 @@ BUNDLE_NAME = "BlueskyDiscordAlertBot-{version}.zip"
 # Files every Windows download must contain: the updater (M3) installs exactly these.
 WINDOWS_FILES = ("setup.bat", "start.bat", "update.bat", "stop.bat", "backup.bat", "restore.bat",
                  "docker-compose.yml", "docker/scripts/common.bat")
+LINUX_BUNDLE_NAME = "BlueskyDiscordAlertBot-{version}-linux.tar.gz"
+# Files every Linux deployment-file set must contain (./alertbot update installs these), and the
+# download besides (it adds docker/release.env, the image pinned by digest).
+LINUX_FILES = ("alertbot", "docker-compose.yml")
+# The downloads this version checks completely: kind -> (name, required files). Any other kind
+# is accepted with only its shape checked, so later versions can add downloads.
+BUNDLES = {"windows-bundle": (BUNDLE_NAME, WINDOWS_FILES),
+           "linux-bundle": (LINUX_BUNDLE_NAME, LINUX_FILES + ("docker/release.env",))}
 MAX_BYTES = 256 * 1024
 
 
@@ -129,10 +137,10 @@ def validate(data) -> Manifest:
     artifacts = _need(data, "artifacts", dict, "manifest")
     if not artifacts:
         raise MetadataError("the manifest lists no downloads")
-    if "windows-bundle" in artifacts:
-        _check_bundle(artifacts["windows-bundle"], version)
     for kind, artifact in artifacts.items():
-        if kind != "windows-bundle":  # kinds this version doesn't use: only their shape is checked
+        if kind in BUNDLES:
+            _check_bundle(kind, artifact, version)
+        else:  # kinds this version doesn't use: only their shape is checked
             _need(artifact, "name", str, f"artifacts[{kind}]")
             _match(SHA256, _need(artifact, "sha256", str, f"artifacts[{kind}]"), f"artifacts[{kind}].sha256")
 
@@ -144,15 +152,16 @@ def validate(data) -> Manifest:
                     min_from_version=min_from, stepping_stones=tuple(stones), data=data)
 
 
-def _check_bundle(bundle, version):
-    where = "artifacts[windows-bundle]"
-    if _need(bundle, "name", str, where) != BUNDLE_NAME.format(version=version):
+def _check_bundle(kind, bundle, version):
+    where = f"artifacts[{kind}]"
+    name_format, required = BUNDLES[kind]
+    if _need(bundle, "name", str, where) != name_format.format(version=version):
         raise MetadataError(f"{where}.name doesn't match the version")
     _match(SHA256, _need(bundle, "sha256", str, where), f"{where}.sha256")
     if _need(bundle, "size", int, where) <= 0:
         raise MetadataError(f"{where}.size must be positive")
     files = _need(bundle, "files", dict, where)
-    for name in WINDOWS_FILES:
+    for name in required:
         if name not in files:
             raise MetadataError(f"{where}.files is missing {name}")
     for name, digest in files.items():

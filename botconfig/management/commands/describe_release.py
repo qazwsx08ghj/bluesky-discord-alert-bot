@@ -13,7 +13,8 @@ connection (the migrations are read from the code), no network, nothing written.
      "version_is_release": true,           # a SemVer version (not "dev" or "ci")
      "platform": "linux/amd64",            # the platform of the image this runs in
      "data_schema": {"activity": "0004_...", "bluesky_monitor": "0009_...", ...},
-     "bundles": {"windows": {"files": {"update.bat": "<sha256>", ...}}},
+     "bundles": {"windows": {"files": {"update.bat": "<sha256>", ...}},
+                 "linux": {"files": {"alertbot": "<sha256>", ...}}},
      "problems": []}
 
 Exit code 0, or 1 when there is a problem (listed under "problems"): the deployment files are
@@ -66,10 +67,11 @@ def describe(bundle_dir: Path) -> dict:
         "bundles": {},
         "problems": problems,
     }
-    try:
-        result["bundles"]["windows"] = {"files": bundle.verify(bundle_dir / "windows")}
-    except MetadataError as exc:
-        problems.append(f"windows deployment files: {exc}")
+    for name in ("windows", "linux"):
+        try:
+            result["bundles"][name] = {"files": bundle.verify(bundle_dir / name, name)}
+        except MetadataError as exc:
+            problems.append(f"{name} deployment files: {exc}")
     return result
 
 
