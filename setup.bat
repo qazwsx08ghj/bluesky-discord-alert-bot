@@ -11,6 +11,7 @@ call "%COMMON%" :init
 
 echo [1/5] Checking Docker Desktop...
 call "%COMMON%" :check_docker || goto :failed
+call "%COMMON%" :check_unfinished_update || goto :failed
 call "%COMMON%" :check_port || goto :failed
 
 echo.

@@ -27,9 +27,11 @@ if not defined ALERTBOT_DOCKER set "ALERTBOT_DOCKER=docker"
 if not defined ALERTBOT_CURL set "ALERTBOT_CURL=curl.exe"
 set "CFG_IMAGE="
 set "CFG_PORT=8000"
+set "CFG_CHANNEL="
 if exist "docker\compose.env" for /f "usebackq eol=# tokens=1,* delims==" %%A in ("docker\compose.env") do (
   if /i "%%A"=="ALERTBOT_IMAGE" set "CFG_IMAGE=%%B"
   if /i "%%A"=="ALERTBOT_PORT" set "CFG_PORT=%%B"
+  if /i "%%A"=="ALERTBOT_CHANNEL" set "CFG_CHANNEL=%%B"
 )
 if defined ALERTBOT_IMAGE set "CFG_IMAGE=%ALERTBOT_IMAGE%"
 if defined ALERTBOT_PORT set "CFG_PORT=%ALERTBOT_PORT%"
@@ -566,3 +568,505 @@ exit /b 1
 echo.
 echo  That backup couldn't be put back (the reason is above). The bot's data is unchanged.
 exit /b 1
+
+rem == update.bat: the one-click update (docs/DOCKER.md, section 3) ================================
+rem update.bat runs this from a copy in %TEMP% (:copy_for_update): an update replaces this folder's
+rem scripts, update.bat and this file included, while they run.
+rem   1. Finish or undo an update that stopped part-way (docker\update\state.txt).
+rem   2. Ask the installed version whether a newer one exists (update-plan: GitHub's releases,
+rem      never older, withdrawn versions skipped, fails closed). Up to date: nothing else happens.
+rem   3. Pull the new version by digest; check its version and its files (hashes); check it can
+rem      update the data (update-preflight, on a copy). Nothing has changed yet.
+rem   4. Stop the bot; nothing else may use the data; back it up.
+rem   5. Keep the current files (docker\update\previous), put the new ones in place, pin the new image
+rem      in docker\compose.env (every other setting there is kept); update the data in a trial run
+rem      (no network, no port); note a fingerprint of the data.
+rem   6. Start the new version and check it answers as that version. Done.
+rem If something fails before step 4, nothing has changed. From step 5 on, it goes back by itself:
+rem the previous files, the backup, the previous version. If the new version started but failed,
+rem it goes back only if the data's fingerprint shows nothing was written since the trial run;
+rem otherwise it stops and says what to do.
+
+:copy_for_update
+set "UPDATE_COMMON=%TEMP%\alertbot-update-%RANDOM%%RANDOM%.bat"
+copy /y "%ALERTBOT_SCRIPTS%common.bat" "%UPDATE_COMMON%" >nul
+exit /b %errorlevel%
+
+:update_main
+set "UPD=docker\update"
+if not exist "%UPD%" mkdir "%UPD%"
+call :runner_vars
+call :update_recover || exit /b 1
+if not defined CFG_IMAGE goto :update_source
+call :update_channel
+echo.
+echo [1/6] Checking for a newer version (%CHANNEL% channel)...
+call :update_plan || goto :update_failed
+call :running_version || goto :update_unknown_running
+if "%PLAN_RESULT%"=="update" if not defined OWN_RUNNING goto :update_offer
+if "%PLAN_RESULT%"=="update" if defined SAME_VERSION goto :update_offer
+if defined OWN_RUNNING if not defined SAME_VERSION goto :update_switch
+if "%PLAN_RESULT%"=="up_to_date" goto :update_current
+echo  %PLAN_MESSAGE%
+goto :update_failed
+
+:update_unknown_running
+call :msg_data_use_unknown_running
+goto :update_failed
+
+:update_current
+call :remember_seen
+echo  %PLAN_MESSAGE%
+if not defined OWN_RUNNING echo  The bot isn't running right now: start.bat starts it.
+echo  Nothing was changed.
+call :pause_end
+exit /b 0
+
+rem The bot runs another version than this folder's (for example the folder of a newer download):
+rem move it to this folder's version, as update.bat always did.
+:update_switch
+echo  The bot is running a different version than this folder's %PLAN_CURRENT_VERSION%. Moving it to this folder's version...
+echo.
+echo [2/6] Backing up your data...
+call :backup before-update || goto :update_failed
+call :get_image || goto :update_keep_running
+call :check_compat || goto :update_failed
+call :previous_folder
+echo [3/6] Restarting the bot with this folder's version...
+call :prepare_start || goto :update_failed
+call :up || goto :update_failed_after_backup
+call :wait_ready || goto :update_failed_after_backup
+call :tidy_images
+call :remember_seen
+call :open_browser
+echo.
+echo  The update is complete. Your accounts, settings and history were kept.
+call :old_folder_note
+if "%PLAN_RESULT%"=="update" echo  A newer version, %PLAN_FINAL_VERSION%, is available too: run update.bat again to install it.
+call :pause_end
+exit /b 0
+
+rem A folder with the source code (no published image): rebuild it, as update.bat always did.
+:update_source
+echo.
+echo [1/4] Backing up your data...
+call :backup before-update || goto :update_failed
+echo.
+echo [2/4] Getting the new version...
+set "BUILD_ARGS=--pull"
+call :get_image || goto :update_keep_running
+call :check_compat || goto :update_failed
+call :previous_folder
+echo.
+echo [3/4] Restarting the bot with the new version...
+call :prepare_start || goto :update_failed
+call :up || goto :update_failed_after_backup
+echo.
+echo [4/4] Checking that everything works...
+call :wait_ready || goto :update_failed_after_backup
+call :tidy_images
+call :open_browser
+echo.
+echo  The update is complete. Your accounts, settings and history were kept.
+call :old_folder_note
+call :pause_end
+exit /b 0
+
+:update_keep_running
+echo  The current version keeps running.
+call :up
+goto :update_failed
+
+:update_failed_after_backup
+echo.
+echo  A backup from just before the update is in the backups folder next to this file.
+echo  See "If an update goes wrong" in docs\DOCKER.md, or ask for help with logs\problem-report.txt.
+:update_failed
+echo.
+echo  The update didn't finish. Nothing was deleted.
+call :pause_end
+exit /b 1
+
+:update_offer
+echo.
+echo  %PLAN_MESSAGE%
+if defined ALERTBOT_ASSUME_YES goto :update_go
+choice /c YN /m " Update to %PLAN_TARGET_VERSION% now"
+if errorlevel 2 goto :update_cancelled
+goto :update_go
+
+:update_cancelled
+echo  Cancelled. Nothing was changed.
+call :pause_end
+exit /b 0
+
+:update_go
+set "OLD_IMAGE=%CFG_IMAGE%"
+set "NEW_IMAGE=%PLAN_TARGET_IMAGE%"
+rem Tests only: their images aren't on ghcr.io.
+if defined ALERTBOT_UPDATE_TEST_IMAGE set "NEW_IMAGE=%ALERTBOT_UPDATE_TEST_IMAGE%"
+set "TARGET_VERSION=%PLAN_TARGET_VERSION%"
+set "WAS_RUNNING="
+if defined OWN_RUNNING set "WAS_RUNNING=1"
+set "BACKUP_FILE="
+set "FP_TRIAL="
+call :update_lock || goto :update_failed
+call :state BEGIN
+echo.
+echo [2/6] Downloading %TARGET_VERSION%...
+call :pull_ref "%NEW_IMAGE%" || goto :update_abort
+call :check_version "%NEW_IMAGE%" || goto :update_abort
+echo [3/6] Checking its files, and that it can update your data...
+call :stage_bundle || goto :update_abort
+call :preflight || goto :update_abort
+echo [4/6] Stopping the bot and backing up your data...
+call :state STOPPING
+%COMPOSE% stop || goto :update_abort_restart
+call :ensure_data_free || goto :update_abort_restart
+call :backup_named before-update || goto :update_abort_restart
+call :state BACKED_UP
+echo [5/6] Installing the new version's files, then updating your data in a trial run...
+call :save_previous || goto :update_abort_restart
+call :state SWAPPING
+call :swap_files || goto :update_rollback
+call :state SWAPPED
+call :trial || goto :update_rollback
+call :fingerprint FP_TRIAL || goto :update_rollback
+call :state TRIAL_OK
+echo [6/6] Starting %TARGET_VERSION%...
+call :state STARTING
+call :up || goto :update_start_failed
+call :wait_ready || goto :update_start_failed
+call :running_is "%TARGET_VERSION%" || goto :update_start_failed
+call :state DONE
+call :remember_seen
+call :update_unlock
+call :open_browser
+echo.
+echo  The update is complete: %TARGET_VERSION% is running. Your accounts, settings and history were kept.
+echo  A backup from just before the update is in the backups folder (%BACKUP_FILE%).
+if not "%PLAN_STEPS%"=="1" echo  The next step towards %PLAN_FINAL_VERSION% is ready: run update.bat again to install it.
+call :pause_end
+exit /b 0
+
+rem -- When a step fails ---------------------------------------------------------------------------
+:update_abort
+call :state ABORTED
+call :update_unlock
+echo.
+echo  The update was stopped before anything changed. The current version keeps running as before.
+goto :update_failed
+
+:update_abort_restart
+call :state ABORTED
+if defined WAS_RUNNING call :up
+call :update_unlock
+echo.
+echo  The update was stopped before anything changed. The bot was started again as it was.
+goto :update_failed
+
+:update_start_failed
+echo.
+echo  %TARGET_VERSION% didn't start properly.
+call :save_logs
+%COMPOSE% stop >nul 2>&1
+set "FP_NOW="
+call :fingerprint FP_NOW || goto :update_needs_user
+if not "%FP_NOW%"=="%FP_TRIAL%" goto :update_needs_user
+goto :update_rollback
+
+:update_rollback
+echo.
+echo  Going back to the previous version, with your data as it was before the update...
+call :state ROLLING_BACK
+%COMPOSE% stop >nul 2>&1
+call :ensure_data_free || goto :update_needs_user
+call :restore_previous || goto :update_needs_user
+if defined BACKUP_FILE call :restore_backup || goto :update_needs_user
+if not defined WAS_RUNNING goto :update_rolled_back
+call :up || goto :update_needs_user
+call :wait_ready || goto :update_needs_user
+:update_rolled_back
+call :state ROLLED_BACK
+call :update_unlock
+echo  Done: the previous version is back, with your data as it was before the update. Nothing was lost.
+goto :update_failed
+
+:update_needs_user
+call :state NEEDS_USER
+call :update_unlock
+echo.
+echo  STOP: the update couldn't be finished or undone by itself, so it is left as it is for you to decide.
+echo  Kept for you: the backup from just before the update (backups\%BACKUP_FILE%) and the previous
+echo  version's files (docker\update\previous).
+echo   - To keep the new version: run start.bat. If it works, run update.bat and type KEEP.
+echo   - To go back: copy everything in docker\update\previous into this folder (replacing the files),
+echo     then run restore.bat and choose %BACKUP_FILE%.
+echo  If you ask for help, share logs\problem-report.txt.
+call :pause_end
+exit /b 1
+
+rem -- An update that stopped part-way (the window was closed, the computer turned off, ...) -------
+:update_recover
+if not exist "%UPD%\state.txt" exit /b 0
+call :state_read
+if "%ST_STATE%"=="DONE" exit /b 0
+if "%ST_STATE%"=="ABORTED" exit /b 0
+if "%ST_STATE%"=="ROLLED_BACK" exit /b 0
+set "OLD_IMAGE=%ST_OLD_IMAGE%"
+set "NEW_IMAGE=%ST_NEW_IMAGE%"
+set "TARGET_VERSION=%ST_TARGET_VERSION%"
+set "BACKUP_FILE=%ST_BACKUP_FILE%"
+set "FP_TRIAL=%ST_FP_TRIAL%"
+set "WAS_RUNNING=%ST_WAS_RUNNING%"
+if "%ST_STATE%"=="NEEDS_USER" goto :recover_needs_user
+echo.
+echo  An earlier update stopped part-way (at %ST_STATE%). It is finished or undone first.
+call :update_lock || goto :update_failed
+if "%ST_STATE%"=="BEGIN" goto :recover_nothing_changed
+if "%ST_STATE%"=="STOPPING" goto :recover_restart
+if "%ST_STATE%"=="BACKED_UP" goto :recover_restart
+if "%ST_STATE%"=="STARTING" goto :recover_starting
+goto :update_rollback
+
+:recover_nothing_changed
+call :state ABORTED
+call :update_unlock
+echo  Nothing had changed yet.
+exit /b 0
+
+:recover_restart
+if defined WAS_RUNNING call :up
+call :state ABORTED
+call :update_unlock
+echo  Nothing had changed yet; the bot was started again as it was.
+exit /b 0
+
+:recover_starting
+call :wait_ready || goto :update_start_failed
+call :running_is "%TARGET_VERSION%" || goto :update_start_failed
+call :state DONE
+call :update_unlock
+echo  It had finished: %TARGET_VERSION% is running.
+exit /b 0
+
+:recover_needs_user
+echo.
+echo  An earlier update to %TARGET_VERSION% needs your decision (see the earlier message).
+echo   - If the bot works with the new version, type KEEP to keep it.
+echo   - To go back instead, close this window and follow the steps it gave (docker\update\previous,
+echo     then restore.bat with %BACKUP_FILE%).
+set "TYPED="
+if defined ALERTBOT_UPDATE_RESOLVE set "TYPED=%ALERTBOT_UPDATE_RESOLVE%"
+if not defined ALERTBOT_UPDATE_RESOLVE set /p "TYPED= Type KEEP to keep the new version: "
+if not "%TYPED%"=="KEEP" goto :update_failed
+call :state DONE
+echo  Kept. Checking for updates now...
+exit /b 0
+
+rem -- The steps -----------------------------------------------------------------------------------
+:runner_vars
+rem A one-off container on the bot's data: no network, no port, no extra rights, nothing written
+rem outside /data and /tmp. Used for the trial run, the fingerprint and putting a backup back.
+rem Each -e is quoted: inside for /f a bare "=" would be read as a space.
+set "RUNNER=%ALERTBOT_DOCKER% run --rm --network none --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges -v %VOLUME%:/data -e "DATABASE_PATH=/data/db.sqlite3" -e "BACKUP_DIR=/data/backups" -e "SECRET_KEY_FILE=/data/secret_key" -e "CACHE_DIR=/data/cache" -e "SCHEDULER_IN_WEB=0" -e "DEBUG=False" -e "ALLOWED_HOSTS=localhost" -e "TZ=UTC""
+exit /b 0
+
+:update_channel
+set "CHANNEL=%ALERTBOT_CHANNEL%"
+if not defined CHANNEL set "CHANNEL=%CFG_CHANNEL%"
+if defined CHANNEL exit /b 0
+set "CHANNEL=stable"
+echo %CFG_IMAGE%| findstr /r /c:":[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*-" >nul && set "CHANNEL=prerelease"
+exit /b 0
+
+:update_plan
+for %%V in (RESULT REASON CURRENT_VERSION MESSAGE TARGET_VERSION TARGET_IMAGE FINAL_VERSION STEPS SEEN_REVISION SEEN_DIGEST) do set "PLAN_%%V="
+call :pull_ref "%CFG_IMAGE%" || exit /b 1
+set "SEEN_R="
+set "SEEN_D="
+if exist "%UPD%\seen.txt" for /f "usebackq tokens=1,* delims==" %%A in ("%UPD%\seen.txt") do (
+  if "%%A"=="REVISION" set "SEEN_R=%%B"
+  if "%%A"=="DIGEST" set "SEEN_D=%%B"
+)
+set "SEEN_ARGS="
+if defined SEEN_R set "SEEN_ARGS=--seen-revision %SEEN_R% --seen-digest %SEEN_D%"
+set "TEST_OPTS="
+rem Tests only (honoured only by images built for the tests): a fake GitHub on a test network.
+if defined ALERTBOT_UPDATE_TEST_NETWORK set "TEST_OPTS=--network %ALERTBOT_UPDATE_TEST_NETWORK%"
+if defined ALERTBOT_UPDATE_TEST_API set "TEST_OPTS=%TEST_OPTS% -e "ALERTBOT_UPDATE_TEST_API=%ALERTBOT_UPDATE_TEST_API%""
+for /f "usebackq tokens=1,* delims==" %%A in (`%ALERTBOT_DOCKER% run --rm --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges %TEST_OPTS% "%CFG_IMAGE%" update-plan --channel %CHANNEL% %SEEN_ARGS% 2^>nul`) do set "PLAN_%%A=%%B"
+if defined PLAN_RESULT exit /b 0
+echo.
+echo  Couldn't check for updates: this folder's version didn't answer. Nothing was changed.
+echo  Check the internet connection and try again. If it keeps happening, download the newest
+echo  version from the releases page and run update.bat in its folder.
+exit /b 1
+
+:remember_seen
+if not defined PLAN_SEEN_REVISION exit /b 0
+> "%UPD%\seen.txt" echo REVISION=%PLAN_SEEN_REVISION%
+>> "%UPD%\seen.txt" echo DIGEST=%PLAN_SEEN_DIGEST%
+exit /b 0
+
+:update_lock
+%ALERTBOT_DOCKER% create --name %PROJECT%-update-lock --label alertbot.update=1 "%CFG_IMAGE%" true >nul 2>&1
+if not errorlevel 1 exit /b 0
+echo.
+echo  Another update is running, or one was interrupted.
+echo  If no other update window is open, type YES to go on.
+set "TYPED="
+if defined ALERTBOT_UPDATE_TAKE_LOCK set "TYPED=%ALERTBOT_UPDATE_TAKE_LOCK%"
+if not defined ALERTBOT_UPDATE_TAKE_LOCK set /p "TYPED= Type YES to go on: "
+if not "%TYPED%"=="YES" exit /b 1
+%ALERTBOT_DOCKER% rm -f %PROJECT%-update-lock >nul 2>&1
+%ALERTBOT_DOCKER% create --name %PROJECT%-update-lock --label alertbot.update=1 "%CFG_IMAGE%" true >nul 2>&1
+exit /b %errorlevel%
+
+:update_unlock
+%ALERTBOT_DOCKER% rm -f %PROJECT%-update-lock >nul 2>&1
+exit /b 0
+
+:state
+set "STATE=%~1"
+> "%UPD%\state.txt" echo STATE=%STATE%
+>> "%UPD%\state.txt" echo OLD_IMAGE=%OLD_IMAGE%
+>> "%UPD%\state.txt" echo NEW_IMAGE=%NEW_IMAGE%
+>> "%UPD%\state.txt" echo TARGET_VERSION=%TARGET_VERSION%
+>> "%UPD%\state.txt" echo BACKUP_FILE=%BACKUP_FILE%
+>> "%UPD%\state.txt" echo FP_TRIAL=%FP_TRIAL%
+>> "%UPD%\state.txt" echo WAS_RUNNING=%WAS_RUNNING%
+exit /b 0
+
+:state_read
+for %%V in (STATE OLD_IMAGE NEW_IMAGE TARGET_VERSION BACKUP_FILE FP_TRIAL WAS_RUNNING) do set "ST_%%V="
+for /f "usebackq tokens=1,* delims==" %%A in ("%UPD%\state.txt") do set "ST_%%A=%%B"
+exit /b 0
+
+:pull_ref
+%ALERTBOT_DOCKER% image inspect "%~1" >nul 2>&1
+if not errorlevel 1 exit /b 0
+echo  Downloading %~1 ...
+%ALERTBOT_DOCKER% pull "%~1"
+if errorlevel 1 goto :msg_get_failed
+exit /b 0
+
+:check_version
+%ALERTBOT_DOCKER% run --rm --network none "%~1" describe 2>nul | findstr /c:"\"version\": \"%TARGET_VERSION%\"" >nul
+if not errorlevel 1 exit /b 0
+echo  The downloaded program isn't version %TARGET_VERSION%, so it wasn't installed.
+exit /b 1
+
+:stage_bundle
+set "STAGE=%UPD%\staging"
+if not exist "%STAGE%" mkdir "%STAGE%"
+%ALERTBOT_DOCKER% rm -f %PROJECT%-update-files >nul 2>&1
+%ALERTBOT_DOCKER% create --name %PROJECT%-update-files "%NEW_IMAGE%" >nul 2>&1
+if errorlevel 1 goto :msg_stage_failed
+%ALERTBOT_DOCKER% cp %PROJECT%-update-files:/app/bundle/windows "%STAGE%" >nul 2>&1
+set "CP1=%errorlevel%"
+%ALERTBOT_DOCKER% cp %PROJECT%-update-files:/app/bundle/windows.sha256 "%STAGE%\windows.sha256" >nul 2>&1
+set "CP2=%errorlevel%"
+%ALERTBOT_DOCKER% rm -f %PROJECT%-update-files >nul 2>&1
+if not "%CP1%%CP2%"=="00" goto :msg_stage_failed
+rem The list has LF line ends (findstr /e would miss them), so the loop notes the files it needs.
+set "BAD="
+set "HAS_UPDATE="
+set "HAS_COMMON="
+for /f "usebackq tokens=1,2" %%H in ("%STAGE%\windows.sha256") do (
+  if "%%I"=="update.bat" set "HAS_UPDATE=1"
+  if "%%I"=="docker/scripts/common.bat" set "HAS_COMMON=1"
+  call :check_file %%H "%%I"
+)
+if not defined HAS_UPDATE goto :msg_stage_failed
+if not defined HAS_COMMON goto :msg_stage_failed
+if not defined BAD exit /b 0
+echo  The new version's files didn't check out (%BAD%), so nothing was installed.
+exit /b 1
+
+:msg_stage_failed
+echo  The new version's files couldn't be copied out of it, so nothing was installed.
+exit /b 1
+
+:check_file
+set "NAME=%~2"
+echo %NAME%| findstr /c:".." /c:":" >nul && set "BAD=an unsafe file name" && exit /b 0
+set "WIN=%NAME:/=\%"
+if not exist "%STAGE%\windows\%WIN%" set "BAD=%NAME% is missing" && exit /b 0
+set "GOT="
+for /f "skip=1 delims=" %%L in ('certutil -hashfile "%STAGE%\windows\%WIN%" SHA256 2^>nul') do if not defined GOT set "GOT=%%L"
+if not defined GOT set "BAD=%NAME% couldn't be checked" && exit /b 0
+set "GOT=%GOT: =%"
+if /i not "%GOT%"=="%~1" set "BAD=%NAME% doesn't match its hash"
+exit /b 0
+
+:preflight
+%RUNNER% "%NEW_IMAGE%" update-preflight
+if not errorlevel 1 exit /b 0
+echo  %TARGET_VERSION% can't take over your data (the reason is above). Nothing was changed.
+exit /b 1
+
+:backup_named
+if not exist "backups" mkdir "backups"
+set "BACKUP_FILE="
+set "BACKUP_PATH="
+for /f "usebackq tokens=5" %%P in (`%COMPOSE% run --rm --no-deps -v "%BOT_DIR%\backups:/export" web backup --label %~1 --export /export 2^>nul ^| findstr /b /c:"Database backed up to"`) do set "BACKUP_PATH=%%P"
+if not defined BACKUP_PATH goto :msg_backup_failed
+set "BACKUP_FILE=%BACKUP_PATH:/data/backups/=%"
+echo  Backed up to %BACKUP_FILE% (a copy is in the backups folder).
+exit /b 0
+
+:save_previous
+set "PREV=%UPD%\previous"
+if not exist "%PREV%\docker\scripts" mkdir "%PREV%\docker\scripts"
+for %%F in (setup.bat start.bat update.bat stop.bat backup.bat restore.bat docker-compose.yml README.txt README.zh-TW.txt LICENSE THIRD_PARTY_NOTICES.txt docker\compose.env docker\scripts\common.bat) do if exist "%%F" copy /y "%%F" "%PREV%\%%F" >nul || exit /b 1
+exit /b 0
+
+:restore_previous
+for %%F in (setup.bat start.bat update.bat stop.bat backup.bat restore.bat docker-compose.yml README.txt README.zh-TW.txt LICENSE THIRD_PARTY_NOTICES.txt docker\compose.env docker\scripts\common.bat) do if exist "%UPD%\previous\%%F" copy /y "%UPD%\previous\%%F" "%%F" >nul || exit /b 1
+exit /b 0
+
+:swap_files
+for /f "usebackq tokens=1,2" %%H in ("%UPD%\staging\windows.sha256") do call :swap_one "%%I" || exit /b 1
+findstr /v /b /c:"ALERTBOT_IMAGE=" "docker\compose.env" > "docker\compose.env.new"
+>> "docker\compose.env.new" echo ALERTBOT_IMAGE=%NEW_IMAGE%
+move /y "docker\compose.env.new" "docker\compose.env" >nul || exit /b 1
+exit /b 0
+
+:swap_one
+set "WIN=%~1"
+set "WIN=%WIN:/=\%"
+copy /y "%UPD%\staging\windows\%WIN%" "%WIN%" >nul
+exit /b %errorlevel%
+
+:trial
+%RUNNER% "%NEW_IMAGE%" trial
+if not errorlevel 1 exit /b 0
+echo  Updating your data with %TARGET_VERSION% failed in the trial run (the reason is above).
+exit /b 1
+
+:fingerprint
+set "%~1="
+for /f "usebackq tokens=1,* delims==" %%A in (`%RUNNER% "%NEW_IMAGE%" fingerprint 2^>nul`) do if "%%A"=="FINGERPRINT" set "%~1=%%B"
+if not defined %~1 exit /b 1
+exit /b 0
+
+:restore_backup
+%RUNNER% "%OLD_IMAGE%" restore "/data/backups/%BACKUP_FILE%"
+exit /b %errorlevel%
+
+:running_is
+%ALERTBOT_CURL% -sS --max-time 5 "%URL%api/health/" 2>nul | findstr /c:"%~1" >nul
+exit /b %errorlevel%
+
+rem start.bat, setup.bat, restore.bat: not while an update is part-way through.
+:check_unfinished_update
+if not exist "docker\update\state.txt" exit /b 0
+set "ST_STATE="
+for /f "usebackq tokens=1,* delims==" %%A in ("docker\update\state.txt") do if "%%A"=="STATE" set "ST_STATE=%%B"
+for %%S in (DONE ABORTED ROLLED_BACK NEEDS_USER) do if "%ST_STATE%"=="%%S" exit /b 0
+echo.
+echo  An update didn't finish (it stopped at %ST_STATE%). Run update.bat first: it finishes it or
+echo  undoes it, safely. Nothing was started or changed.
+exit /b 1
+

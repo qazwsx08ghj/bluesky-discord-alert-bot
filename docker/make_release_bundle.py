@@ -119,6 +119,10 @@ def export(dest: Path, root: Path = ROOT) -> dict:
         target.write_bytes(data)
     info = index(files)
     (dest / INDEX).write_text(json.dumps(info, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+    # The same hashes as plain "<sha256> <name>" lines, beside the folder, for update.bat to check the
+    # files it copies out with certutil (no JSON reading in a batch file).
+    sums = "".join(f"{digest} {name}\n" for name, digest in sorted(info["files"].items()))
+    dest.with_name(dest.name + ".sha256").write_text(sums, encoding="ascii", newline="\n")
     return info
 
 

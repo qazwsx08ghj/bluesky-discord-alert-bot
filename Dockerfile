@@ -23,6 +23,8 @@ RUN pip wheel --no-cache-dir --wheel-dir /wheels -r requirements-docker.txt
 # -- 3. The image that runs -----------------------------------------------------------------------
 FROM python:3.11-slim-bookworm
 ARG ALERTBOT_VERSION=dev
+# 1 only for images built by the automated tests: allows their test-only overrides (a fake GitHub).
+ARG ALERTBOT_TEST_BUILD=0
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
@@ -48,7 +50,8 @@ COPY --from=panel /panel/dist /app/frontend/dist
 # This version's Windows deployment files, with bundle.json (their SHA-256), for an updater to copy
 # out with `docker cp`; see docs/RELEASES.md, "Inside the image". Owned by root: the bot can read
 # them but not change them. The copies at the top of /app are removed: nothing there uses them.
-RUN python docker/make_release_bundle.py --export /app/bundle/windows \
+RUN if [ "$ALERTBOT_TEST_BUILD" = "1" ]; then touch /app/.test-build; fi \
+    && python docker/make_release_bundle.py --export /app/bundle/windows \
     && rm /app/setup.bat /app/start.bat /app/update.bat /app/stop.bat /app/backup.bat /app/restore.bat \
           /app/docker-compose.yml /app/docker/scripts/common.bat \
     && test -f /app/bundle/windows/bundle.json && test -f /app/bundle/windows/update.bat \

@@ -37,3 +37,13 @@ class NeedsNewerUpdater(MetadataError):
 
 
 RELEASES_PAGE = f"https://github.com/{REPOSITORY}/releases"
+
+# Only images built for the automated tests have this file (Dockerfile, ALERTBOT_TEST_BUILD=1; the
+# release workflow never sets it). Test-only overrides (a fake GitHub) are refused without it.
+TEST_BUILD_MARKER = "/app/.test-build"
+
+
+def is_test_build() -> bool:
+    import os
+
+    return os.path.exists(TEST_BUILD_MARKER)

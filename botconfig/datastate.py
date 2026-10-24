@@ -125,6 +125,16 @@ def compare(now: dict, backup: dict) -> Impact:
     return impact
 
 
+def fingerprint(snap: dict) -> str:
+    """A short code for what counts in the data (what you set up, posts, finished notifications).
+    Bookkeeping and the activity log don't change it. update.bat compares it before and after
+    starting a new version, to know whether anything that counts was written meanwhile."""
+    gated = {kind: snap.get(kind, {}) for kind in SETUP_TABLES}
+    gated["posts"] = sorted(snap.get("posts", {}))
+    gated["finished"] = sorted(f"{k}={s}" for k, s in snap.get("deliveries", {}).items() if s in FINISHED)
+    return hashlib.sha256(json.dumps(gated, sort_keys=True).encode()).hexdigest()[:20]
+
+
 def confirmation_code(now: dict, impact: Impact) -> str:
     """A short code for "this impact, on the data as it is now".
 
