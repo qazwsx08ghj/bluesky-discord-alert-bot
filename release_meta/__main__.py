@@ -3,6 +3,10 @@
     python -m release_meta validate-manifest alertbot-release.json
     python -m release_meta validate-withdrawn release/withdrawn.json
     python -m release_meta check --installed 1.0.0-rc.2 --channel prerelease    # reads GitHub; changes nothing
+    python -m release_meta generate --version 1.2.0 --commit <sha> --run-id <id> --index-digest sha256:<...> \
+        --index index.json --describe describe.json --bundle dist/BlueskyDiscordAlertBot-1.2.0.zip \
+        --compatibility release/compatibility.json --out dist        # writes alertbot-release.json, SHA256SUMS
+    python -m release_meta verify-checksums dist
 
 Exit code 0: valid (or, for check, an update is available or it is up to date); 1: invalid or
 blocked, with the reason on stderr.
@@ -16,7 +20,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import MetadataError, github, manifest, withdrawn
+from . import MetadataError, generate, github, manifest, withdrawn
 
 
 def _load(path):
@@ -35,8 +39,29 @@ def main(argv=None) -> int:
     check = sub.add_parser("check")
     check.add_argument("--installed", required=True)
     check.add_argument("--channel", choices=["stable", "prerelease"], required=True)
+    gen = sub.add_parser("generate")
+    for option in ("--version", "--commit", "--run-id", "--index-digest", "--index", "--describe", "--bundle",
+                   "--compatibility", "--out"):
+        gen.add_argument(option, required=True)
+    sub.add_parser("verify-checksums").add_argument("folder")
     args = parser.parse_args(argv)
     try:
+        if args.command == "generate":
+            try:
+                index_raw = Path(args.index).read_bytes()
+            except OSError:
+                raise MetadataError(f"{args.index} can't be read") from None
+            data = generate.generate(version=args.version, commit=args.commit, run_id=args.run_id,
+                                     index_digest=args.index_digest, index_raw=index_raw,
+                                     describe=_load(args.describe), bundle_path=Path(args.bundle),
+                                     compatibility=_load(args.compatibility))
+            for path in generate.write_release_files(Path(args.out), data, Path(args.bundle)):
+                print(f"written: {path}")
+            return 0
+        if args.command == "verify-checksums":
+            names = generate.verify_checksums(Path(args.folder))
+            print(f"checksums match: {', '.join(names)}")
+            return 0
         if args.command == "validate-manifest":
             m = manifest.validate(_load(args.file))
             print(f"valid format: {m.version} ({m.channel}), image {m.image_reference}")

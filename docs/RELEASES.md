@@ -2,8 +2,10 @@
 
 For maintainers. How a published version is described (the release manifest), which version an install may move to, how a bad release is withdrawn, and how releases are meant to be published.
 
-**Status (M2, foundation):**
-- **Done:** the metadata rules in `release_meta/` (standard library only) and their tests, and `release/withdrawn.json`.
+**Status (M2):**
+- **Done:**
+  - the metadata rules in `release_meta/` (standard library only) and their tests, and `release/withdrawn.json` (M2.1);
+  - the image carries its deployment files and describes itself, and the manifest and checksums are built from what was built (M2.2, sections 2a and 2b).
 - **Not changed yet:** the publishing workflow (`.github/workflows/release.yml`) and the GitHub settings. Today's publishing is described in [DOCKER.md](DOCKER.md), section 7. Section 5 below is the planned flow, to be built in a later step after approval.
 - **Nothing installs releases automatically yet:** that is the updater (M3).
 
@@ -78,6 +80,81 @@ One per release, attached to it. Schema id `alertbot-release/1`. Example (values
 - `alertbot-release.json` and every listed download are attached;
 - sizes and hashes match what GitHub reports.
 
+## 2a. Inside the image: the deployment files, and `describe`
+
+Each image carries the Windows deployment files of its own version:
+
+```
+/app/bundle/windows/
+    bundle.json                 {"schema": "alertbot-bundle/1", "platform": "windows",
+                                 "files": {"update.bat": "<sha256>", ...}}
+    setup.bat  start.bat  update.bat  stop.bat  backup.bat  restore.bat
+    docker-compose.yml  docker/scripts/common.bat
+    README.txt  README.zh-TW.txt  LICENSE  THIRD_PARTY_NOTICES.txt
+```
+
+- **Written by the build:** `docker/make_release_bundle.py --export`, before the image switches to the bot's user. The files are owned by root: the bot can read them but not change them. The copies at the top of `/app` are removed; nothing there uses them.
+- **The same bytes everywhere:** line endings are fixed by `.gitattributes` (`.bat` files CRLF, the others LF), so a file's hash is the same whatever computer builds it.
+- **Never in the bundle:**
+  - `docker/compose.env`: it pins a release's own image by digest, which can't be known inside that image;
+  - anything of a single install: its port and channel, `.env`, the data volume, backups, logs.
+
+  `release_meta/bundle.py` refuses an index that lists such a file. When an updater (M3) replaces the deployment files, these stay untouched.
+- **Getting them out needs only Docker,** not Git, Python or Node.js:
+  ```
+  docker create --name tmp <image>@sha256:<digest>
+  docker cp tmp:/app/bundle/windows <folder>
+  docker rm tmp
+  ```
+  Then check them with `release_meta.bundle.verify`: no file missing, extra or changed, no unsafe path.
+
+**`describe`** (`docker run --rm <image>@sha256:<digest> describe`, or `manage.py describe_release`) prints what the image is, as JSON:
+
+```json
+{
+  "schema": "alertbot-describe/1",
+  "version": "1.0.0-rc.99",
+  "version_is_release": true,
+  "platform": "linux/amd64",
+  "data_schema": {"activity": "0001_initial", "bluesky_monitor": "0009_remove_single_channel_fields",
+                  "botconfig": "0002_remove_legacy_copies", "discord_alerts": "0003_channel_guild_id"},
+  "bundles": {"windows": {"files": {"update.bat": "<sha256>", "...": "..."}}},
+  "problems": []
+}
+```
+
+- **Read-only:**
+  - no database connection (the migrations are read from the code);
+  - no network, nothing written;
+  - it runs without the data volume.
+- **What it reports:**
+  - `version` is `ALERTBOT_VERSION`, set by the build; `version_is_release` is false for `dev` and `ci` builds;
+  - `platform` is the platform of the image it runs in. The full platform list comes from the image index (section 2b);
+  - `data_schema` holds this project's apps only (`activity`, `bluesky_monitor`, `botconfig`, `discord_alerts`), each with its newest migration.
+- **Exit code 1, with `problems`,** when the deployment files are missing or don't match their index, or an app has two newest migrations.
+
+## 2b. Building the manifest from what was built
+
+`release_meta/generate.py` (`python -m release_meta generate ...`) writes `alertbot-release.json` and `SHA256SUMS`. It uses only build outputs, and checks each one first:
+
+| Input | Comes from | Checked |
+|---|---|---|
+| The image index (raw) | `docker buildx imagetools inspect --raw <image>@<digest>` | Its SHA-256 **is** the digest the build reported, so the platform list belongs to that digest. It must be a multi-platform index with `linux/amd64`. Attestation entries are skipped. |
+| What the image says about itself | `describe`, run by digest | Its version is the release's; no problems; its platform is in the index |
+| The download (zip) | `make_release_bundle.py --from-bundle` on the files copied out of the image | Named `BlueskyDiscordAlertBot-<version>.zip`. It holds exactly the image's deployment files with the same hashes, plus `docker/compose.env` pinning **this image by its digest** (a tag alone, `:stable` or another image is refused). No `.env`, no unsafe paths. |
+| The compatibility policy | `release/compatibility.json` (version-controlled: `min_updater`, `min_from_version`, `stepping_stones`, `compose_min`) | Known schema, no unknown fields |
+
+The result must pass `release_meta.manifest.validate`, the same check every updater makes.
+
+**Reproducible outputs:**
+- the download has sorted entries and fixed timestamps and permissions, so the same files give the same bytes;
+- the manifest is written with sorted keys;
+- `SHA256SUMS` holds `<sha256>  <name>` lines, sorted, for the download and the manifest.
+
+`python -m release_meta verify-checksums <folder>` checks them.
+
+**What this proves:** integrity only. The manifest describes these exact bytes. Who published them is section 1's question.
+
 ## 3. Choosing a release
 
 `release_meta/select.py`, `decide()`. The first rule that applies decides:
@@ -151,8 +228,8 @@ The job summary shows the version, the commit and the changelog section.
 
 **4. Publish**, in this order. Any failure stops it, and nothing later happens.
 1. Build the multi-platform image, and push it **by digest only, untagged**. Record the index digest and confirm it resolves.
-2. Run the image by digest to read its version, its migrations and its bundled-file hashes (M2.2). This proves the image is the one just built.
-3. Build the download pinned to `repo:VERSION@sha256:…`. Write the manifest and `SHA256SUMS`. **Validate the manifest with `release_meta`.**
+2. Read the image index raw by digest, and run `describe` in the image by digest (section 2a). Copy its deployment files out with `docker cp`.
+3. Build the download from those files, pinned to `repo:VERSION@sha256:…`. Then build the manifest and `SHA256SUMS` with `release_meta generate`, which checks every input (section 2b) and validates the result.
 4. Create build provenance attestations for the image digest and the download.
 5. Create the version tag at the approved commit (blocked from being moved or deleted by the tag ruleset).
 6. Create the GitHub release as a **draft**, upload the assets, download them again, and check their hashes against the manifest.

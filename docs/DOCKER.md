@@ -174,6 +174,8 @@ Non-technical users should get the **release download**, so nothing is built on 
 
 This section describes publishing as it works today. The release manifest, how an updater chooses a version, withdrawn releases, and the planned publishing flow (approval before anything is pushed or published) are in [RELEASES.md](RELEASES.md).
 
+**Every image also carries the Windows deployment files of its own version** in `/app/bundle/windows`, with their hashes, and can describe itself (`docker run --rm <image> describe`). See RELEASES.md, section 2a. The download is built from the same files and is reproducible.
+
 1. **Prepare the version:**
    - set it in `frontend/package.json`;
    - in `CHANGELOG.md`, move the `[Unreleased]` notes under `## [1.2.0] - YYYY-MM-DD`;

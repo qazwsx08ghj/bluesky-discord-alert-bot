@@ -1,0 +1,7 @@
+{
+  "schema": "alertbot-compatibility/1",
+  "min_updater": 1,
+  "min_from_version": "1.0.0-rc.1",
+  "stepping_stones": [],
+  "compose_min": "2.23.0"
+}
