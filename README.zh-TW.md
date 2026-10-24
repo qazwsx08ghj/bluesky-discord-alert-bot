@@ -64,7 +64,7 @@ Docker Desktop 是讓機器人執行的程式，只要裝一次。
 
 ## 第 2 步：下載並安裝機器人
 
-1. 到[最新版本頁面](https://github.com/qazwsx08ghj/bluesky-discord-alert-bot/releases/latest)下載 **`BlueskyDiscordAlertBot-stable.zip`**。
+1. 到[最新版本頁面](https://github.com/qazwsx08ghj/bluesky-discord-alert-bot/releases/latest)，下載檔名是 **`BlueskyDiscordAlertBot-`** 加上版本號碼的 zip 檔（例如 `BlueskyDiscordAlertBot-1.0.0.zip`）。
 2. **解壓縮之前：** 在 zip 檔上按右鍵 →「內容」，如果看到「解除封鎖」就勾選，再按「確定」。不然執行每個指令檔時，Windows 都可能跳出警告。
 3. 在 zip 檔上按右鍵 →「全部解壓縮」，把資料夾放在不會移動的地方，例如「文件」。
 4. 點兩下 **`setup.bat`**。

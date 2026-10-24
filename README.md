@@ -62,7 +62,7 @@ Docker Desktop is the program the bot runs in. You install it once.
 
 ## Step 2: Download and install the bot
 
-1. Download **`BlueskyDiscordAlertBot-stable.zip`** from the [latest release](https://github.com/qazwsx08ghj/bluesky-discord-alert-bot/releases/latest).
+1. Open the [latest release](https://github.com/qazwsx08ghj/bluesky-discord-alert-bot/releases/latest) and download the zip file named **`BlueskyDiscordAlertBot-`** followed by the version number (for example `BlueskyDiscordAlertBot-1.0.0.zip`).
 2. **Before unzipping:** right-click the zip, choose **Properties**, tick **Unblock** if you see it, and press **OK**. Otherwise Windows may warn you about each script.
 3. Right-click the zip, choose **Extract All**, and put the folder somewhere permanent, for example **Documents**.
 4. Double-click **`setup.bat`**.
