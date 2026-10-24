@@ -44,8 +44,26 @@ def main(argv=None) -> int:
                    "--compatibility", "--out"):
         gen.add_argument(option, required=True)
     sub.add_parser("verify-checksums").add_argument("folder")
+    sub.add_parser("validate-compatibility").add_argument("file")
+    sub.add_parser("check-withdrawn-history").add_argument("file", help="release/withdrawn.json, in a full git clone")
+    verify = sub.add_parser("verify-release")
+    verify.add_argument("tag")
+    verify.add_argument("--expect", help="the manifest that was built; the published one must be identical")
     args = parser.parse_args(argv)
     try:
+        if args.command == "validate-compatibility":
+            data = generate.read_compatibility(_load(args.file))
+            print(f"valid format: updates from {data['min_from_version']}, updater protocol {data['min_updater']}+")
+            return 0
+        if args.command == "check-withdrawn-history":
+            revisions = generate.check_withdrawn_history(Path(args.file).as_posix(), Path.cwd())
+            print(f"revisions in order: {revisions}")
+            return 0
+        if args.command == "verify-release":
+            expected = Path(args.expect).read_bytes() if args.expect else None
+            m = github.verify_release(github.Client(), args.tag, expected)
+            print(f"verified: {args.tag} is immutable, its manifest is valid and matches it; image {m.image_reference}")
+            return 0
         if args.command == "generate":
             try:
                 index_raw = Path(args.index).read_bytes()

@@ -182,7 +182,7 @@ class GenerateTests(GenerateTestCase):
         self.assertRefused("unknown schema", compatibility={**COMPAT, "schema": "x"})
         self.assertRefused("unknown fields", compatibility={**COMPAT, "min_from_versoin": "1.0.0"})
         self.assertRefused("newer than the version itself", compatibility={**COMPAT, "min_from_version": "2.0.0"})
-        self.assertRefused("must be 1 or more", compatibility={**COMPAT, "min_updater": 0})
+        self.assertRefused("min_updater must be a whole number, 1 or more", compatibility={**COMPAT, "min_updater": 0})
 
 
 class ChecksumTests(GenerateTestCase):

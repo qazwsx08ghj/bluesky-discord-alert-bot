@@ -172,35 +172,51 @@ What has and hasn't been tested, including the Docker and release acceptance tes
 
 Non-technical users should get the **release download**, so nothing is built on their computer.
 
-This section describes publishing as it works today. The release manifest, how an updater chooses a version, withdrawn releases, and the planned publishing flow (approval before anything is pushed or published) are in [RELEASES.md](RELEASES.md).
+How a release is published, step by step. The release manifest, how an updater chooses a version, withdrawn releases and the trust model are in [RELEASES.md](RELEASES.md).
 
-**Every image also carries the Windows deployment files of its own version** in `/app/bundle/windows`, with their hashes, and can describe itself (`docker run --rm <image> describe`). See RELEASES.md, section 2a. The download is built from the same files and is reproducible.
+**Every image also carries the Windows deployment files of its own version** in `/app/bundle/windows`, with their hashes, and can describe itself (`docker run --rm <image> describe`). See RELEASES.md, section 2a.
+
+**Before the first run of this workflow** (the maintainer, in the repository's settings; RELEASES.md, section 6):
+- the `release` environment exists, with the maintainer as required reviewer, limited to `main`;
+- **immutable releases are switched on.** Otherwise the workflow's last check fails right after the release is published.
 
 1. **Prepare the version:**
    - set it in `frontend/package.json`;
    - in `CHANGELOG.md`, move the `[Unreleased]` notes under `## [1.2.0] - YYYY-MM-DD`;
    - make sure the links at the bottom name the real repository.
-2. **Tag it:** `git tag v1.2.0 && git push --tags`.
-3. **`.github/workflows/release.yml` runs:**
-   1. `docker/release_check.py` checks that the tag, `package.json` and `CHANGELOG.md` agree. A release needs a dated changelog entry and no `OWNER/REPOSITORY` placeholders.
-   2. Every CI job runs (`ci.yml`).
-   3. The image is built for `linux/amd64` and `linux/arm64`, and pushed as `ghcr.io/<owner>/<repo>:1.2.0` and `:stable`. **ARM (`linux/arm64`) has been tested under emulation only, not on real ARM hardware.**
-   4. `BlueskyDiscordAlertBot-stable.zip` is attached to the GitHub release. The release notes are the version's changelog section.
-4. **The zip** (`docker/make_release_bundle.py`) contains only:
+2. **Start it:** on GitHub, *Actions > release > Run workflow*, on `main`, and type the version: `1.2.0`, or `1.2.0-rc.3` for a test version. **Don't push a tag:** the workflow creates it, after approval.
+3. **Check, then approve.** Before anything is visible outside the repository:
+   - `prepare` (read-only) checks that:
+     - the version, `package.json` and `CHANGELOG.md` agree (`docker/release_check.py`; a final release needs a dated changelog entry and no `OWNER/REPOSITORY` placeholders);
+     - the version isn't tagged or released yet, and the run is on `main`;
+     - `release/withdrawn.json` and `release/compatibility.json` are valid, and the withdrawal list's revision went up with every change.
+
+     Its summary shows the version, the commit and the changes.
+   - every CI job runs (`ci.yml`).
+
+   Then the run waits for the `release` environment: **Review deployments > Approve**. Nothing is pushed, tagged or published before that.
+4. **After approval** (`publish`; RELEASES.md, section 5):
+   1. the image is built for `linux/amd64` and `linux/arm64`, and pushed **by digest only**. **ARM (`linux/arm64`) has been tested under emulation only, not on real ARM hardware.**
+   2. the image is read back by digest: its index, `describe`, and its deployment files (`docker cp`).
+   3. the download is built from those files and pinned by digest. The manifest and `SHA256SUMS` are built by `python -m release_meta generate`, which checks every input.
+   4. build provenance attestations are made for the image and the files.
+   5. the tag is created at the approved commit, then a draft release with the download, `alertbot-release.json` and `SHA256SUMS`. Its files are downloaded again and checked.
+   6. the release is published, then read back the way updaters read it: it must be immutable, and its manifest the one that was built.
+   7. the image gets `:1.2.0`, and, for a final release only and last of all, `:stable`.
+5. **The download, `BlueskyDiscordAlertBot-<version>.zip`** (`docker/make_release_bundle.py`, reproducible), contains only:
    - the six scripts and `docker/scripts/common.bat`;
    - `docker-compose.yml`;
-   - `docker/compose.env` with `ALERTBOT_IMAGE` set to the published image;
+   - `docker/compose.env` with `ALERTBOT_IMAGE` pinned to the image **by digest** (`ghcr.io/<owner>/<repo>:1.2.0@sha256:…`);
    - `README.txt` and `README.zh-TW.txt`;
    - `LICENSE` and `THIRD_PARTY_NOTICES.txt`.
 
-   Its `setup.bat` and `update.bat` download the image instead of building.
-5. **Users update with `update.bat`,** which pulls the newest `:stable`. To stay on one version, set a version tag in `docker\compose.env`.
+   Its `setup.bat` and `update.bat` download that exact image instead of building.
+6. **Updates:** a download stays on its own image. Moving to a newer version is the updater's job (M3); until then, download the new version (the README's steps for a newer download). `:stable` is kept for people who run the image by hand. Installs never depend on it.
 
-**Pre-releases for testing:** a tag with a suffix, such as `v1.2.0-rc.1`:
-- pushes only `:1.2.0-rc.1`, never `:stable`;
-- its zip uses that exact image;
-- the GitHub release is marked as a pre-release.
+**Test versions** (a suffix, such as `1.2.0-rc.1`):
+- get only `:1.2.0-rc.1`, never `:stable`;
+- their release is marked as a pre-release.
 
-Its changelog entry may still say `Unreleased`. Users on `:stable` never receive a pre-release.
+Their changelog entry may still say `Unreleased`.
 
 **The GitHub package must be public,** so users can download without signing in to the registry. A new package starts private: change its visibility once, after the first release.

@@ -6,7 +6,8 @@ For maintainers. How a published version is described (the release manifest), wh
 - **Done:**
   - the metadata rules in `release_meta/` (standard library only) and their tests, and `release/withdrawn.json` (M2.1);
   - the image carries its deployment files and describes itself, and the manifest and checksums are built from what was built (M2.2, sections 2a and 2b).
-- **Not changed yet:** the publishing workflow (`.github/workflows/release.yml`) and the GitHub settings. Today's publishing is described in [DOCKER.md](DOCKER.md), section 7. Section 5 below is the planned flow, to be built in a later step after approval.
+- **Done (M2.3):** the publishing workflow (`.github/workflows/release.yml`) follows section 5. How to run it is in [DOCKER.md](DOCKER.md), section 7.
+- **Not changed yet:** the GitHub settings it relies on (section 6). Until they are in place, don't run it.
 - **Nothing installs releases automatically yet:** that is the updater (M3).
 
 ## 1. Integrity is not authenticity
@@ -206,7 +207,7 @@ The result must pass `release_meta.manifest.validate`, the same check every upda
 
 **`revision`:** goes up by 1 on every change and never down. The release workflow step (section 5) will also check this against the previous version of the file. For now it is checked only by the updater and by review.
 
-## 5. Publishing (planned; not yet in `release.yml`)
+## 5. Publishing (`.github/workflows/release.yml`)
 
 **Rule: nothing becomes visible outside the repository before the maintainer approves the release.** That covers:
 - pushing the image to GHCR;
