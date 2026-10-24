@@ -783,6 +783,10 @@ call :state ROLLING_BACK
 call :ensure_data_free || goto :update_needs_user
 call :restore_previous || goto :update_needs_user
 if defined BACKUP_FILE call :restore_backup || goto :update_needs_user
+rem Saved before the old version starts: resuming from here must never put the backup back again
+rem (the old bot may already have changed data or sent notifications since).
+call :state RESTORED
+:update_rollback_start
 if not defined WAS_RUNNING goto :update_rolled_back
 call :up || goto :update_needs_user
 call :wait_ready || goto :update_needs_user
@@ -801,7 +805,7 @@ echo  Kept for you: the backup from just before the update (backups\%BACKUP_FILE
 echo  version's files (docker\update\previous).
 echo   - To keep the new version: run start.bat. If it works, run update.bat and type KEEP.
 echo   - To go back: copy everything in docker\update\previous into this folder (replacing the files),
-echo     then run restore.bat and choose %BACKUP_FILE%.
+echo     then run restore.bat and choose %BACKUP_FILE%. Then run update.bat and type BACK.
 echo  If you ask for help, share logs\problem-report.txt.
 call :pause_end
 exit /b 1
@@ -827,7 +831,12 @@ if "%ST_STATE%"=="BEGIN" goto :recover_nothing_changed
 if "%ST_STATE%"=="STOPPING" goto :recover_restart
 if "%ST_STATE%"=="BACKED_UP" goto :recover_restart
 if "%ST_STATE%"=="STARTING" goto :recover_starting
+if "%ST_STATE%"=="RESTORED" goto :recover_restored
 goto :update_rollback
+
+:recover_restored
+echo  Your data had already been put back; starting the previous version.
+goto :update_rollback_start
 
 :recover_nothing_changed
 call :state ABORTED
@@ -854,12 +863,18 @@ exit /b 0
 echo.
 echo  An earlier update to %TARGET_VERSION% needs your decision (see the earlier message).
 echo   - If the bot works with the new version, type KEEP to keep it.
-echo   - To go back instead, close this window and follow the steps it gave (docker\update\previous,
-echo     then restore.bat with %BACKUP_FILE%).
+echo   - If you went back by hand (docker\update\previous, then restore.bat with %BACKUP_FILE%),
+echo     type BACK.
+echo   - Otherwise close this window and follow the steps it gave.
 set "TYPED="
 if defined ALERTBOT_UPDATE_RESOLVE set "TYPED=%ALERTBOT_UPDATE_RESOLVE%"
-if not defined ALERTBOT_UPDATE_RESOLVE set /p "TYPED= Type KEEP to keep the new version: "
-if not "%TYPED%"=="KEEP" goto :update_failed
+if not defined ALERTBOT_UPDATE_RESOLVE set /p "TYPED= Type KEEP or BACK: "
+if "%TYPED%"=="KEEP" goto :recover_kept
+if not "%TYPED%"=="BACK" goto :update_failed
+call :state ROLLED_BACK
+echo  Noted: you went back by hand. Checking for updates now...
+exit /b 0
+:recover_kept
 call :state DONE
 echo  Kept. Checking for updates now...
 exit /b 0

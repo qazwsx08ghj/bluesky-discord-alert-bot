@@ -288,6 +288,23 @@ class UpdaterScriptTests(ScriptHarness):
         self.assertEqual(code, 0, out)
         self.assertEqual(self.state()["STATE"], "DONE")
 
+    def test_a_rollback_interrupted_after_the_restore_doesnt_restore_again(self):
+        self.seed("RESTORED")
+        code, out, calls = self.update(FAKE_PLAN="up_to_date")
+        self.assertIn("Your data had already been put back", out)
+        self.assertFalse(self.has(calls, " restore "), "the old bot may have written since")
+        self.assertTrue(any("up -d" in c for c in self.compose_calls(calls)))
+        self.assertEqual(self.state()["STATE"], "ROLLED_BACK")
+        self.assertEqual(code, 1, out)
+
+    def test_a_decision_left_to_the_user_going_back(self):
+        self.seed("NEEDS_USER")
+        code, out, calls = self.update(FAKE_PLAN="up_to_date", ALERTBOT_UPDATE_RESOLVE="BACK")
+        self.assertEqual(code, 0, out)
+        self.assertIn("you went back by hand", out)
+        self.assertEqual(self.state()["STATE"], "ROLLED_BACK")
+        self.assertFalse(self.has(calls, " restore "))
+
     def test_other_scripts_wait_for_an_unfinished_update(self):
         self.seed("TRIAL_OK", swapped=True)
         for name in ("start.bat", "restore.bat", "setup.bat"):
