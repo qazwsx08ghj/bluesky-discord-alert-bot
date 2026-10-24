@@ -28,7 +28,7 @@ import re
 import zipfile
 from pathlib import Path
 
-from . import IMAGE, MANIFEST_ASSET, REPOSITORY, MetadataError, manifest, semver
+from . import IMAGE, MANIFEST_ASSET, REPOSITORY, MetadataError, manifest, semver  # noqa: F401
 from .bundle import NEVER_BUNDLED
 
 COMPAT_SCHEMA = "alertbot-compatibility/1"
@@ -105,7 +105,59 @@ def read_compatibility(data) -> dict:
     unknown = set(data) - allowed
     if unknown:
         raise MetadataError(f"release/compatibility.json has unknown fields: {sorted(unknown)}")
-    return {k: data[k] for k in ("min_updater", "min_from_version", "stepping_stones", "compose_min") if k in data}
+    missing = sorted(allowed - set(data))
+    if missing:
+        raise MetadataError(f"release/compatibility.json is missing {missing}")
+    updater = data["min_updater"]
+    if isinstance(updater, bool) or not isinstance(updater, int) or updater < 1:
+        raise MetadataError("release/compatibility.json: min_updater must be a whole number, 1 or more")
+    semver.parse(data["min_from_version"])
+    stones = data["stepping_stones"]
+    if not isinstance(stones, list) or [semver.parse(s) for s in stones] != sorted({semver.parse(s) for s in stones}):
+        raise MetadataError("release/compatibility.json: stepping_stones must be versions, in order, without repeats")
+    if not isinstance(data["compose_min"], str) or not manifest.COMPOSE.fullmatch(data["compose_min"]):
+        raise MetadataError("release/compatibility.json: compose_min must look like 2.23.0")
+    return {k: data[k] for k in ("min_updater", "min_from_version", "stepping_stones", "compose_min")}
+
+
+def check_withdrawn_history(path: str, repo_dir: Path) -> list:
+    """Every committed version of release/withdrawn.json, oldest first, plus the working copy:
+    each must be valid, and its revision must go up whenever its content changes (and never
+    down). Needs the full git history (refuses a shallow clone). Returns the revisions seen."""
+    import subprocess
+
+    from . import withdrawn
+
+    def git(*args):
+        res = subprocess.run(["git", *args], cwd=repo_dir, capture_output=True, text=True, encoding="utf-8")
+        if res.returncode != 0:
+            raise MetadataError(f"git {args[0]} failed: {res.stderr.strip()[:200]}")
+        return res.stdout
+
+    if git("rev-parse", "--is-shallow-repository").strip() == "true":
+        raise MetadataError("the withdrawal-list history needs the full git history (fetch-depth: 0)")
+    versions = []
+    for commit in reversed(git("log", "--format=%H", "--", path).split()):
+        text = git("show", f"{commit}:{path}")
+        versions.append((commit[:12], text))
+    current = Path(repo_dir, path).read_text(encoding="utf-8")
+    if not versions or versions[-1][1] != current:
+        versions.append(("working copy", current))
+    seen, previous = [], None
+    for where, text in versions:
+        try:
+            parsed = withdrawn.validate(json.loads(text))
+        except ValueError:
+            raise MetadataError(f"release/withdrawn.json at {where} isn't valid JSON") from None
+        if previous is not None:
+            if parsed.revision < previous.revision:
+                raise MetadataError(f"release/withdrawn.json went back to revision {parsed.revision} at {where}")
+            if parsed.digest != previous.digest and parsed.revision == previous.revision:
+                raise MetadataError(f"release/withdrawn.json changed at {where} without a new revision "
+                                    f"(still {parsed.revision})")
+        seen.append(parsed.revision)
+        previous = parsed
+    return seen
 
 
 def generate(*, version: str, commit: str, run_id: str, index_digest: str, index_raw: bytes, describe: dict,

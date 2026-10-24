@@ -1,78 +1,151 @@
-# Publish a release: the Docker image (built for Intel/AMD and ARM; ARM is tested under emulation
-# only, not yet on real ARM hardware) and the small download
-# for non-technical users. Runs when a version tag is pushed:
-#   v1.2.0        a release: the image gets :1.2.0 and :stable (what users' update.bat downloads)
-#   v1.2.0-rc.1   a pre-release, for testing: only :1.2.0-rc.1, never :stable; its download uses
-#                 that exact image, and the GitHub release is marked as a pre-release
-# The tag, frontend/package.json and CHANGELOG.md must agree first (docker/release_check.py).
+# Publish a release (docs/RELEASES.md, section 5; how to run it: docs/DOCKER.md, section 7).
+#
+# Started by hand only (Actions > release > Run workflow, on main, with the version). Pushing a tag
+# no longer starts anything: the workflow creates the tag itself, after approval.
+#
+# Nothing is visible outside the repository before the maintainer approves the `release`
+# environment. Before that, everything runs with read-only access:
+#   prepare  the version, package.json and CHANGELOG.md agree; not released yet; on main; the
+#            release metadata files are valid. The job summary shows what would be released.
+#   checks   every CI job (ci.yml).
+# After approval, `publish`, in this order (any failure stops it; nothing later happens):
+#   1. build linux/amd64 + linux/arm64 and push by digest only (untagged)
+#   2. read it back by digest: the raw index, `describe`, the deployment files (docker cp)
+#   3. the download from those files (pinned by digest), the manifest and SHA256SUMS
+#      (python -m release_meta generate: every input checked, the result validated)
+#   4. build provenance attestations (image digest, files)
+#   5. the version tag, at the approved commit
+#   6. a draft release with the files; downloaded again and checked
+#   7. publish it; then read it back like an updater does (immutable, manifest matches)
+#   8. :VERSION on the image digest
+#   9. final releases only, last: :stable on the image digest (a convenience; never used for installs)
+# Every action is pinned to a full commit SHA (the version is in the comment).
 name: release
 
 on:
-  push:
-    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, without the v (for example 1.2.0, or 1.2.0-rc.3 for a test version)"
+        required: true
+        type: string
 
-permissions:
-  contents: write   # attach the download to the GitHub release
-  packages: write   # publish the image to ghcr.io
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
-  version:
-    name: Tag, package.json and CHANGELOG.md agree
+  prepare:
+    name: What would be released (read-only; nothing is published)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       version: ${{ steps.check.outputs.version }}
       prerelease: ${{ steps.check.outputs.prerelease }}
+      commit: ${{ github.sha }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0   # the withdrawal-list history needs every commit
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"   # the version CI tests with and the image runs
+      - name: Only from main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Releases are made from main only."
+          exit 1
       - id: check
-        run: python docker/release_check.py "$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+        name: The version, frontend/package.json and CHANGELOG.md agree
+        env:
+          VERSION: ${{ inputs.version }}
+        run: python docker/release_check.py "v$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Not released yet
+        env:
+          VERSION: ${{ steps.check.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::v$VERSION is already tagged."; exit 1
+          fi
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::A release v$VERSION already exists."; exit 1
+          fi
+      - name: The release metadata files are valid
+        run: |
+          python -m release_meta validate-withdrawn release/withdrawn.json
+          python -m release_meta check-withdrawn-history release/withdrawn.json
+          python -m release_meta validate-compatibility release/compatibility.json
+      - name: Summary, for the approval
+        env:
+          VERSION: ${{ steps.check.outputs.version }}
+          CHANNEL: ${{ steps.check.outputs.channel }}
+        run: |
+          python docker/release_check.py "v$VERSION" --notes notes.md >/dev/null
+          {
+            echo "## Release v$VERSION ($CHANNEL)"
+            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- Approving the \`release\` environment builds and publishes exactly this commit."
+            echo
+            echo "### Changes"
+            cat notes.md
+          } >> "$GITHUB_STEP_SUMMARY"
 
   checks:
-    # Every CI job (ci.yml) must pass before anything is published.
+    name: Every CI job
+    needs: prepare
+    permissions:
+      contents: read
     uses: ./.github/workflows/ci.yml
 
   publish:
-    needs: [version, checks]
+    name: Build and publish (after approval)
+    needs: [prepare, checks]
     runs-on: ubuntu-latest
+    environment: release   # the maintainer approves here; nothing below runs before that
+    permissions:
+      contents: write      # the tag and the GitHub release
+      packages: write      # the image on ghcr.io
+      id-token: write      # build provenance attestations
+      attestations: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+      COMMIT: ${{ needs.prepare.outputs.commit }}
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}   # exactly the commit that was checked and approved
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ github.token }}
       - id: names
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
-          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        name: The image name (must be the one the updaters trust)
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          python -c 'import sys, release_meta; sys.exit(release_meta.IMAGE != sys.argv[1])' "$image" \
+            || { echo "::error::$image isn't the image updaters trust (release_meta.IMAGE)."; exit 1; }
           echo "image=$image" >> "$GITHUB_OUTPUT"
-          if [ "$PRERELEASE" = "false" ]; then
-            echo "tags=$image:$VERSION,$image:stable" >> "$GITHUB_OUTPUT"
-            echo "download_image=$image:stable" >> "$GITHUB_OUTPUT"
-          else
-            echo "tags=$image:$VERSION" >> "$GITHUB_OUTPUT"
-            echo "download_image=$image:$VERSION" >> "$GITHUB_OUTPUT"
-          fi
-      - uses: docker/build-push-action@v6
+
+      # 1. Build and push by digest only: no tag yet
+      - id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: true
-          build-args: ALERTBOT_VERSION=${{ needs.version.outputs.version }}
-          tags: ${{ steps.names.outputs.tags }}
-          # Shown on the package page. The repository link is also made automatically, because
-          # this workflow publishes with GITHUB_TOKEN. A multi-platform image's description is
-          # read from the index annotation.
+          build-args: ALERTBOT_VERSION=${{ needs.prepare.outputs.version }}
+          outputs: type=image,name=${{ steps.names.outputs.image }},push-by-digest=true,name-canonical=true,push=true
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.description=Sends a Discord notification when Bluesky accounts you choose post something new. Runs on your own computer with Docker Desktop.
@@ -81,12 +154,82 @@ jobs:
             index:org.opencontainers.image.description=Sends a Discord notification when Bluesky accounts you choose post something new. Runs on your own computer with Docker Desktop.
             index:org.opencontainers.image.source=https://github.com/${{ github.repository }}
             index:org.opencontainers.image.licenses=MIT
-      - name: Download for users, and the release notes from CHANGELOG.md
+
+      # 2. Read it back by digest
+      - id: image
+        name: Read the image back by its digest
+        env:
+          IMAGE: ${{ steps.names.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
-          python docker/make_release_bundle.py --image "${{ steps.names.outputs.download_image }}" --out dist
-          python docker/release_check.py "$GITHUB_REF_NAME" --notes release-notes.md
-      - uses: softprops/action-gh-release@v2
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::The build reported no image digest."; exit 1; }
+          mkdir -p build
+          docker buildx imagetools inspect --raw "$IMAGE@$DIGEST" > build/index.json
+          docker pull --quiet "$IMAGE@$DIGEST"
+          docker run --rm --network none "$IMAGE@$DIGEST" describe > build/describe.json
+          docker create --name bundle "$IMAGE@$DIGEST"
+          docker cp bundle:/app/bundle/windows build/
+          docker rm bundle
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+
+      # 3. The download, the manifest and SHA256SUMS, from what was built
+      - name: The download, the manifest and SHA256SUMS
+        env:
+          IMAGE: ${{ steps.names.outputs.image }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          python docker/make_release_bundle.py --image "$IMAGE:$VERSION@$DIGEST" --from-bundle build/windows --out dist
+          python -m release_meta generate --version "$VERSION" --commit "$COMMIT" --run-id "$GITHUB_RUN_ID" \
+            --index-digest "$DIGEST" --index build/index.json --describe build/describe.json \
+            --bundle "dist/BlueskyDiscordAlertBot-$VERSION.zip" --compatibility release/compatibility.json --out dist
+          python -m release_meta verify-checksums dist
+          python docker/release_check.py "v$VERSION" --notes build/notes.md
+
+      # 4. Build provenance
+      - name: Provenance of the image
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          files: dist/*.zip
-          body_path: release-notes.md
-          prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
+          subject-name: ${{ steps.names.outputs.image }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+      - name: Provenance of the download and the manifest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/BlueskyDiscordAlertBot-${{ needs.prepare.outputs.version }}.zip
+            dist/alertbot-release.json
+
+      # 5. The tag, at the approved commit
+      - name: Tag the approved commit
+        run: gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/v$VERSION" -f sha="$COMMIT" --silent
+
+      # 6. A draft release, checked
+      - name: Create the release as a draft
+        run: |
+          flag=--latest; [ "$PRERELEASE" = "true" ] && flag=--prerelease
+          gh release create "v$VERSION" dist/* --draft --verify-tag --title "v$VERSION" \
+            --notes-file build/notes.md "$flag"
+      - name: Check the draft's files
+        run: |
+          gh release download "v$VERSION" --dir build/check
+          python -m release_meta verify-checksums build/check
+          for f in dist/*; do cmp "$f" "build/check/$(basename "$f")"; done
+
+      # 7. Publish, then read it back like an updater does
+      - name: Publish the release
+        run: gh release edit "v$VERSION" --draft=false
+      - name: Check the published release
+        run: python -m release_meta verify-release "v$VERSION" --expect dist/alertbot-release.json
+
+      # 8-9. Tags on the image, last (conveniences for people; installs and updates use the digest)
+      - name: Add the version tag to the image
+        env:
+          IMAGE: ${{ steps.names.outputs.image }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: docker buildx imagetools create --tag "$IMAGE:$VERSION" "$IMAGE@$DIGEST"
+      - name: Move :stable (final releases only)
+        if: needs.prepare.outputs.prerelease == 'false'
+        env:
+          IMAGE: ${{ steps.names.outputs.image }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: docker buildx imagetools create --tag "$IMAGE:stable" "$IMAGE@$DIGEST"

@@ -104,6 +104,18 @@ class Client:
         data, _ = self._json(url, accept="application/octet-stream", limit=limit)
         return data
 
+    def release(self, tag: str) -> dict:
+        if not tag.startswith("v") or not semver.is_valid(tag[1:]):
+            raise MetadataError(f"{tag!r} isn't a version tag")
+        data, _ = self._json(f"{self.api}/repos/{self.repository}/releases/tags/{tag}")
+        if not isinstance(data, dict):
+            raise MetadataError("GitHub's description of the release is malformed")
+        return data
+
+    def asset_bytes(self, url, limit) -> bytes:
+        body, _ = self._get(url, "application/octet-stream", limit)
+        return body
+
     def withdrawn_file(self):
         url = f"{self.api}/repos/{self.repository}/contents/{WITHDRAWN_PATH}?ref=main"
         data, _ = self._json(url, accept="application/vnd.github.raw+json", limit=withdrawn.MAX_BYTES)
@@ -156,6 +168,24 @@ def load_candidates(client: Client, newer_than: semver.Version | None = None,
 
 def load_withdrawn(client: Client) -> withdrawn.Withdrawn:
     return withdrawn.validate(client.withdrawn_file())
+
+
+def verify_release(client: Client, tag: str, expected_manifest: bytes | None = None) -> manifest.Manifest:
+    """A published release, read back from GitHub the way updaters read it: it must be immutable, its
+    manifest valid and matching the release, and (if given) byte-for-byte the manifest that was built."""
+    record = _record(client.release(tag))
+    asset = record.assets.get(MANIFEST_ASSET)
+    if asset is None:
+        raise MetadataError(f"{tag} has no {MANIFEST_ASSET}")
+    raw = client.asset_bytes(asset["url"], manifest.MAX_BYTES)
+    try:
+        parsed = manifest.validate(json.loads(raw.decode("utf-8")))
+    except (UnicodeDecodeError, ValueError):
+        raise MetadataError(f"{tag}'s {MANIFEST_ASSET} isn't valid JSON") from None
+    manifest.check_against_release(parsed, record, require_immutable=True)
+    if expected_manifest is not None and raw != expected_manifest:
+        raise MetadataError(f"{tag}'s published {MANIFEST_ASSET} isn't the one that was built")
+    return parsed
 
 
 def check(installed: str, channel: str, client: Client | None = None, seen: withdrawn.Seen | None = None,

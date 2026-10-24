@@ -20,6 +20,8 @@ Every version is updated with `update.bat`, which backs up your data first.
 
 - **For maintainers: the image carries its own deployment files** in `/app/bundle/windows` (scripts, Compose file, READMEs, licenses, with their hashes), and describes itself (`describe`: version, migrations, platform, deployment files). The release manifest and `SHA256SUMS` are built from the real build outputs (`python -m release_meta generate`). The download is now reproducible: the same files give a byte-identical zip. The publishing workflow doesn't use this yet.
 
+- **For maintainers: a hardened release workflow.** It is started by hand, with the version, and creates the tag itself. Nothing is pushed or published before the maintainer approves the `release` environment. The image is pushed by digest, and the download is built from the image's own files and pinned by digest. The manifest, `SHA256SUMS` and build provenance attestations are published with it; the release is checked as a draft, then read back after publishing. `:stable` moves last, for final releases only. Every action in the workflows is pinned to a commit. Not run yet: it needs the repository settings in docs/RELEASES.md, section 6.
+
 ### Changed
 - **Stopping the checker is clean:** the Discord notification it is sending finishes and is saved, nothing new starts, a running Check All saves what it did, and it never waits more than 20 seconds. `update.bat` (and `start.bat` or `setup.bat` starting another version) stops the running bot this way before the new version updates the database.
 - **`restore.bat` stops the bot before its safety backup,** so that backup holds exactly the data that is replaced.
