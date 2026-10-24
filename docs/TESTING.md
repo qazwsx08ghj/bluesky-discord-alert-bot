@@ -71,6 +71,7 @@ The opt-in real-Docker tests build images and start containers (about 5 minutes)
 ```
 set RUN_DOCKER_TESTS=1
 python manage.py test config.tests_docker config.tests_docker_safety config.tests_docker_release config.tests_dev_stack
+python manage.py test config.tests_docker_updater   # update.bat with real containers (about 3 minutes)
 ```
 
 Docker files only:
@@ -117,6 +118,9 @@ docker build -t bluesky-alert-bot:local .          # also checks the license not
 | `config/tests_release_workflow.py` | 17 | The release workflow file: triggers, permissions before and after approval, the order of what is published, digests, pins, and the shell steps run as GitHub runs them (a fork can't publish under another image name; a missing digest stops it) |
 | `botconfig/tests_describe.py` | 8 | `describe_release`: a complete image, only this project's newest migrations, a development build, changed or missing deployment files; it touches no data. Static checks: the image build exports and checks the deployment files as root, only those files are let into the build, and no container gets the Docker socket or extra privileges |
 | `config/tests_docker_release.py` | 8 | Opt-in, slow: a real `linux/amd64` + `linux/arm64` build pushed to a local registry. The index read raw matches the digest; `describe` run by digest; the deployment files copied out with `docker cp` equal the checkout's; manifest and checksums built and valid, and reproducible. Caught: a tag moved to another image, a changed download, a deployment file changed in a container (the bot's user can't change them) |
+| `config/tests_updater_scripts.py` | 27 | `update.bat` under `cmd.exe` with a fake Docker (Windows only): up to date changes nothing; channels, the remembered withdrawal list; a full update (files swapped, `compose.env` re-pinned with your lines kept); every abort before stopping; going back after a failed trial or start, or `NEEDS_USER` when the data changed; finishing or undoing an interrupted update; the lock; other scripts blocked mid-update |
+| `botconfig/tests_updater.py` | 10 | The updater's commands in the image: `update_plan` against a fake GitHub (the test API only in test builds), `update_preflight` (newer data, a failing migration; only a copy is changed), `update_selftest`, `data_fingerprint` |
+| `config/tests_docker_updater.py` | 8 | Opt-in, with **real containers**, images built for the tests and a fake GitHub on a private network: up to date (no restart, no backup), no network, an update keeping the data and settings, going back after a failed trial and after a version that doesn't start, withdrawn versions, an interrupted update undone, the lock |
 | `config/tests.py`, `tests_step10.py` | 9, 10 | Settings API, removed routes, migrations of legacy data |
 | `config/tests_docker.py` | 13 | Opt-in, with **real containers** driven by the real scripts. It covers: `setup.bat` importing an earlier install, `start.bat`, `update.bat` backing up first, stopping the old version, and refusing while a real 1.0.0-rc.2 checker from another folder uses the data, `stop.bat` and `restore.bat` (with its report and RESTORE, and refused while another container uses the data); local-only access and CSRF in Docker; crash recovery; data kept across restarts, rebuilds and recreation; and the `@docker` browser checks. (`backup.bat` is covered by the fake-Docker script tests only.) |
 | `config/tests_dev_stack.py` | 6 | Opt-in: the demo stack has no mounts, credentials or internet, and Discord is fake |

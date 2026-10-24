@@ -12,6 +12,7 @@ echo ============================================================
 echo.
 call "%COMMON%" :init
 call "%COMMON%" :check_docker || goto :failed
+call "%COMMON%" :check_unfinished_update || goto :failed
 call "%COMMON%" :is_set_up
 if errorlevel 1 goto :nothing
 

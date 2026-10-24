@@ -42,3 +42,5 @@ docker/compose.env
 !backup.bat
 !restore.bat
 !docker-compose.yml
+# update.bat's working files (state, staged and previous files) in an install
+docker/update/

@@ -50,9 +50,12 @@ def _allowed(url, allowed):
 
 class Client:
     def __init__(self, api: str = API, repository: str = REPOSITORY, test_hosts=()):
-        """test_hosts: extra URL prefixes allowed, only http://127.0.0.1:<port>/ (the tests' fake GitHub)."""
+        """test_hosts: extra URL prefixes allowed, only http://127.0.0.1:<port>/ (the tests' fake GitHub),
+        or, in an image built for the tests only (is_test_build), any http:// test server."""
+        from . import is_test_build
+
         for host in test_hosts:
-            if not host.startswith("http://127.0.0.1:"):
+            if not host.startswith("http://127.0.0.1:") and not (is_test_build() and host.startswith("http://")):
                 raise ValueError("only a local test server may be added")
         if not _allowed(api.rstrip("/") + "/", test_hosts):
             raise ValueError("the API must be GitHub's")

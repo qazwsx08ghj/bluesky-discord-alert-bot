@@ -52,16 +52,17 @@ The only thing a Windows user installs is **Docker Desktop**. Everything else is
 
 ## 3. Updates
 
-`update.bat` does, in order:
-1. **Backup:** `backup_db --label before-update`, inside the volume plus a copy in `backups\`. If this fails, nothing else happens.
-2. **New version:** a release download pulls the published image (`docker compose pull`); a source folder rebuilds (`docker compose build --pull`). If this fails, the current version keeps running.
-3. **Restart:**
-   - if the running bot isn't exactly this version (or Docker can't tell), it is stopped first (`docker compose stop`; the checker finishes the notification it is sending). Then no container may still use the data volume (see "Data safety"). If one does, or Docker can't say, the stopped containers are started again as they were and the update stops there. `start.bat` and `setup.bat` do the same before they start a version that isn't running;
-   - `docker compose up -d` recreates the containers with the new image, keeping the same volume. On start, `web` takes the data lock (see "Data safety"), backs up again if the update brings database changes, then migrates.
-4. **Check:** waits for `/api/health/`, then opens the panel.
-5. **Tidy up:** only after a successful update, removes this bot's old images that nothing uses any more (`docker image prune` limited to images labelled "Bluesky Discord Alert Bot"; never volumes). Without this, every update would leave about 260 MB behind.
+**A release download** (`ALERTBOT_IMAGE` set in `docker\compose.env`). `update.bat` runs from a copy in `%TEMP%`, because it may replace itself:
+1. **Check:** the installed image (`update-plan`, no data mounted) asks GitHub's releases for a newer version on your channel (`stable`, or `prerelease` for a test version; `ALERTBOT_CHANNEL` in `compose.env` overrides it). It follows `release_meta` (docs/RELEASES.md): never older, withdrawn versions skipped, each manifest validated, images pinned by digest, versions needing a newer updater named instead of installed. If GitHub can't be reached or anything is invalid, it says so and changes nothing. **Already up to date: it exits without stopping anything or making a backup.**
+2. **Download:** pulls `image:version@sha256:...` and checks that the image reports that version.
+3. **Check before stopping:** copies the new deployment files out of the image into `docker\update\staging` and checks each against the image's SHA-256 list; then migrates a copy of the data with the new image (`update-preflight`: enough disk space, data not from a newer version, migrations succeed). Any failure here: nothing was stopped or changed.
+4. **Stop and back up:** `docker compose stop`, no other container may use the data, then `backup_db --label before-update` (also copied to `backups\`).
+5. **Swap:** keeps the current files in `docker\update\previous`, installs the new ones (`compose.env` keeps your lines, only `ALERTBOT_IMAGE` is re-pinned), then a trial run of the new image on the data (migrate plus a self-test).
+6. **Start:** `docker compose up -d`, waits for `/api/health/` and checks the running version.
 
-If nothing changed since the last update, Docker rebuilds or downloads the same image and leaves the running bot as it is.
+Every step is written to `docker\update\state.txt`; one update runs at a time (a lock container, `<project>-update-lock`). The previous image is kept for going back. `start.bat`, `setup.bat` and `restore.bat` refuse to run while an update is unfinished; running `update.bat` again finishes or undoes it.
+
+**A source folder** (`ALERTBOT_IMAGE` empty) backs up, rebuilds (`docker compose build --pull`), restarts and checks, as before.
 
 ### Where backups are
 - **Inside Docker,** in the data volume (`/data/backups`): `db-before-update-*` (`update.bat`), `db-manual-*` (`backup.bat`), `db-before-restore-*` (`restore.bat`), and `db-auto-*` (made by the web start whenever migrations are waiting, so an update makes two backups).
@@ -71,14 +72,14 @@ If nothing changed since the last update, Docker rebuilds or downloads the same 
 - `restore.bat` first copies every backup from the volume into its own `backups` folder, so a new download's folder lists the backups made from an older folder too.
 
 ### If an update goes wrong
-Your data and the backups are untouched; nothing in the update deletes anything, and nothing is undone automatically. What `update.bat` does when a step fails:
-- **The backup fails:** it stops; nothing else is done.
-- **The new version can't be downloaded:** the current version keeps running.
-- **The data is from a newer version than this folder's** (1.0.0-rc.2 and later): it stops before starting anything; see "Older versions and newer data" below.
-- **The new version doesn't start, or the panel doesn't answer:** it says so, keeps the backup, and saves `logs\problem-report.txt`.
+Nothing in the update deletes data or backups. What `update.bat` does when a step fails:
+- **Steps 1-3 (check, download, files, preflight):** stops; the bot keeps running as it was.
+- **The backup fails, or another container uses the data:** stops; the bot is started again as it was.
+- **The trial run fails, or the new version doesn't start:** goes back on its own: the previous files, the before-update backup put back with the previous image, and the previous version started. If the new version may already have written something you'd lose (the data's fingerprint changed since the trial run), or putting the backup back fails, it doesn't guess: it stops with `NEEDS_USER` and says what to do.
+- **The window was closed part-way:** the next `update.bat` reads `state.txt` and finishes the update (if it had already started the new version) or undoes it.
 
-Then:
-1. Run `update.bat` again (a download that broke off is a common cause), or ask for help with `logs\problem-report.txt`.
+To go back by hand (after `NEEDS_USER`, or later):
+1. Ask for help with `logs\problem-report.txt` if unsure.
 2. **To go back to the version you had, restore first:** use that version's `restore.bat` and choose the newest `db-before-update-*` backup. It backs up the current data, puts the backup back, and starts that version.
    - A test version's download: the old folder's `restore.bat`.
    - A stable download: set `ALERTBOT_IMAGE` in `docker\compose.env` to the previous version tag (e.g. `…:1.1.0`), then `restore.bat`.

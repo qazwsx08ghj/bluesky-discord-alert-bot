@@ -12,6 +12,7 @@
 #               "restore --report <file>" only says what that would undo (the bot may run)
 #   describe    this image's version, migrations, platform and deployment files, as JSON (read-only;
 #               the release workflow builds the release manifest from it)
+#   update-plan, update-preflight, trial, fingerprint: steps of update.bat (docs/UPDATES.md)
 #   anything else is run as a command, e.g. "python manage.py check"
 set -eu
 cd /app
@@ -62,6 +63,20 @@ case "${1:-web}" in
     ;;
   describe)
     exec python manage.py describe_release
+    ;;
+  update-plan)
+    shift
+    exec python manage.py update_plan "$@"
+    ;;
+  update-preflight)
+    exec python manage.py update_preflight
+    ;;
+  trial)
+    python manage.py prepare_data
+    exec python manage.py update_selftest
+    ;;
+  fingerprint)
+    exec python manage.py data_fingerprint
     ;;
   *)
     exec "$@"

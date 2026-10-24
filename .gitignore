@@ -42,3 +42,5 @@ Thumbs.db
 # Docker scripts: problem reports, and release downloads built by docker/make_release_bundle.py
 logs/
 dist/
+# update.bat's working files (state, staged and previous files) in an install
+docker/update/

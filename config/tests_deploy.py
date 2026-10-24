@@ -773,11 +773,15 @@ class ReleaseBundleTests(ScriptHarness):
         code, out, calls = self.run_script("setup.bat", FAKE_VOLUME="missing")
         self.assertEqual(code, 0, out)
         self.assertEqual(self.compose_calls(calls), ["ps -q web", "pull", OWN_PS, "up -d"])
-        code, out, calls = self.run_script("update.bat")
+        # A release download's update.bat asks the installed image for a newer release first
+        # (config/tests_updater_scripts.py has the whole updater).
+        code, out, calls = self.run_script("update.bat", FAKE_PLAN="up_to_date")
         self.assertEqual(code, 0, out)
-        steps = self.compose_calls(calls)
-        self.assertTrue(steps[0].startswith("run --rm --no-deps"))
-        self.assertEqual(steps[1:], ["pull", CHECK_COMPAT, OWN_PS, "up -d"])
+        plan = [c for c in calls if " update-plan " in c]
+        self.assertEqual(len(plan), 1)
+        self.assertIn('"ghcr.io/example/bluesky-discord-alert-bot:stable" update-plan --channel stable', plan[0])
+        self.assertIn("You have the newest version", out)
+        self.assertNotIn("up -d", self.compose_calls(calls), "nothing is started")
         self.assertFalse(any("build" in c for c in calls))
 
     def test_bad_image_names_are_refused(self):
