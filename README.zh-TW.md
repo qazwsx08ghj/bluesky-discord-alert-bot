@@ -44,6 +44,8 @@
 
 不需要 Python、Git 或其他任何工具，也完全不用打指令。
 
+**要裝在 Ubuntu 伺服器上？** 請看 [docs/UBUNTU.zh-TW.md](docs/UBUNTU.zh-TW.md)：一個指令就能安裝（從 1.0.0-rc.4 版開始）。
+
 ---
 
 ## 第 1 步：安裝 Docker Desktop

@@ -6,3 +6,4 @@
 # Generated from the code; regenerate rather than edit (see CONTRIBUTING.md).
 docs/openapi.yaml linguist-generated=true
 frontend/src/api/schema.gen.ts linguist-generated=true
+docker/linux/alertbot text eol=lf

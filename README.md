@@ -42,6 +42,8 @@ Clicking the title opens the post on Bluesky.
 
 You don't need Python, Git or any other tools, and you never type commands.
 
+**On an Ubuntu server instead?** See [docs/UBUNTU.md](docs/UBUNTU.md): one command installs it (from version 1.0.0-rc.4).
+
 ---
 
 ## Step 1: Install Docker Desktop

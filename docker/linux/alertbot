@@ -1,0 +1,1046 @@
+#!/usr/bin/env bash
+# Bluesky -> Discord Alert Bot on a Linux server (Ubuntu). One script for everything:
+#
+#   ./alertbot setup     first-time setup, also safe to run again: settings, download, start
+#   ./alertbot start     start the bot (and say where the control panel is)
+#   ./alertbot stop      stop the bot (it stays stopped until start)
+#   ./alertbot status    is it running and healthy, which version, where to open it
+#   ./alertbot config    change the address and port the control panel listens on
+#   ./alertbot update    install a newer version: checks first, backs up, goes back by itself if it fails
+#   ./alertbot backup    save a backup copy into the backups folder here
+#   ./alertbot restore   put a backup back (the current data is backed up first)
+#
+# The bot's data lives in the Docker volume <project>_bot-data and is never deleted by this script.
+# Settings of this install are in docker/compose.env; updates keep them. See docs/UBUNTU.md.
+# The same steps as the Windows scripts (docker/scripts/common.bat), using the same commands
+# inside the image (update-plan, update-preflight, trial, fingerprint, backup, restore).
+set -u
+umask 077   # backups hold passwords: everything written here is private to this user
+
+DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)" || exit 1
+cd "$DIR" || exit 1
+PROJECT="${ALERTBOT_PROJECT:-alertbot}"
+VOLUME="${PROJECT}_bot-data"
+DOCKER="${ALERTBOT_DOCKER:-docker}"
+ENV_FILE="docker/compose.env"
+RELEASE_ENV="docker/release.env"
+UPD="docker/update"
+READY_WAIT="${ALERTBOT_READY_WAIT_SECONDS:-240}"
+DEFAULT_HOSTS="localhost,127.0.0.1,[::1]"
+LOCAL_FILES="alertbot docker-compose.yml README.txt README.zh-TW.txt LICENSE THIRD_PARTY_NOTICES.txt"
+HEALTH_PY='import urllib.request, urllib.error
+try:
+    r = urllib.request.urlopen("http://127.0.0.1:8000/api/health/", timeout=5)
+    print(r.status, r.read().decode())
+except urllib.error.HTTPError as e:
+    print(e.code, e.read().decode())'
+# A one-off container on the bot's data: no network, no port, no extra rights, nothing written
+# outside /data and /tmp. Used for the trial run, the fingerprint and putting a backup back.
+RUNNER=("$DOCKER" run --rm --network none --read-only --tmpfs /tmp --cap-drop ALL
+        --security-opt no-new-privileges -v "$VOLUME:/data" -e DATABASE_PATH=/data/db.sqlite3
+        -e BACKUP_DIR=/data/backups -e SECRET_KEY_FILE=/data/secret_key -e CACHE_DIR=/data/cache
+        -e SCHEDULER_IN_WEB=0 -e DEBUG=False -e ALLOWED_HOSTS=localhost -e TZ=UTC)
+
+say() { printf '%s\n' "$*"; }
+compose() { "$DOCKER" compose -p "$PROJECT" --env-file "$ENV_FILE" -f docker-compose.yml "$@"; }
+
+# ask VAR "prompt" default: one line from the keyboard; just Enter (or no input at all) gives the default.
+ask() {
+  local _line=""
+  printf '%s' "$2"
+  if IFS= read -r _line; then ASK_EOF=""; else ASK_EOF=1; echo; fi
+  _line="${_line%$'\r'}"
+  _line="${_line#"${_line%%[![:space:]]*}"}"; _line="${_line%"${_line##*[![:space:]]}"}"
+  printf -v "$1" '%s' "${_line:-$3}"
+}
+
+yes_no() {  # yes_no "question" -> 0 for yes (Enter = yes)
+  [ -n "${ALERTBOT_ASSUME_YES:-}" ] && return 0
+  local answer; ask answer "$1 [Y/n] " "y"
+  [ -z "$ASK_EOF" ] || return 1
+  case "$answer" in [Yy]|[Yy][Ee][Ss]) return 0 ;; *) return 1 ;; esac
+}
+
+# -- docker/compose.env ----------------------------------------------------------------------------
+env_get() {  # env_get KEY [file]: the value of the last KEY= line, or nothing
+  local file="${2:-$ENV_FILE}" line value=""
+  [ -f "$file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    case "$line" in "$1="*) value="${line#*=}" ;; esac
+  done < "$file"
+  printf '%s' "$value"
+}
+
+env_set() {  # env_set KEY VALUE: replaces KEY's line, keeps every other line
+  local tmp="$ENV_FILE.tmp.$$"
+  { [ -f "$ENV_FILE" ] && grep -v "^$1=" "$ENV_FILE"; printf '%s=%s\n' "$1" "$2"; } > "$tmp" && mv -f "$tmp" "$ENV_FILE"
+}
+
+load_config() {
+  CFG_IMAGE="$(env_get ALERTBOT_IMAGE)"
+  CFG_BIND="$(env_get ALERTBOT_BIND)"; CFG_BIND="${CFG_BIND:-127.0.0.1}"
+  CFG_PORT="$(env_get ALERTBOT_PORT)"; CFG_PORT="${CFG_PORT:-8000}"
+}
+
+image_version() {  # ghcr.io/x/y:1.2.3@sha256:... -> 1.2.3
+  local ref="${1%%@*}" last
+  last="${ref##*/}"
+  case "$last" in *:*) printf '%s' "${last##*:}" ;; *) printf 'unknown' ;; esac
+}
+
+# -- Checks ----------------------------------------------------------------------------------------
+version_at_least() {  # version_at_least 2.29.1 2.23.0
+  local IFS=.- i x y
+  local -a a b
+  read -r -a a <<< "$1"; read -r -a b <<< "$2"
+  for i in 0 1 2; do
+    x="${a[i]:-0}"; y="${b[i]:-0}"; x="${x%%[!0-9]*}"; y="${y%%[!0-9]*}"; x="${x:-0}"; y="${y:-0}"
+    [ "$((10#$x))" -gt "$((10#$y))" ] && return 0
+    [ "$((10#$x))" -lt "$((10#$y))" ] && return 1
+  done
+  return 0
+}
+
+check_docker() {
+  if ! command -v "$DOCKER" > /dev/null 2>&1; then
+    say " Docker isn't installed. Install Docker Engine with its Compose plugin first, as described in"
+    say "   https://docs.docker.com/engine/install/ubuntu/"
+    say " then run this again (docs/UBUNTU.md, \"What you need\")."
+    return 1
+  fi
+  local out version
+  if ! out="$("$DOCKER" info --format '{{.OSType}}' 2>&1)"; then
+    case "$out" in
+      *[Pp]ermission\ denied*)
+        say " Docker is installed, but this user may not use it. Either:"
+        say "   - add yourself to the docker group:  sudo usermod -aG docker \$USER"
+        say "     then log out and back in (the docker group can control the whole server, like root), or"
+        say "   - run this script with sudo." ;;
+      *)
+        say " Docker isn't running. Start it (and have it start with the server) with:"
+        say "   sudo systemctl enable --now docker" ;;
+    esac
+    return 1
+  fi
+  if [ "$out" != "linux" ]; then
+    say " Docker must run Linux containers, but it reports \"$out\"."
+    return 1
+  fi
+  version="$("$DOCKER" compose version --short 2> /dev/null)"; version="${version#v}"
+  if [ -z "$version" ]; then
+    say " The Docker Compose plugin is missing. Install it (package docker-compose-plugin), see"
+    say "   https://docs.docker.com/compose/install/linux/"
+    return 1
+  fi
+  if ! version_at_least "$version" 2.23.0; then
+    say " Docker Compose $version is too old: this bot needs 2.23.0 or later."
+    say " Update it (package docker-compose-plugin), see https://docs.docker.com/compose/install/linux/"
+    return 1
+  fi
+}
+
+is_set_up() { "$DOCKER" volume inspect "$VOLUME" > /dev/null 2>&1; }
+
+own_web_running() { [ -n "$(compose ps -q --status running web 2> /dev/null)" ]; }
+
+port_in_use() {  # 0: something listens on TCP port $1 (any address, IPv4 or IPv6); 2: can't tell
+  local out
+  out="$(ss -Hltn "sport = :$1" 2> /dev/null)" || return 2
+  [ -n "$out" ]
+}
+
+free_port_after() {
+  local p=$(( $1 + 1 ))
+  while [ "$p" -le 65535 ] && [ "$p" -le $(( $1 + 100 )) ]; do
+    port_in_use "$p" || { [ $? -eq 1 ] && { printf '%s' "$p"; return 0; }; }
+    p=$((p + 1))
+  done
+  return 1
+}
+
+check_port() {  # before starting: the saved port must be free, unless this bot already uses it
+  own_web_running && return 0
+  port_in_use "$CFG_PORT"
+  case $? in
+    1) return 0 ;;
+    2) say " Couldn't check whether port $CFG_PORT is free (the \"ss\" command is missing: sudo apt install iproute2)."
+       return 1 ;;
+  esac
+  say ""
+  say " Port $CFG_PORT is already in use on this server (by another program, on IPv4 or IPv6),"
+  say " so the control panel can't start there. Choose another port with:  ./alertbot config"
+  return 1
+}
+
+host_ipv4s() { ip -o -4 addr show 2> /dev/null | awk '{ split($4, a, "/"); print a[1] }'; }
+
+valid_ipv4() {
+  local IFS=. o
+  local -a p
+  [[ "$1" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] || return 1
+  read -r -a p <<< "$1"
+  for o in "${p[@]}"; do [ "$((10#$o))" -le 255 ] || return 1; done
+}
+
+is_private_ipv4() {  # LAN, VPN (100.64/10, e.g. Tailscale) and link-local ranges
+  local IFS=.
+  local -a p
+  read -r -a p <<< "$1"
+  local first=$((10#${p[0]})) second=$((10#${p[1]}))
+  [ "$first" -eq 10 ] && return 0
+  [ "$first" -eq 172 ] && [ "$second" -ge 16 ] && [ "$second" -le 31 ] && return 0
+  [ "$first" -eq 192 ] && [ "$second" -eq 168 ] && return 0
+  [ "$first" -eq 100 ] && [ "$second" -ge 64 ] && [ "$second" -le 127 ] && return 0
+  [ "$first" -eq 169 ] && [ "$second" -eq 254 ] && return 0
+  return 1
+}
+
+check_bind() {  # an address this server has (or 127.0.0.1 / 0.0.0.0)
+  if ! valid_ipv4 "$1"; then
+    say " \"$1\" isn't an IPv4 address such as 127.0.0.1 or 192.168.1.10."
+    return 1
+  fi
+  case "$1" in 127.0.0.1|0.0.0.0) return 0 ;; esac
+  if ! host_ipv4s | grep -qxF "$1"; then
+    say " This server has no address $1. Its addresses: $(host_ipv4s | tr '\n' ' ')"
+    return 1
+  fi
+}
+
+panel_urls() {
+  case "$CFG_BIND" in
+    127.0.0.1) say "   http://127.0.0.1:$CFG_PORT  (on this server; from your computer use an SSH tunnel:"
+               say "    ssh -L $CFG_PORT:127.0.0.1:$CFG_PORT <you>@<this server>, then open that address)" ;;
+    0.0.0.0) local ip
+             for ip in $(host_ipv4s); do say "   http://$ip:$CFG_PORT"; done ;;
+    *) say "   http://$CFG_BIND:$CFG_PORT" ;;
+  esac
+}
+
+# -- Settings: address and port --------------------------------------------------------------------
+configure() {
+  local cur_bind cur_port bind port confirm alt public="" ip
+  cur_bind="$(env_get ALERTBOT_BIND)"; cur_bind="${cur_bind:-127.0.0.1}"
+  cur_port="$(env_get ALERTBOT_PORT)"; cur_port="${cur_port:-8000}"
+  say ""
+  say " Where should the control panel be reachable? Press Enter to keep the value in [brackets]."
+  say "   127.0.0.1   only on this server (safest; reach it from your computer with an SSH tunnel)"
+  say "   a LAN or VPN address of this server, for other devices on that network"
+  say "   0.0.0.0     every network this server is connected to"
+  say "   This server's addresses: $(host_ipv4s | tr '\n' ' ')"
+  while :; do
+    ask bind " Bind IP [$cur_bind]: " "$cur_bind"
+    if check_bind "$bind"; then
+      [ "$bind" = "127.0.0.1" ] && break
+      public=""
+      if [ "$bind" = "0.0.0.0" ]; then
+        for ip in $(host_ipv4s); do
+          [ "$ip" = "127.0.0.1" ] || is_private_ipv4 "$ip" || public=1
+        done
+      elif ! is_private_ipv4 "$bind"; then
+        public=1
+      fi
+      say ""
+      say " WARNING: the control panel has NO login. Anyone who can reach it can read and change the"
+      say " bot's settings, including the Bluesky password and the Discord channels."
+      if [ -n "$public" ]; then
+        say " $bind makes it reachable from the INTERNET unless a firewall in front of this server blocks"
+        say " the port. Docker publishes ports past ufw's rules, so ufw alone doesn't protect it."
+        say " Safer: keep 127.0.0.1 and use an SSH tunnel, or use a VPN such as Tailscale (docs/UBUNTU.md)."
+        ask confirm " Type PUBLIC to allow access from the internet anyway (anything else: choose again): " ""
+        [ "$confirm" = "PUBLIC" ] && break
+      else
+        say " Only use this on a network where you trust every device. Safer: an SSH tunnel (docs/UBUNTU.md)."
+        ask confirm " Type yes to allow access from other devices (anything else: choose again): " ""
+        [ "$confirm" = "yes" ] && break
+      fi
+    fi
+    [ -n "$ASK_EOF" ] && { say " Nothing was changed."; return 1; }
+  done
+  while :; do
+    ask port " Host port [$cur_port]: " "$cur_port"
+    if [[ ! "$port" =~ ^[0-9]{1,5}$ ]] || [ "$((10#$port))" -lt 1 ] || [ "$((10#$port))" -gt 65535 ]; then
+      say " \"$port\" isn't a port number from 1 to 65535."
+    else
+      port="$((10#$port))"
+      if [ "$port" = "$cur_port" ] && own_web_running; then break; fi   # this bot already listens there
+      port_in_use "$port"
+      case $? in
+        1) break ;;
+        2) say " Couldn't check whether port $port is free (the \"ss\" command is missing: sudo apt install iproute2)."
+           return 1 ;;
+      esac
+      say " Port $port is already in use on this server (by another program, on IPv4 or IPv6)."
+      if alt="$(free_port_after "$port")"; then
+        if yes_no " Use port $alt instead?"; then port="$alt"; break; fi
+      fi
+    fi
+    [ -n "$ASK_EOF" ] && { say " Nothing was changed."; return 1; }
+  done
+  local hosts="$DEFAULT_HOSTS" origins=""
+  case "$bind" in
+    127.0.0.1) ;;
+    0.0.0.0) for ip in $(host_ipv4s); do
+               [ "$ip" = "127.0.0.1" ] && continue
+               hosts="$hosts,$ip"; origins="${origins:+$origins,}http://$ip:$port"
+             done ;;
+    *) hosts="$hosts,$bind"; origins="http://$bind:$port" ;;
+  esac
+  env_set ALERTBOT_BIND "$bind"
+  env_set ALERTBOT_PORT "$port"
+  env_set ALERTBOT_ALLOWED_HOSTS "$hosts"
+  env_set ALERTBOT_CSRF_TRUSTED_ORIGINS "$origins"
+  load_config
+  say " Saved in docker/compose.env: the control panel will listen on $bind, port $port."
+}
+
+# docker/compose.env of this install: created from the download's docker/release.env the first time.
+ensure_env() {
+  local release installed
+  release="$(env_get ALERTBOT_IMAGE "$RELEASE_ENV")"
+  if [ ! -f "$ENV_FILE" ] || [ -z "$(env_get ALERTBOT_IMAGE)" ]; then
+    if [ -z "$release" ]; then
+      say " This folder is incomplete (docker/release.env is missing). Download the bot again (docs/UBUNTU.md)."
+      return 1
+    fi
+    [ -f "$ENV_FILE" ] || printf '# Settings of this install. Updates keep them. Change the address and port with: ./alertbot config\n' > "$ENV_FILE"
+    env_set ALERTBOT_IMAGE "$release"
+  else
+    installed="$(env_get ALERTBOT_IMAGE)"
+    if [ -n "$release" ] && [ "$installed" != "$release" ]; then
+      say " This folder already has the bot installed ($(image_version "$installed")); it is kept, with its"
+      say " settings and data. To install a newer version, run:  ./alertbot update"
+    fi
+  fi
+  load_config
+}
+
+# -- Docker steps ----------------------------------------------------------------------------------
+pull_ref() {
+  "$DOCKER" image inspect "$1" > /dev/null 2>&1 && return 0
+  say " Downloading $1 ..."
+  "$DOCKER" pull "$1" && return 0
+  say " The bot program couldn't be downloaded. Check the internet connection, then try again."
+  say " Nothing was changed, and your data is safe."
+  return 1
+}
+
+check_compat() {
+  compose run --rm --no-deps -T web python manage.py check_compat > /dev/null 2>&1
+  [ $? -eq 3 ] || return 0
+  say " The bot's data was last used by a newer version than this folder's, so this version can't"
+  say " use it. Nothing was changed. Use the newer version's folder, or restore a backup."
+  return 1
+}
+
+running_version() {  # OWN_RUNNING: this bot's containers run; SAME_VERSION: all of them on CFG_IMAGE
+  OWN_RUNNING=""; SAME_VERSION=""
+  local want ids id img all_same=1
+  want="$("$DOCKER" image inspect --format '{{.Id}}' "$CFG_IMAGE" 2> /dev/null)"
+  ids="$(compose ps -q 2> /dev/null)" || return 1
+  for id in $ids; do
+    OWN_RUNNING=1
+    img="$("$DOCKER" inspect --format '{{.Image}}' "$id" 2> /dev/null)"
+    { [ -n "$want" ] && [ "$img" = "$want" ]; } || all_same=""
+  done
+  [ -n "$OWN_RUNNING" ] && [ -n "$all_same" ] && [ -n "$want" ] && SAME_VERSION=1
+  return 0
+}
+
+ensure_data_free() {  # no container may still use the data (fails closed if Docker can't say)
+  local names
+  if ! names="$("$DOCKER" ps --filter "volume=$VOLUME" --format '{{.Names}}' 2> /dev/null)"; then
+    say " Docker didn't say which containers use the bot's data, so nothing was changed. Try again."
+    return 1
+  fi
+  [ -z "$names" ] && return 0
+  say " Something else still uses the bot's data: $(printf '%s' "$names" | tr '\n' ' ')"
+  say " It is probably the bot started from another folder. Stop it there, then try again. Nothing was changed."
+  return 1
+}
+
+prepare_start() {  # before starting a version that isn't running: stop the old one, data must be free
+  if ! running_version; then
+    say " Docker didn't say which version of the bot is running, so nothing was changed. Try again."
+    return 1
+  fi
+  [ -n "$SAME_VERSION" ] && return 0
+  if [ -n "$OWN_RUNNING" ]; then
+    say " Stopping the running bot first (it finishes any notification it is sending)..."
+    compose stop || { say " The running bot couldn't be stopped, so nothing was changed."; return 1; }
+  fi
+  ensure_data_free && return 0
+  [ -n "$OWN_RUNNING" ] && compose start > /dev/null 2>&1
+  return 1
+}
+
+do_up() {
+  compose up -d && return 0
+  if ! own_web_running && port_in_use "$CFG_PORT"; then
+    say " Port $CFG_PORT is taken by another program. Choose another port with:  ./alertbot config"
+  else
+    say " The bot couldn't be started (the reason is above)."
+  fi
+  return 1
+}
+
+health() { compose exec -T web python -c "$HEALTH_PY" 2> /dev/null; }
+
+save_logs() {
+  mkdir -p logs
+  { say "Bluesky Discord Alert Bot - problem report"
+    say "Passwords and Discord webhook links are hidden in the bot's messages."
+    compose ps -a 2>&1
+    compose logs --no-color --tail 300 2>&1; } > logs/problem-report.txt
+  say " Details were saved in $DIR/logs/problem-report.txt (share it if you ask for help)."
+}
+
+wait_ready() {
+  say " Waiting for the control panel to be ready..."
+  local waited=0 out
+  while :; do
+    out="$(health)"
+    case "$out" in
+      "200 "*) break ;;
+      *newer_data*) say " The bot's data was last used by a newer version, so this version shows only a warning."
+                    say " Use the newer version, or restore a backup. Nothing was changed."
+                    return 1 ;;
+    esac
+    if [ "$waited" -ge "$READY_WAIT" ]; then
+      say " The control panel didn't answer within $READY_WAIT seconds."
+      save_logs
+      return 1
+    fi
+    sleep 2; waited=$((waited + 2))
+  done
+  say " The control panel is ready:"
+  panel_urls
+}
+
+running_is() { health | grep -qF "\"$1\""; }
+
+check_unfinished_update() {
+  [ -f "$UPD/state.txt" ] || return 0
+  local state; state="$(env_get STATE "$UPD/state.txt")"
+  case "$state" in DONE|ABORTED|ROLLED_BACK|NEEDS_USER|"") return 0 ;; esac
+  say ""
+  say " An update didn't finish (it stopped at $state). Run ./alertbot update first: it finishes it"
+  say " or undoes it, safely. Nothing was started or changed."
+  return 1
+}
+
+# -- Backups ---------------------------------------------------------------------------------------
+copy_out() {  # copy_out NAME [IMAGE]: /data/backups/NAME into backups/, checked byte for byte
+  local name="$1" img="${2:-$CFG_IMAGE}" part info want mtime
+  [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || return 1
+  mkdir -p backups
+  part="backups/.$name.part"
+  if ! "$DOCKER" run --rm --network none -v "$VOLUME:/data:ro" --entrypoint cat "$img" "/data/backups/$name" > "$part"; then
+    rm -f "$part"; return 1
+  fi
+  info="$("$DOCKER" run --rm --network none -v "$VOLUME:/data:ro" --entrypoint sh "$img" \
+          -c 'sha256sum "$1" | cut -d" " -f1; stat -c %Y "$1"' sh "/data/backups/$name" 2> /dev/null)"
+  want="$(printf '%s\n' "$info" | sed -n 1p)"; mtime="$(printf '%s\n' "$info" | sed -n 2p)"
+  if [ -z "$want" ] || [ "$want" != "$(sha256sum "$part" | cut -d' ' -f1)" ]; then
+    rm -f "$part"; return 1
+  fi
+  mv -f "$part" "backups/$name"
+  [ -n "$mtime" ] && touch -d "@$mtime" "backups/$name" 2> /dev/null
+  return 0
+}
+
+backup_named() {  # backup_named LABEL: a backup inside the data, and a checked copy in backups/
+  BACKUP_FILE=""
+  local out rc path
+  out="$(compose run --rm --no-deps -T web backup --label "$1" 2>&1)"; rc=$?
+  path="$(printf '%s\n' "$out" | sed -n 's|^Database backed up to \(/data/backups/[^ ]*\).*|\1|p' | head -n 1)"
+  if [ "$rc" -ne 0 ] || [ -z "$path" ]; then
+    printf '%s\n' "$out"
+    say " The backup failed, so nothing else was done. Nothing was changed."
+    return 1
+  fi
+  BACKUP_FILE="${path#/data/backups/}"
+  if ! copy_out "$BACKUP_FILE"; then
+    say " The backup $BACKUP_FILE is in the bot's data, but its copy in backups/ couldn't be saved"
+    say " (is the disk full?). Nothing else was done."
+    return 1
+  fi
+  say " Backed up to $BACKUP_FILE (a copy is in $DIR/backups)."
+}
+
+export_backups() {  # every backup in the data that isn't in backups/ yet
+  local names name
+  names="$("$DOCKER" run --rm --network none -v "$VOLUME:/data:ro" --entrypoint sh "$CFG_IMAGE" \
+           -c 'ls -1 /data/backups 2>/dev/null; true')" || return 1
+  for name in $names; do
+    case "$name" in *.sqlite3) [ -f "backups/$name" ] || copy_out "$name" || return 1 ;; esac
+  done
+}
+
+# -- Commands --------------------------------------------------------------------------------------
+cmd_setup() {
+  say "============================================================"
+  say " Bluesky to Discord Alert Bot - setup"
+  say "============================================================"
+  say ""
+  say "[1/4] Checking Docker..."
+  check_docker || return 1
+  check_unfinished_update || return 1
+  ensure_env || return 1
+  say "[2/4] Settings"
+  configure || return 1
+  say ""
+  say "[3/4] Preparing the bot..."
+  pull_ref "$CFG_IMAGE" || return 1
+  if is_set_up; then check_compat || return 1; fi
+  say ""
+  say "[4/4] Starting the bot..."
+  check_port || return 1
+  prepare_start || return 1
+  do_up || return 1
+  wait_ready || return 1
+  say ""
+  say " Setup is complete. The bot runs in Docker and starts again by itself after a reboot."
+  say " Open the control panel, enter your Bluesky login and your Discord channels (docs/UBUNTU.md)."
+  say " Later: ./alertbot status | start | stop | update | backup | restore | config"
+}
+
+cmd_start() {
+  check_docker || return 1
+  check_unfinished_update || return 1
+  load_config
+  if ! is_set_up || [ ! -f "$ENV_FILE" ]; then
+    say " The bot hasn't been set up here yet. Starting the setup..."
+    cmd_setup; return $?
+  fi
+  check_port || return 1
+  check_compat || return 1
+  say " Starting the bot..."
+  prepare_start || return 1
+  do_up || return 1
+  wait_ready || return 1
+  say " The bot is running."
+}
+
+cmd_stop() {
+  check_docker || return 1
+  load_config
+  say " Stopping the bot..."
+  if ! compose stop; then say " The bot couldn't be stopped. Nothing was deleted."; return 1; fi
+  say " The bot is stopped. No posts are checked or sent until:  ./alertbot start"
+  say " Your accounts, settings and history are kept."
+}
+
+cmd_status() {
+  check_docker || return 1
+  load_config
+  say " Folder:   $DIR"
+  say " Version:  $(image_version "$CFG_IMAGE")"
+  say " Listens:  $CFG_BIND, port $CFG_PORT"
+  if ! is_set_up; then say " The bot hasn't been set up here yet:  ./alertbot setup"; return 0; fi
+  compose ps --format 'table {{.Service}}\t{{.State}}\t{{.Status}}'
+  local out; out="$(health)"
+  case "$out" in
+    "200 "*) say " Health:   OK"; say " Control panel:"; panel_urls ;;
+    "") say " Health:   not running (start it with: ./alertbot start)" ;;
+    *) say " Health:   NOT OK: ${out:0:300}" ;;
+  esac
+  if [ -f "$UPD/state.txt" ]; then
+    case "$(env_get STATE "$UPD/state.txt")" in
+      DONE|ABORTED|ROLLED_BACK|"") ;;
+      *) say " An update needs attention:  ./alertbot update" ;;
+    esac
+  fi
+}
+
+cmd_config() {
+  check_docker || return 1
+  check_unfinished_update || return 1
+  ensure_env || return 1
+  configure || return 1
+  if own_web_running; then
+    say " Restarting the control panel with the new settings..."
+    do_up || return 1
+    wait_ready || return 1
+  else
+    say " Start the bot to use them:  ./alertbot start"
+  fi
+}
+
+cmd_backup() {
+  check_docker || return 1
+  load_config
+  if ! is_set_up; then say " The bot hasn't been set up here yet, so there is nothing to back up."; return 0; fi
+  say " Backing up the bot's data..."
+  backup_named manual || return 1
+  say " Done. The backup holds your settings, including passwords, so keep it private."
+}
+
+cleanup_staging() {
+  "$DOCKER" run --rm --network none -v "$VOLUME:/data" --entrypoint rm "$CFG_IMAGE" -rf /data/restore-staging > /dev/null 2>&1
+}
+
+cmd_restore() {
+  say "============================================================"
+  say " Bluesky to Discord Alert Bot - restore a backup"
+  say "============================================================"
+  check_docker || return 1
+  check_unfinished_update || return 1
+  load_config
+  if ! is_set_up; then say " The bot hasn't been set up here yet, so there is nothing to restore."; return 0; fi
+  say ""
+  say "[1/4] Looking for backups..."
+  export_backups || { say " The backups couldn't be read. Nothing was changed."; return 1; }
+  local -a files=()
+  local f n=0 choice file
+  while IFS= read -r f; do [ -n "$f" ] && files+=("${f#backups/}"); done < <(ls -1t backups/*.sqlite3 2> /dev/null)
+  if [ "${#files[@]}" -eq 0 ]; then
+    say " No backups were found. ./alertbot backup and ./alertbot update make them; a backup from"
+    say " another computer can be copied into $DIR/backups first."
+    return 0
+  fi
+  say " Backups, newest first:"
+  for f in "${files[@]}"; do n=$((n + 1)); say "   $n. $f"; done
+  choice="${ALERTBOT_RESTORE_CHOICE:-}"
+  [ -n "$choice" ] || ask choice " Type the number of the backup to put back, then press Enter (just Enter cancels): " ""
+  [ -n "$choice" ] || { say " Cancelled. Nothing was changed."; return 0; }
+  if [[ ! "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "${#files[@]}" ]; then
+    say " There is no backup number $choice. Nothing was changed."; return 1
+  fi
+  file="${files[$((choice - 1))]}"
+  if [[ ! "$file" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+    say " Rename the file to letters, digits, dots and dashes only, then try again. Nothing was changed."; return 1
+  fi
+  say ""
+  say " This puts back $file. The bot's current accounts, settings and history are replaced by the"
+  say " ones in that backup. A backup of the current data is made first, so you can go back."
+  say ""
+  say " Checking what that would change (nothing is changed yet)..."
+  trap cleanup_staging EXIT
+  local got want out rc impact=""
+  want="$(sha256sum "backups/$file" | cut -d' ' -f1)"
+  got="$("$DOCKER" run --rm -i --network none -v "$VOLUME:/data" --entrypoint sh "$CFG_IMAGE" \
+         -c 'mkdir -p /data/restore-staging && cat > "/data/restore-staging/$1" && sha256sum "/data/restore-staging/$1" | cut -d" " -f1' \
+         sh "$file" < "backups/$file")"
+  if [ -z "$got" ] || [ "$got" != "$want" ]; then say " The backup couldn't be read into Docker. Nothing was changed."; return 1; fi
+  out="$(compose run --rm --no-deps -T web restore --report "/data/restore-staging/$file" 2>&1)"; rc=$?
+  printf '%s\n' "$out" | grep -v '^IMPACT='
+  impact="$(printf '%s\n' "$out" | sed -n 's/^IMPACT=//p' | head -n 1)"
+  case "$rc" in
+    0|10) [ -n "$impact" ] || { say " That backup can't be put back (the reason is above). Nothing was changed."; return 1; } ;;
+    3) say " That backup was made by a newer version of the bot than this one, so this version can't use it."
+       say " Nothing was changed."; return 1 ;;
+    *) say " That backup can't be put back (the reason is above). Nothing was changed."; return 1 ;;
+  esac
+  if [ "$rc" -eq 10 ]; then
+    local typed="${ALERTBOT_RESTORE_CONFIRM:-}"
+    say ""
+    say " To put the backup back anyway, type RESTORE in capital letters and press Enter."
+    say " Anything else cancels, and nothing is changed."
+    [ -n "$typed" ] || ask typed " Type RESTORE to continue: " ""
+    [ "$typed" = "RESTORE" ] || { say " Cancelled. Nothing was changed."; return 0; }
+  else
+    yes_no " Continue?" || { say " Cancelled. Nothing was changed."; return 0; }
+  fi
+  say ""
+  say "[2/4] Stopping the bot..."
+  compose stop || { say " The bot couldn't be stopped. Nothing was changed."; return 1; }
+  if ! ensure_data_free; then do_up; return 1; fi
+  say ""
+  say "[3/4] Backing up the current data, then putting back $file..."
+  if ! backup_named before-restore; then say " The bot's data is unchanged. Starting it again..."; do_up; return 1; fi
+  compose run --rm --no-deps -T web restore --expect "$impact" "/data/restore-staging/$file"; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    if [ "$rc" -eq 11 ]; then
+      say " The data changed after you confirmed, so the backup wasn't put back. Run ./alertbot restore again."
+    else
+      say " The backup couldn't be put back (the reason is above). Your data is as it was."
+    fi
+    say " Starting the bot again..."; do_up; return 1
+  fi
+  say ""
+  say "[4/4] Starting the bot again..."
+  do_up || return 1
+  wait_ready || return 1
+  say " Done. The bot is running with the data from $file."
+}
+
+# -- Updates ---------------------------------------------------------------------------------------
+state() {
+  STATE="$1"
+  mkdir -p "$UPD"
+  printf 'STATE=%s\nOLD_IMAGE=%s\nNEW_IMAGE=%s\nTARGET_VERSION=%s\nBACKUP_FILE=%s\nFP_TRIAL=%s\nWAS_RUNNING=%s\n' \
+    "$STATE" "$OLD_IMAGE" "$NEW_IMAGE" "$TARGET_VERSION" "$BACKUP_FILE" "$FP_TRIAL" "$WAS_RUNNING" > "$UPD/state.txt.tmp" \
+    && mv -f "$UPD/state.txt.tmp" "$UPD/state.txt"
+}
+
+update_lock() {
+  "$DOCKER" create --name "$PROJECT-update-lock" --label alertbot.update=1 "$CFG_IMAGE" true > /dev/null 2>&1 && return 0
+  say ""
+  say " Another update is running, or one was interrupted."
+  say " If no other update window is open, type YES to go on."
+  local typed="${ALERTBOT_UPDATE_TAKE_LOCK:-}"
+  [ -n "$typed" ] || ask typed " Type YES to go on: " ""
+  [ "$typed" = "YES" ] || return 1
+  "$DOCKER" rm -f "$PROJECT-update-lock" > /dev/null 2>&1
+  "$DOCKER" create --name "$PROJECT-update-lock" --label alertbot.update=1 "$CFG_IMAGE" true > /dev/null 2>&1
+}
+
+update_unlock() { "$DOCKER" rm -f "$PROJECT-update-lock" > /dev/null 2>&1; return 0; }
+
+update_channel() {
+  CHANNEL="${ALERTBOT_CHANNEL:-$(env_get ALERTBOT_CHANNEL)}"
+  [ -n "$CHANNEL" ] && return 0
+  CHANNEL="stable"
+  [[ "$(image_version "$CFG_IMAGE")" == *-* ]] && CHANNEL="prerelease"
+  return 0
+}
+
+update_plan() {
+  local key line seen_r seen_d
+  local -a seen=() test=()
+  for key in RESULT REASON CURRENT_VERSION MESSAGE TARGET_VERSION TARGET_IMAGE FINAL_VERSION STEPS SEEN_REVISION SEEN_DIGEST; do
+    printf -v "PLAN_$key" '%s' ""
+  done
+  pull_ref "$CFG_IMAGE" || return 1
+  seen_r="$(env_get REVISION "$UPD/seen.txt")"; seen_d="$(env_get DIGEST "$UPD/seen.txt")"
+  if [[ "$seen_r" =~ ^[0-9]+$ ]] && [[ "$seen_d" =~ ^[0-9a-f]+$ ]]; then
+    seen=(--seen-revision "$seen_r" --seen-digest "$seen_d")
+  fi
+  # Tests only (honoured only by images built for the tests): a fake GitHub on a test network.
+  [ -n "${ALERTBOT_UPDATE_TEST_NETWORK:-}" ] && test+=(--network "$ALERTBOT_UPDATE_TEST_NETWORK")
+  [ -n "${ALERTBOT_UPDATE_TEST_API:-}" ] && test+=(-e "ALERTBOT_UPDATE_TEST_API=$ALERTBOT_UPDATE_TEST_API")
+  while IFS= read -r line; do
+    key="${line%%=*}"
+    case "$key" in
+      RESULT|REASON|CURRENT_VERSION|MESSAGE|TARGET_VERSION|TARGET_IMAGE|FINAL_VERSION|STEPS|SEEN_REVISION|SEEN_DIGEST)
+        printf -v "PLAN_$key" '%s' "${line#*=}" ;;
+    esac
+  done < <("$DOCKER" run --rm --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges \
+             ${test[@]+"${test[@]}"} "$CFG_IMAGE" update-plan --channel "$CHANNEL" ${seen[@]+"${seen[@]}"} 2> /dev/null)
+  [ -n "$PLAN_RESULT" ] && return 0
+  say ""
+  say " Couldn't check for updates: this folder's version didn't answer. Nothing was changed."
+  say " Check the internet connection and try again."
+  return 1
+}
+
+remember_seen() {
+  [ -n "$PLAN_SEEN_REVISION" ] || return 0
+  mkdir -p "$UPD"
+  printf 'REVISION=%s\nDIGEST=%s\n' "$PLAN_SEEN_REVISION" "$PLAN_SEEN_DIGEST" > "$UPD/seen.txt"
+}
+
+safe_name() { [[ "$1" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$ ]] && [[ "/$1/" != */../* ]] && [[ "/$1/" != */./* ]]; }
+
+stage_bundle() {  # the new version's files, copied out of its image and checked against its list
+  local stage="$UPD/staging" hash name has_script="" has_compose=""
+  rm -rf "$stage"; mkdir -p "$stage"
+  "$DOCKER" rm -f "$PROJECT-update-files" > /dev/null 2>&1
+  if ! "$DOCKER" create --name "$PROJECT-update-files" "$NEW_IMAGE" > /dev/null 2>&1; then
+    say " The new version's files couldn't be copied out of it, so nothing was installed."; return 1
+  fi
+  "$DOCKER" cp "$PROJECT-update-files:/app/bundle/linux" "$stage/" > /dev/null 2>&1; local cp1=$?
+  "$DOCKER" cp "$PROJECT-update-files:/app/bundle/linux.sha256" "$stage/linux.sha256" > /dev/null 2>&1; local cp2=$?
+  "$DOCKER" rm -f "$PROJECT-update-files" > /dev/null 2>&1
+  if [ "$cp1" -ne 0 ] || [ "$cp2" -ne 0 ]; then
+    say " The new version's files couldn't be copied out of it, so nothing was installed."; return 1
+  fi
+  while read -r hash name; do
+    [ -n "$name" ] || continue
+    if ! safe_name "$name"; then say " The new version's files didn't check out (an unsafe file name), so nothing was installed."; return 1; fi
+    if [ ! -f "$stage/linux/$name" ] || [ "$(sha256sum "$stage/linux/$name" | cut -d' ' -f1)" != "$hash" ]; then
+      say " The new version's files didn't check out ($name), so nothing was installed."; return 1
+    fi
+    [ "$name" = "alertbot" ] && has_script=1
+    [ "$name" = "docker-compose.yml" ] && has_compose=1
+  done < "$stage/linux.sha256"
+  if [ -z "$has_script" ] || [ -z "$has_compose" ]; then
+    say " The new version's files are incomplete, so nothing was installed."; return 1
+  fi
+}
+
+previous_list() {  # the files to keep for going back: this folder's, plus every file the new version replaces
+  { for f in $LOCAL_FILES; do printf '%s\n' "$f"; done
+    [ -f "$UPD/staging/linux.sha256" ] && cut -d' ' -f2 "$UPD/staging/linux.sha256"
+    printf '%s\n%s\n' "$ENV_FILE" "$RELEASE_ENV"; } | sort -u
+}
+
+save_previous() {
+  local prev="$UPD/previous" f
+  rm -rf "$prev"; mkdir -p "$prev"
+  : > "$prev/.files"
+  while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    mkdir -p "$prev/$(dirname "$f")" && cp -p "$f" "$prev/$f" || return 1
+    printf '%s\n' "$f" >> "$prev/.files"
+  done < <(previous_list)
+}
+
+put_file() {  # put_file SOURCE TARGET: replaced in one step (a running script keeps reading its old copy)
+  mkdir -p "$(dirname "$2")" && cp -p "$1" "$2.tmp-update" && mv -f "$2.tmp-update" "$2"
+}
+
+restore_previous() {
+  local f
+  [ -f "$UPD/previous/.files" ] || return 1
+  while IFS= read -r f || [ -n "$f" ]; do
+    f="${f%$'\r'}"
+    [ -n "$f" ] && { put_file "$UPD/previous/$f" "$f" || return 1; }
+  done < "$UPD/previous/.files"
+}
+
+swap_files() {
+  local hash name
+  while read -r hash name; do
+    [ -n "$name" ] && { put_file "$UPD/staging/linux/$name" "$name" || return 1; }
+  done < "$UPD/staging/linux.sha256"
+  chmod 755 alertbot 2> /dev/null
+  { grep -v '^ALERTBOT_IMAGE=' "$ENV_FILE"; printf 'ALERTBOT_IMAGE=%s\n' "$NEW_IMAGE"; } > "$ENV_FILE.new" \
+    && mv -f "$ENV_FILE.new" "$ENV_FILE" || return 1
+  printf 'ALERTBOT_IMAGE=%s\n' "$NEW_IMAGE" > "$RELEASE_ENV.new" && mv -f "$RELEASE_ENV.new" "$RELEASE_ENV"
+}
+
+fingerprint() {  # fingerprint VAR: FINGERPRINT=<code> of the data, read with the new version
+  local line value=""
+  while IFS= read -r line; do
+    case "$line" in FINGERPRINT=*) value="${line#FINGERPRINT=}" ;; esac
+  done < <("${RUNNER[@]}" "$NEW_IMAGE" fingerprint 2> /dev/null)
+  printf -v "$1" '%s' "$value"
+  [ -n "$value" ]
+}
+
+update_failed() { say ""; say " The update didn't finish. Nothing was deleted."; return 1; }
+
+update_abort() {
+  state ABORTED; update_unlock
+  say ""; say " The update was stopped before anything changed. The current version keeps running as before."
+  update_failed
+}
+
+update_abort_restart() {
+  state ABORTED
+  [ -n "$WAS_RUNNING" ] && do_up
+  update_unlock
+  say ""; say " The update was stopped before anything changed. The bot was started again as it was."
+  update_failed
+}
+
+update_needs_user() {
+  state NEEDS_USER; update_unlock
+  say ""
+  say " STOP: the update couldn't be finished or undone by itself, so it is left as it is for you to decide."
+  say " Kept for you: the backup from just before the update (backups/$BACKUP_FILE) and the previous"
+  say " version's files (docker/update/previous)."
+  say "  - To keep the new version: ./alertbot start. If it works, run ./alertbot update and type KEEP."
+  say "  - To go back: copy everything in docker/update/previous into this folder (replacing the files),"
+  say "    then ./alertbot restore and choose $BACKUP_FILE. Then run ./alertbot update and type BACK."
+  say " If you ask for help, share logs/problem-report.txt."
+  return 1
+}
+
+update_rollback() {
+  say ""
+  say " Going back to the previous version, with your data as it was before the update..."
+  state ROLLING_BACK
+  compose stop > /dev/null 2>&1
+  ensure_data_free || { update_needs_user; return 1; }
+  restore_previous || { update_needs_user; return 1; }
+  load_config
+  if [ -n "$BACKUP_FILE" ]; then
+    "${RUNNER[@]}" "$OLD_IMAGE" restore "/data/backups/$BACKUP_FILE" || { update_needs_user; return 1; }
+  fi
+  # Saved before the old version starts: resuming from here must never put the backup back again
+  # (the old bot may already have changed data or sent notifications since).
+  state RESTORED
+  update_rollback_start
+}
+
+update_rollback_start() {
+  if [ -n "$WAS_RUNNING" ]; then
+    do_up || { update_needs_user; return 1; }
+    wait_ready || { update_needs_user; return 1; }
+  fi
+  state ROLLED_BACK; update_unlock
+  say " Done: the previous version is back, with your data as it was before the update. Nothing was lost."
+  update_failed
+}
+
+update_start_failed() {
+  say ""
+  say " $TARGET_VERSION didn't start properly."
+  save_logs
+  compose stop > /dev/null 2>&1
+  local fp_now=""
+  fingerprint fp_now || { update_needs_user; return 1; }
+  [ "$fp_now" = "$FP_TRIAL" ] || { update_needs_user; return 1; }
+  update_rollback
+}
+
+update_go() {
+  OLD_IMAGE="$CFG_IMAGE"
+  NEW_IMAGE="$PLAN_TARGET_IMAGE"
+  # Tests only: their images aren't on ghcr.io.
+  [ -n "${ALERTBOT_UPDATE_TEST_IMAGE:-}" ] && NEW_IMAGE="$ALERTBOT_UPDATE_TEST_IMAGE"
+  TARGET_VERSION="$PLAN_TARGET_VERSION"
+  WAS_RUNNING=""; [ -n "$OWN_RUNNING" ] && WAS_RUNNING=1
+  BACKUP_FILE=""; FP_TRIAL=""
+  update_lock || { update_failed; return 1; }
+  state BEGIN
+  say ""
+  say "[2/6] Downloading $TARGET_VERSION..."
+  pull_ref "$NEW_IMAGE" || { update_abort; return 1; }
+  if ! "$DOCKER" run --rm --network none "$NEW_IMAGE" describe 2> /dev/null | grep -qF "\"version\": \"$TARGET_VERSION\""; then
+    say " The downloaded program isn't version $TARGET_VERSION, so it wasn't installed."
+    update_abort; return 1
+  fi
+  say "[3/6] Checking its files, and that it can update your data..."
+  stage_bundle || { update_abort; return 1; }
+  if ! "${RUNNER[@]}" "$NEW_IMAGE" update-preflight; then
+    say " $TARGET_VERSION can't take over your data (the reason is above). Nothing was changed."
+    update_abort; return 1
+  fi
+  say "[4/6] Stopping the bot and backing up your data..."
+  state STOPPING
+  compose stop || { update_abort_restart; return 1; }
+  ensure_data_free || { update_abort_restart; return 1; }
+  backup_named before-update || { update_abort_restart; return 1; }
+  state BACKED_UP
+  say "[5/6] Installing the new version's files, then updating your data in a trial run..."
+  save_previous || { update_abort_restart; return 1; }
+  state SWAPPING
+  swap_files || { update_rollback; return 1; }
+  state SWAPPED
+  load_config
+  if ! "${RUNNER[@]}" "$NEW_IMAGE" trial; then
+    say " Updating your data with $TARGET_VERSION failed in the trial run (the reason is above)."
+    update_rollback; return 1
+  fi
+  fingerprint FP_TRIAL || { update_rollback; return 1; }
+  state TRIAL_OK
+  say "[6/6] Starting $TARGET_VERSION..."
+  state STARTING
+  do_up || { update_start_failed; return 1; }
+  wait_ready || { update_start_failed; return 1; }
+  running_is "$TARGET_VERSION" || { update_start_failed; return 1; }
+  state DONE
+  remember_seen
+  update_unlock
+  say ""
+  say " The update is complete: $TARGET_VERSION is running. Your accounts, settings and history were kept."
+  say " A backup from just before the update is in the backups folder ($BACKUP_FILE)."
+  [ "$PLAN_STEPS" = "1" ] || say " The next step towards $PLAN_FINAL_VERSION is ready: run ./alertbot update again to install it."
+  return 0
+}
+
+# An update that stopped part-way (the terminal was closed, the server restarted, ...).
+update_recover() {
+  [ -f "$UPD/state.txt" ] || return 0
+  local key line
+  for key in STATE OLD_IMAGE NEW_IMAGE TARGET_VERSION BACKUP_FILE FP_TRIAL WAS_RUNNING; do printf -v "ST_$key" '%s' ""; done
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    key="${line%%=*}"
+    case "$key" in
+      STATE|OLD_IMAGE|NEW_IMAGE|TARGET_VERSION|BACKUP_FILE|FP_TRIAL|WAS_RUNNING) printf -v "ST_$key" '%s' "${line#*=}" ;;
+    esac
+  done < "$UPD/state.txt"
+  case "$ST_STATE" in DONE|ABORTED|ROLLED_BACK|"") return 0 ;; esac
+  OLD_IMAGE="$ST_OLD_IMAGE"; NEW_IMAGE="$ST_NEW_IMAGE"; TARGET_VERSION="$ST_TARGET_VERSION"
+  BACKUP_FILE="$ST_BACKUP_FILE"; FP_TRIAL="$ST_FP_TRIAL"; WAS_RUNNING="$ST_WAS_RUNNING"
+  if [ "$ST_STATE" = "NEEDS_USER" ]; then
+    say ""
+    say " An earlier update to $TARGET_VERSION needs your decision (see the earlier message)."
+    say "  - If the bot works with the new version, type KEEP to keep it."
+    say "  - If you went back by hand (docker/update/previous, then ./alertbot restore with $BACKUP_FILE),"
+    say "    type BACK."
+    say "  - Otherwise, follow the steps it gave."
+    local typed="${ALERTBOT_UPDATE_RESOLVE:-}"
+    [ -n "$typed" ] || ask typed " Type KEEP or BACK: " ""
+    case "$typed" in
+      KEEP) state DONE; say " Kept. Checking for updates now..."; load_config; return 0 ;;
+      BACK) state ROLLED_BACK; say " Noted: you went back by hand. Checking for updates now..."; load_config; return 0 ;;
+    esac
+    update_failed; return 1
+  fi
+  say ""
+  say " An earlier update stopped part-way (at $ST_STATE). It is finished or undone first."
+  update_lock || { update_failed; return 1; }
+  case "$ST_STATE" in
+    BEGIN) state ABORTED; update_unlock; say " Nothing had changed yet."; return 0 ;;
+    STOPPING|BACKED_UP)
+      [ -n "$WAS_RUNNING" ] && do_up
+      state ABORTED; update_unlock; say " Nothing had changed yet; the bot was started again as it was."; return 0 ;;
+    STARTING)
+      if wait_ready && running_is "$TARGET_VERSION"; then
+        state DONE; update_unlock; say " It had finished: $TARGET_VERSION is running."; load_config; return 0
+      fi
+      update_start_failed; return 1 ;;
+    RESTORED) say " Your data had already been put back; starting the previous version."
+              update_rollback_start; return 1 ;;
+  esac
+  update_rollback; return 1
+}
+
+cmd_update() {
+  say "============================================================"
+  say " Bluesky to Discord Alert Bot - update"
+  say "============================================================"
+  check_docker || return 1
+  load_config
+  if ! is_set_up || [ -z "$CFG_IMAGE" ]; then say " The bot hasn't been set up here yet:  ./alertbot setup"; return 1; fi
+  update_recover || return 1
+  load_config
+  update_channel
+  say ""
+  say "[1/6] Checking for a newer version ($CHANNEL channel)..."
+  update_plan || { update_failed; return 1; }
+  if ! running_version; then
+    say " Docker didn't say which version of the bot is running, so nothing was changed. Try again."
+    update_failed; return 1
+  fi
+  if [ -n "$OWN_RUNNING" ] && [ -z "$SAME_VERSION" ]; then
+    say " The running bot isn't this folder's version ($(image_version "$CFG_IMAGE")). Start this folder's"
+    say " version first with ./alertbot start, then update. Nothing was changed."
+    update_failed; return 1
+  fi
+  case "$PLAN_RESULT" in
+    up_to_date)
+      remember_seen
+      say " $PLAN_MESSAGE"
+      [ -n "$OWN_RUNNING" ] || say " The bot isn't running right now: ./alertbot start starts it."
+      say " Nothing was changed."
+      return 0 ;;
+    update) ;;
+    *) say " $PLAN_MESSAGE"; update_failed; return 1 ;;
+  esac
+  say ""
+  say " $PLAN_MESSAGE"
+  if ! yes_no " Update to $PLAN_TARGET_VERSION now?"; then say " Cancelled. Nothing was changed."; return 0; fi
+  update_go
+}
+
+usage() {
+  say "Usage: ./alertbot <command>"
+  say "  setup     first-time setup (safe to run again)    start | stop | status"
+  say "  config    change the address and port of the control panel"
+  say "  update    install a newer version (backs up first; goes back by itself if it fails)"
+  say "  backup    save a backup copy into the backups folder"
+  say "  restore   put a backup back (the current data is backed up first)"
+  say "See docs/UBUNTU.md."
+}
+
+main() {
+  local command="${1:-help}"
+  [ $# -gt 0 ] && shift
+  case "$command" in
+    setup|start|stop|status|config|update|backup|restore) "cmd_$command" "$@" ;;
+    help|-h|--help) usage ;;
+    *) usage; return 2 ;;
+  esac
+}
+
+# Everything above is only definitions: the whole file is read before anything runs, so an update
+# that replaces this file can't change what this run does.
+main "$@"; exit $?

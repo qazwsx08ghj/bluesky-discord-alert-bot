@@ -5,6 +5,7 @@
     python -m release_meta check --installed 1.0.0-rc.2 --channel prerelease    # reads GitHub; changes nothing
     python -m release_meta generate --version 1.2.0 --commit <sha> --run-id <id> --index-digest sha256:<...> \
         --index index.json --describe describe.json --bundle dist/BlueskyDiscordAlertBot-1.2.0.zip \
+        [--linux-bundle dist/BlueskyDiscordAlertBot-1.2.0-linux.tar.gz] \
         --compatibility release/compatibility.json --out dist        # writes alertbot-release.json, SHA256SUMS
     python -m release_meta verify-checksums dist
 
@@ -43,6 +44,7 @@ def main(argv=None) -> int:
     for option in ("--version", "--commit", "--run-id", "--index-digest", "--index", "--describe", "--bundle",
                    "--compatibility", "--out"):
         gen.add_argument(option, required=True)
+    gen.add_argument("--linux-bundle", help="the Linux download (.tar.gz); needed when the image has Linux files")
     sub.add_parser("verify-checksums").add_argument("folder")
     sub.add_parser("validate-compatibility").add_argument("file")
     sub.add_parser("check-withdrawn-history").add_argument("file", help="release/withdrawn.json, in a full git clone")
@@ -72,8 +74,10 @@ def main(argv=None) -> int:
             data = generate.generate(version=args.version, commit=args.commit, run_id=args.run_id,
                                      index_digest=args.index_digest, index_raw=index_raw,
                                      describe=_load(args.describe), bundle_path=Path(args.bundle),
-                                     compatibility=_load(args.compatibility))
-            for path in generate.write_release_files(Path(args.out), data, Path(args.bundle)):
+                                     compatibility=_load(args.compatibility),
+                                     linux_bundle_path=Path(args.linux_bundle) if args.linux_bundle else None)
+            linux = Path(args.linux_bundle) if args.linux_bundle else None
+            for path in generate.write_release_files(Path(args.out), data, Path(args.bundle), linux):
                 print(f"written: {path}")
             return 0
         if args.command == "verify-checksums":
