@@ -27,6 +27,7 @@ class DescribeTests(SimpleTestCase):
         self.addCleanup(tmp.cleanup)
         self.tmp = Path(tmp.name)
         mrb.export(self.tmp / "bundle" / "windows")
+        mrb.export(self.tmp / "bundle" / "linux", platform="linux")
         self.db = self.tmp / "data" / "db.sqlite3"
 
     def describe(self, version="1.2.0", bundle_dir=None):
@@ -45,6 +46,7 @@ class DescribeTests(SimpleTestCase):
         self.assertEqual((out["version"], out["version_is_release"]), ("1.2.0", True))
         self.assertEqual(out["problems"], [])
         self.assertEqual(out["bundles"]["windows"]["files"], mrb.index(mrb.bundle_files())["files"])
+        self.assertEqual(out["bundles"]["linux"]["files"], mrb.index(mrb.bundle_files(platform="linux"))["files"])
         self.assertRegex(out["platform"], r"^[a-z]+/[a-z0-9]+$")
 
     def test_only_this_projects_newest_migrations(self):
@@ -65,6 +67,10 @@ class DescribeTests(SimpleTestCase):
         code, out, _ = self.describe()
         self.assertEqual(code, 1)
         self.assertIn("update.bat doesn't match its hash", " ".join(out["problems"]))
+        self.assertEqual(list(out["bundles"]), ["linux"], "only the intact set is listed")
+        (self.tmp / "bundle" / "linux" / "alertbot").unlink()
+        code, out, _ = self.describe()
+        self.assertIn("linux deployment files", " ".join(out["problems"]))
         self.assertEqual(out["bundles"], {})
         code, out, _ = self.describe(bundle_dir=self.tmp / "nowhere")
         self.assertEqual(code, 1)
@@ -82,6 +88,8 @@ class ImageLayoutTests(SimpleTestCase):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         self.assertIn("python docker/make_release_bundle.py --export /app/bundle/windows", dockerfile)
         self.assertIn("test ! -e /app/bundle/windows/docker/compose.env", dockerfile)
+        self.assertIn("python docker/make_release_bundle.py --platform linux --export /app/bundle/linux", dockerfile)
+        self.assertIn("test -x /app/bundle/linux/alertbot", dockerfile)
         export_at = dockerfile.index("--export /app/bundle/windows")
         self.assertLess(dockerfile.index("COPY . /app"), export_at)
         self.assertLess(export_at, dockerfile.index("USER bot"), "exported as root: the bot can't change them")

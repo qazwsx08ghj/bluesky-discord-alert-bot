@@ -169,6 +169,7 @@ jobs:
           docker run --rm --network none "$IMAGE@$DIGEST" describe > build/describe.json
           docker create --name bundle "$IMAGE@$DIGEST"
           docker cp bundle:/app/bundle/windows build/
+          docker cp bundle:/app/bundle/linux build/
           docker rm bundle
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
 
@@ -179,9 +180,13 @@ jobs:
           DIGEST: ${{ steps.image.outputs.digest }}
         run: |
           python docker/make_release_bundle.py --image "$IMAGE:$VERSION@$DIGEST" --from-bundle build/windows --out dist
+          python docker/make_release_bundle.py --platform linux --image "$IMAGE:$VERSION@$DIGEST" \
+            --from-bundle build/linux --out dist
           python -m release_meta generate --version "$VERSION" --commit "$COMMIT" --run-id "$GITHUB_RUN_ID" \
             --index-digest "$DIGEST" --index build/index.json --describe build/describe.json \
-            --bundle "dist/BlueskyDiscordAlertBot-$VERSION.zip" --compatibility release/compatibility.json --out dist
+            --bundle "dist/BlueskyDiscordAlertBot-$VERSION.zip" \
+            --linux-bundle "dist/BlueskyDiscordAlertBot-$VERSION-linux.tar.gz" \
+            --compatibility release/compatibility.json --out dist
           python -m release_meta verify-checksums dist
           python docker/release_check.py "v$VERSION" --notes build/notes.md
 
@@ -197,6 +202,7 @@ jobs:
         with:
           subject-path: |
             dist/BlueskyDiscordAlertBot-${{ needs.prepare.outputs.version }}.zip
+            dist/BlueskyDiscordAlertBot-${{ needs.prepare.outputs.version }}-linux.tar.gz
             dist/alertbot-release.json
 
       # 5. The tag, at the approved commit

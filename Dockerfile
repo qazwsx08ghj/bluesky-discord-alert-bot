@@ -47,15 +47,18 @@ WORKDIR /app
 COPY . /app
 # The built control panel, served by Django (config/frontend.py).
 COPY --from=panel /panel/dist /app/frontend/dist
-# This version's Windows deployment files, with bundle.json (their SHA-256), for an updater to copy
+# This version's Windows and Linux deployment files, with bundle.json (their SHA-256), for an updater to copy
 # out with `docker cp`; see docs/RELEASES.md, "Inside the image". Owned by root: the bot can read
 # them but not change them. The copies at the top of /app are removed: nothing there uses them.
 RUN if [ "$ALERTBOT_TEST_BUILD" = "1" ]; then touch /app/.test-build; fi \
     && python docker/make_release_bundle.py --export /app/bundle/windows \
+    && python docker/make_release_bundle.py --platform linux --export /app/bundle/linux \
     && rm /app/setup.bat /app/start.bat /app/update.bat /app/stop.bat /app/backup.bat /app/restore.bat \
-          /app/docker-compose.yml /app/docker/scripts/common.bat \
+          /app/docker-compose.yml /app/docker/scripts/common.bat /app/docker/linux/alertbot \
     && test -f /app/bundle/windows/bundle.json && test -f /app/bundle/windows/update.bat \
-    && test ! -e /app/bundle/windows/docker/compose.env && test ! -e /app/docker/compose.env
+    && test -f /app/bundle/linux/bundle.json && test -x /app/bundle/linux/alertbot \
+    && test ! -e /app/bundle/windows/docker/compose.env && test ! -e /app/docker/compose.env \
+    && test ! -e /app/bundle/linux/docker/compose.env && test ! -e /app/bundle/linux/docker/release.env
 RUN sed -i 's/\r$//' docker/entrypoint.sh \
     && chmod 755 docker/entrypoint.sh \
     && python -m compileall -q /app \

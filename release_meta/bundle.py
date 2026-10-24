@@ -17,11 +17,12 @@ import json
 from pathlib import Path
 
 from . import MetadataError
-from .manifest import SHA256, WINDOWS_FILES
+from .manifest import LINUX_FILES, SHA256, WINDOWS_FILES
 
 SCHEMA = "alertbot-bundle/1"
 INDEX = "bundle.json"
-NEVER_BUNDLED = ("docker/compose.env", ".env", "local.env", "docker/local.env")
+NEVER_BUNDLED = ("docker/compose.env", ".env", "local.env", "docker/local.env", "docker/release.env")
+REQUIRED = {"windows": WINDOWS_FILES, "linux": LINUX_FILES}
 MAX_INDEX_BYTES = 64 * 1024
 
 
@@ -32,7 +33,7 @@ def _safe(name) -> bool:
     return all(p not in ("", ".", "..") for p in parts) and ":" not in parts[0]
 
 
-def verify(folder) -> dict:
+def verify(folder, platform: str = "windows") -> dict:
     """{name: sha256} of a bundle folder, after checking it completely. MetadataError if anything is
     wrong: the index unreadable or malformed, a file missing, extra or changed, an unsafe path, a
     required file absent, or a file that must never be bundled."""
@@ -49,7 +50,7 @@ def verify(folder) -> dict:
         raise MetadataError(f"{INDEX} isn't valid JSON") from None
     if not isinstance(info, dict) or info.get("schema") != SCHEMA:
         raise MetadataError(f"{INDEX} has an unknown schema")
-    if info.get("platform") != "windows":
+    if info.get("platform") != platform:
         raise MetadataError(f"{INDEX} is for another platform: {str(info.get('platform'))[:20]!r}")
     files = info.get("files")
     if not isinstance(files, dict) or not files:
@@ -61,7 +62,7 @@ def verify(folder) -> dict:
             raise MetadataError(f"{name} must never be a deployment file")
         if not isinstance(digest, str) or not SHA256.fullmatch(digest):
             raise MetadataError(f"{INDEX} has a malformed hash for {name}")
-    missing_required = [n for n in WINDOWS_FILES if n not in files]
+    missing_required = [n for n in REQUIRED[platform] if n not in files]
     if missing_required:
         raise MetadataError(f"the deployment files lack {', '.join(missing_required)}")
     found = {p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file()} - {INDEX}
@@ -74,7 +75,7 @@ def verify(folder) -> dict:
     return dict(sorted(files.items()))
 
 
-def read(folder) -> dict:
+def read(folder, platform: str = "windows") -> dict:
     """{name: bytes} of a verified bundle folder."""
     folder = Path(folder)
-    return {name: (folder / name).read_bytes() for name in verify(folder)}
+    return {name: (folder / name).read_bytes() for name in verify(folder, platform)}

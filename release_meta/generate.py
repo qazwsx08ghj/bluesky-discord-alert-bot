@@ -2,7 +2,8 @@
 
     python -m release_meta generate --version 1.2.0 --commit <sha> --run-id <id> \\
         --index-digest sha256:<...> --index index.json --describe describe.json \\
-        --bundle dist/BlueskyDiscordAlertBot-1.2.0.zip --compatibility release/compatibility.json --out dist
+        --bundle dist/BlueskyDiscordAlertBot-1.2.0.zip --linux-bundle dist/BlueskyDiscordAlertBot-1.2.0-linux.tar.gz \
+        --compatibility release/compatibility.json --out dist
     python -m release_meta verify-checksums dist
 
 Inputs, each checked before anything is written:
@@ -10,22 +11,26 @@ Inputs, each checked before anything is written:
   the digest given, so the platform list really belongs to that digest;
 - what the image says about itself (`describe`, run by digest): its version must be the release's,
   its deployment files must be complete;
-- the download (zip): exactly the image's deployment files with the same hashes, plus
-  docker/compose.env pinning this image **by digest**;
+- the downloads: the Windows zip and the Linux .tar.gz, each exactly the image's deployment files
+  for that platform with the same hashes, plus docker/compose.env (zip) or docker/release.env
+  (tar.gz) pinning this image **by digest**;
 - release/compatibility.json (min_updater, min_from_version, stepping_stones, compose_min).
 
 The result must pass release_meta.manifest.validate, the same check updaters make. Output:
-alertbot-release.json and SHA256SUMS (the zip and the manifest), both byte-for-byte reproducible
+alertbot-release.json and SHA256SUMS (the downloads and the manifest), both byte-for-byte reproducible
 from the same inputs.
 
 What this proves is integrity (the manifest describes these exact bytes); who published it is a
 separate question, answered by where it is published (docs/RELEASES.md, section 1).
 """
+import gzip
 import hashlib
 import io
 import json
 import re
+import tarfile
 import zipfile
+import zlib
 from pathlib import Path
 
 from . import IMAGE, MANIFEST_ASSET, REPOSITORY, MetadataError, manifest, semver  # noqa: F401
@@ -35,6 +40,9 @@ COMPAT_SCHEMA = "alertbot-compatibility/1"
 INDEX_TYPES = ("application/vnd.oci.image.index.v1+json",
                "application/vnd.docker.distribution.manifest.list.v2+json")
 COMPOSE_ENV = "docker/compose.env"
+RELEASE_ENV = "docker/release.env"
+LINUX_FOLDER = "bluesky-alert-bot"
+MAX_TAR_BYTES = 32 * 1024 * 1024
 CHECKSUMS = "SHA256SUMS"
 MAX_ZIP_ENTRIES = 200
 MAX_ENTRY_BYTES = 8 * 1024 * 1024
@@ -96,6 +104,69 @@ def read_zip(path: Path) -> dict:
                 raise MetadataError(f"{name} in the download is larger than allowed")
             files[name] = zf.read(e)
     return files
+
+
+def _safe_name(name: str) -> bool:
+    return bool(name) and not name.startswith("/") and "\\" not in name and ".." not in name.split("/") \
+        and ":" not in name.split("/")[0]
+
+
+def read_tar(path: Path) -> dict:
+    """{name: bytes} of the Linux download, without its bluesky-alert-bot/ folder: only folders and
+    ordinary files with safe paths (no links, devices or anything outside that folder)."""
+    unreadable = MetadataError(f"{Path(path).name} isn't a readable .tar.gz")
+    try:
+        with gzip.open(path, "rb") as gz:
+            raw = gz.read(MAX_TAR_BYTES + 1)  # never more than the limit in memory
+        if len(raw) > MAX_TAR_BYTES:
+            raise MetadataError(f"{Path(path).name} is larger than allowed")
+        with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as tar:
+            return _tar_files(tar)
+    except (OSError, EOFError, zlib.error, tarfile.TarError):
+        raise unreadable from None
+
+
+def _tar_files(tar) -> dict:
+    """The checked files of an open Linux download (see read_tar)."""
+    files = {}
+    entries = tar.getmembers()
+    if len(entries) > MAX_ZIP_ENTRIES:
+        raise MetadataError("the Linux download has too many files")
+    for e in entries:
+        if not _safe_name(e.name) or (e.name != LINUX_FOLDER and not e.name.startswith(LINUX_FOLDER + "/")):
+            raise MetadataError(f"the Linux download has an unsafe path {e.name[:80]!r}")
+        if e.isdir():
+            continue
+        if not e.isfile():
+            raise MetadataError(f"the Linux download has a link or special file: {e.name[:80]!r}")
+        name = e.name[len(LINUX_FOLDER) + 1:]
+        if name in files:
+            raise MetadataError(f"the Linux download has {name} twice")
+        if e.size > MAX_ENTRY_BYTES:
+            raise MetadataError(f"{name} in the Linux download is larger than allowed")
+        files[name] = tar.extractfile(e).read()
+    return files
+
+
+def _check_download(files: dict, image_files: dict, pin_file: str, version: str, index_digest: str, what: str):
+    """The download holds exactly the image's deployment files, plus pin_file pinning this image by digest."""
+    if pin_file not in files:
+        raise MetadataError(f"the {what} has no {pin_file}")
+    pinned = re.findall(r"(?m)^ALERTBOT_IMAGE=(.*?)\r?$", files[pin_file].decode("utf-8", "replace"))
+    allowed_pins = {f"{IMAGE}@{index_digest}", f"{IMAGE}:{version}@{index_digest}"}
+    if len(pinned) != 1 or pinned[0] not in allowed_pins:
+        raise MetadataError(f"the {what}'s {pin_file} must pin this image by its digest "
+                            f"({IMAGE}:{version}@{index_digest})")
+    others = {n: d for n, d in files.items() if n != pin_file}
+    if set(others) != set(image_files):
+        raise MetadataError(f"the {what}'s files differ from the image's: missing {sorted(set(image_files) - set(others))}, "
+                            f"unexpected {sorted(set(others) - set(image_files))}"[:300])
+    for name, data in others.items():
+        if sha256(data) != image_files[name]:
+            raise MetadataError(f"{name} in the {what} differs from the image's")
+    leaked = [n for n in files if n != pin_file and (n in NEVER_BUNDLED or n.endswith(".env"))]
+    if leaked:
+        raise MetadataError(f"the {what} must not contain {leaked}")
 
 
 def read_compatibility(data) -> dict:
@@ -161,7 +232,7 @@ def check_withdrawn_history(path: str, repo_dir: Path) -> list:
 
 
 def generate(*, version: str, commit: str, run_id: str, index_digest: str, index_raw: bytes, describe: dict,
-             bundle_path: Path, compatibility: dict) -> dict:
+             bundle_path: Path, compatibility: dict, linux_bundle_path: Path | None = None) -> dict:
     """The release manifest (a dict), checked by manifest.validate. MetadataError on any inconsistency."""
     parsed = semver.parse(version)
     if not isinstance(describe, dict) or describe.get("schema") != "alertbot-describe/1":
@@ -173,32 +244,35 @@ def generate(*, version: str, commit: str, run_id: str, index_digest: str, index
     platforms = platforms_from_index(index_raw, index_digest)
     if describe.get("platform") not in platforms:
         raise MetadataError(f"the image was described on {describe.get('platform')!r}, which isn't one of its platforms")
-    image_files = (describe.get("bundles") or {}).get("windows", {}).get("files")
+    bundles = describe.get("bundles") or {}
+    image_files = bundles.get("windows", {}).get("files")
     if not isinstance(image_files, dict) or not image_files:
         raise MetadataError("the image description lists no deployment files")
+    linux_files = bundles.get("linux", {}).get("files")
+    if (linux_bundle_path is None) != (not linux_files):
+        raise MetadataError("the image's Linux deployment files and the Linux download must come together")
 
     bundle_path = Path(bundle_path)
     expected_name = manifest.BUNDLE_NAME.format(version=version)
     if bundle_path.name != expected_name:
         raise MetadataError(f"the download must be named {expected_name}")
     zip_files = read_zip(bundle_path)
-    if COMPOSE_ENV not in zip_files:
-        raise MetadataError(f"the download has no {COMPOSE_ENV}")
-    pinned = re.findall(r"(?m)^ALERTBOT_IMAGE=(.*?)\r?$", zip_files[COMPOSE_ENV].decode("utf-8", "replace"))
-    allowed_pins = {f"{IMAGE}@{index_digest}", f"{IMAGE}:{version}@{index_digest}"}
-    if len(pinned) != 1 or pinned[0] not in allowed_pins:
-        raise MetadataError("the download's docker/compose.env must pin this image by its digest "
-                            f"({IMAGE}:{version}@{index_digest})")
-    others = {n: d for n, d in zip_files.items() if n != COMPOSE_ENV}
-    if set(others) != set(image_files):
-        raise MetadataError(f"the download's files differ from the image's: missing {sorted(set(image_files) - set(others))}, "
-                            f"unexpected {sorted(set(others) - set(image_files))}"[:300])
-    for name, data in others.items():
-        if sha256(data) != image_files[name]:
-            raise MetadataError(f"{name} in the download differs from the image's")
-    leaked = [n for n in zip_files if n in NEVER_BUNDLED[1:] or (n.endswith(".env") and n != COMPOSE_ENV)]
-    if leaked:
-        raise MetadataError(f"the download must not contain {leaked}")
+    _check_download(zip_files, image_files, COMPOSE_ENV, version, index_digest, "download")
+    artifacts = {"windows-bundle": {"name": expected_name, "sha256": sha256(bundle_path.read_bytes()),
+                                    "size": bundle_path.stat().st_size,
+                                    "files": {n: sha256(d) for n, d in sorted(zip_files.items())}}}
+    if linux_bundle_path is not None:
+        linux_bundle_path = Path(linux_bundle_path)
+        linux_name = manifest.LINUX_BUNDLE_NAME.format(version=version)
+        if linux_bundle_path.name != linux_name:
+            raise MetadataError(f"the Linux download must be named {linux_name}")
+        tar_files = read_tar(linux_bundle_path)
+        if COMPOSE_ENV in tar_files:
+            raise MetadataError(f"the Linux download must not contain {COMPOSE_ENV} (an install's own settings)")
+        _check_download(tar_files, linux_files, RELEASE_ENV, version, index_digest, "Linux download")
+        artifacts["linux-bundle"] = {"name": linux_name, "sha256": sha256(linux_bundle_path.read_bytes()),
+                                     "size": linux_bundle_path.stat().st_size,
+                                     "files": {n: sha256(d) for n, d in sorted(tar_files.items())}}
 
     data = {
         "schema": manifest.SCHEMA,
@@ -207,9 +281,7 @@ def generate(*, version: str, commit: str, run_id: str, index_digest: str, index
         "source": {"repository": REPOSITORY, "commit": commit, "run_id": str(run_id)},
         "image": {"name": IMAGE, "digest": index_digest, "platforms": platforms},
         "compatibility": {**read_compatibility(compatibility), "data_schema": describe.get("data_schema")},
-        "artifacts": {"windows-bundle": {"name": expected_name, "sha256": sha256(bundle_path.read_bytes()),
-                                         "size": bundle_path.stat().st_size,
-                                         "files": {n: sha256(d) for n, d in sorted(zip_files.items())}}},
+        "artifacts": artifacts,
         "notes_url": f"https://github.com/{REPOSITORY}/releases/tag/v{version}",
     }
     manifest.validate(data)  # the same check every updater makes
@@ -258,15 +330,16 @@ def verify_checksums(folder: Path) -> list:
     return names
 
 
-def write_release_files(out: Path, data: dict, bundle_path: Path) -> tuple:
-    """Write alertbot-release.json and SHA256SUMS (covering the download and the manifest) into out,
-    next to the download. Returns their paths."""
+def write_release_files(out: Path, data: dict, bundle_path: Path, linux_bundle_path: Path | None = None) -> tuple:
+    """Write alertbot-release.json and SHA256SUMS (covering the downloads and the manifest) into out,
+    next to the downloads. Returns their paths."""
     out = Path(out)
-    if Path(bundle_path).resolve().parent != out.resolve():
-        raise MetadataError("the download must be in the output folder")
+    downloads = [Path(bundle_path)] + ([Path(linux_bundle_path)] if linux_bundle_path else [])
+    if any(d.resolve().parent != out.resolve() for d in downloads):
+        raise MetadataError("the downloads must be in the output folder")
     manifest_path = out / MANIFEST_ASSET
     manifest_path.write_bytes(dump(data))
     sums_path = out / CHECKSUMS
-    sums_path.write_bytes(checksums(out, [Path(bundle_path).name, MANIFEST_ASSET]))
+    sums_path.write_bytes(checksums(out, [d.name for d in downloads] + [MANIFEST_ASSET]))
     verify_checksums(out)
     return manifest_path, sums_path

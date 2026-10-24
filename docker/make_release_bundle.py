@@ -1,8 +1,17 @@
-"""The Windows deployment files, and the download for non-technical users built from them.
+"""The deployment files (Windows and Linux), and the downloads for non-technical users built from them.
 
     python docker/make_release_bundle.py --image ghcr.io/OWNER/bluesky-discord-alert-bot:1.0.0 --out dist
     python docker/make_release_bundle.py --image <repo>:1.0.0@sha256:<digest> --from-bundle bundle/windows --out dist
+    python docker/make_release_bundle.py --platform linux --image <repo>:1.0.0@sha256:<digest> \
+        --from-bundle bundle/linux --out dist                             # BlueskyDiscordAlertBot-1.0.0-linux.tar.gz
     python docker/make_release_bundle.py --export /app/bundle/windows     # the image build (Dockerfile)
+    python docker/make_release_bundle.py --platform linux --export /app/bundle/linux
+
+Linux: ./alertbot (docker/linux/alertbot in the repository), docker-compose.yml, README.txt,
+README.zh-TW.txt, LICENSE and THIRD_PARTY_NOTICES.txt, at /app/bundle/linux. Its download is a
+.tar.gz with everything in a bluesky-alert-bot/ folder, plus docker/release.env (the image pinned by
+digest), never docker/compose.env: that file holds an install's own settings, which unpacking a
+download again must not replace. ./alertbot setup creates it from docker/release.env.
 
 The deployment files (bundle_files) are the replaceable, version-matched files: the six
 scripts, docker/scripts/common.bat, docker-compose.yml, README.txt, README.zh-TW.txt, LICENSE
@@ -20,9 +29,12 @@ copied out of the image, so the download and the image hold exactly the same fil
 Used by .github/workflows/release.yml; see docs/DOCKER.md, "Releases", and docs/RELEASES.md.
 """
 import argparse
+import gzip
 import hashlib
+import io
 import json
 import re
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -87,6 +99,63 @@ update.bat 和 backup.bat 做的備份會放在這裡的 backups 資料夾。
 """
 
 
+LINUX_FILES = {"alertbot": "docker/linux/alertbot", "docker-compose.yml": "docker-compose.yml",
+               "LICENSE": "LICENSE", "THIRD_PARTY_NOTICES.txt": "THIRD_PARTY_NOTICES.txt"}
+EXECUTABLE = {"alertbot"}
+LINUX_FOLDER = "bluesky-alert-bot"
+RELEASE_ENV = "docker/release.env"
+README_LINUX = """Bluesky to Discord Alert Bot for Linux servers (Ubuntu)
+(繁體中文說明：README.zh-TW.txt)
+
+Needs Docker Engine with its Compose plugin (2.23.0 or later). The full guide, with the
+installation command: docs/UBUNTU.md in the project
+(https://github.com/qazwsx08ghj/bluesky-discord-alert-bot/blob/main/docs/UBUNTU.md).
+
+In this folder:
+  ./alertbot setup     first-time setup (asks for the address and port; safe to run again)
+  ./alertbot status    is it running, which version, where to open the control panel
+  ./alertbot start | stop
+  ./alertbot config    change the address and port of the control panel later
+  ./alertbot update    install a newer version (backs up first; goes back by itself if it fails)
+  ./alertbot backup    save a backup copy into the backups folder here
+  ./alertbot restore   put a backup back (the current data is backed up first)
+
+The control panel has no login. It listens on this server only (127.0.0.1) unless you choose
+otherwise; reach it from your computer with an SSH tunnel (see the guide).
+
+Your accounts, settings and history are kept in Docker (the volume alertbot_bot-data) and are
+never deleted by these files. Backups also go into the backups folder here; they contain
+passwords, so keep them private.
+
+Free and open source under the MIT License (see LICENSE). The bot (the Docker image this
+downloads) also contains other open-source software: see THIRD_PARTY_NOTICES.txt.
+"""
+README_LINUX_ZH_TW = """Bluesky to Discord Alert Bot（Linux 伺服器版，Ubuntu）
+(English: README.txt)
+
+需要 Docker Engine 和它的 Compose 外掛（2.23.0 或更新版本）。完整說明和安裝指令請看專案的
+docs/UBUNTU.zh-TW.md
+（https://github.com/qazwsx08ghj/bluesky-discord-alert-bot/blob/main/docs/UBUNTU.zh-TW.md）。
+
+在這個資料夾裡：
+  ./alertbot setup     第一次設定（會詢問位址和連接埠；重複執行也安全）
+  ./alertbot status    是否在執行、哪個版本、控制面板的網址
+  ./alertbot start | stop
+  ./alertbot config    之後再修改控制面板的位址和連接埠
+  ./alertbot update    更新到新版本（會先備份；失敗會自動退回）
+  ./alertbot backup    備份到這裡的 backups 資料夾
+  ./alertbot restore   還原備份（會先備份目前的資料）
+
+控制面板沒有登入功能。除非你另外選擇，否則它只在這台伺服器上（127.0.0.1）提供服務；
+請用 SSH 通道從你的電腦連線（見說明文件）。
+
+你的帳號、設定和紀錄存在 Docker 裡（alertbot_bot-data 磁碟區），這些檔案絕對不會刪掉它們。
+備份也會放在這裡的 backups 資料夾；備份含有密碼，請妥善保管。
+
+這是採用 MIT 授權的免費開源軟體（見 LICENSE，以英文原文為準）。機器人（這個資料夾
+下載的 Docker 映像檔）也包含其他開源軟體，請見 THIRD_PARTY_NOTICES.txt。
+"""
+
 BUNDLE_SCHEMA = "alertbot-bundle/1"  # release_meta/bundle.py reads what export() writes
 INDEX = "bundle.json"
 COMPOSE_ENV = "docker/compose.env"
@@ -95,9 +164,15 @@ IMAGE_REF = re.compile(r"(?:[a-z0-9.-]+(?::\d+)?/)?[a-z0-9._/-]+(?::[A-Za-z0-9._
 ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 
 
-def bundle_files(root: Path = ROOT) -> dict:
+def bundle_files(root: Path = ROOT, platform: str = "windows") -> dict:
     """The deployment files: relative path (with /) -> exact bytes. Line endings come from
     .gitattributes (.bat files CRLF, the others LF), so they are the same on every computer."""
+    if platform == "linux":
+        files = {name: (root / source).read_bytes().replace(b"\r\n", b"\n") if name == "alertbot"
+                 else (root / source).read_bytes() for name, source in LINUX_FILES.items()}
+        files["README.txt"] = README_LINUX.encode("utf-8")
+        files["README.zh-TW.txt"] = README_LINUX_ZH_TW.encode("utf-8")
+        return dict(sorted(files.items()))
     files = {name: (root / name).read_bytes() for name in FILES}
     files["README.txt"] = README.replace("\n", "\r\n").encode("utf-8-sig")
     # With a BOM, so every version of Notepad shows the Chinese text correctly.
@@ -105,28 +180,29 @@ def bundle_files(root: Path = ROOT) -> dict:
     return dict(sorted(files.items()))
 
 
-def index(files: dict) -> dict:
-    return {"schema": BUNDLE_SCHEMA, "platform": "windows",
+def index(files: dict, platform: str = "windows") -> dict:
+    return {"schema": BUNDLE_SCHEMA, "platform": platform,
             "files": {name: hashlib.sha256(data).hexdigest() for name, data in sorted(files.items())}}
 
 
-def export(dest: Path, root: Path = ROOT) -> dict:
+def export(dest: Path, root: Path = ROOT, platform: str = "windows") -> dict:
     """Write the deployment files and bundle.json into dest (the image build). Returns the index."""
-    files = bundle_files(root)
+    files = bundle_files(root, platform)
     for name, data in files.items():
         target = dest / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
-    info = index(files)
+        target.chmod(0o755 if name in EXECUTABLE else 0o644)
+    info = index(files, platform)
     (dest / INDEX).write_text(json.dumps(info, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
-    # The same hashes as plain "<sha256> <name>" lines, beside the folder, for update.bat to check the
-    # files it copies out with certutil (no JSON reading in a batch file).
+    # The same hashes as plain "<sha256> <name>" lines, beside the folder, for update.bat (certutil)
+    # and ./alertbot update (sha256sum) to check the files they copy out, without reading JSON.
     sums = "".join(f"{digest} {name}\n" for name, digest in sorted(info["files"].items()))
     dest.with_name(dest.name + ".sha256").write_text(sums, encoding="ascii", newline="\n")
     return info
 
 
-def read_bundle(folder: Path) -> dict:
+def read_bundle(folder: Path, platform: str = "windows") -> dict:
     """The deployment files from a folder written by export() (for instance copied out of the
     image), checked against its bundle.json (release_meta.bundle.verify)."""
     import sys
@@ -135,7 +211,7 @@ def read_bundle(folder: Path) -> dict:
     from release_meta import MetadataError, bundle
 
     try:
-        return bundle.read(folder)
+        return bundle.read(folder, platform)
     except MetadataError as exc:
         raise SystemExit(f"The deployment files can't be used: {exc}") from None
 
@@ -165,15 +241,39 @@ def write_zip(target: Path, files: dict) -> Path:
     return target
 
 
-def make(image: str, out: Path, from_bundle: Path | None = None) -> Path:
+def write_tar(target: Path, files: dict) -> Path:
+    """A reproducible .tar.gz, everything in LINUX_FOLDER/: sorted entries, fixed times, owners and
+    permissions (./alertbot executable), and a gzip header without a time or name."""
+    raw = io.BytesIO()
+    with tarfile.open(fileobj=raw, mode="w", format=tarfile.USTAR_FORMAT) as tar:
+        folders = sorted({"/".join(n.split("/")[:i]) for n in files for i in range(1, n.count("/") + 1)})
+        for name in [""] + folders:
+            entry = tarfile.TarInfo(f"{LINUX_FOLDER}/{name}".rstrip("/"))
+            entry.type, entry.mode, entry.mtime = tarfile.DIRTYPE, 0o755, 0
+            tar.addfile(entry)
+        for name in sorted(files):
+            entry = tarfile.TarInfo(f"{LINUX_FOLDER}/{name}")
+            entry.size, entry.mtime = len(files[name]), 0
+            entry.mode = 0o755 if name in EXECUTABLE else 0o644
+            tar.addfile(entry, io.BytesIO(files[name]))
+    with open(target, "wb") as f, gzip.GzipFile(filename="", mode="wb", fileobj=f, mtime=0, compresslevel=9) as gz:
+        gz.write(raw.getvalue())
+    return target
+
+
+def make(image: str, out: Path, from_bundle: Path | None = None, platform: str = "windows") -> Path:
     # [registry[:port]/]name[:tag][@sha256:digest], e.g. ghcr.io/owner/bot:1.0.0 or localhost:5000/bot:stable
     if not IMAGE_REF.fullmatch(image):
         raise SystemExit(f"Not a valid image name: {image}")
-    files = read_bundle(from_bundle) if from_bundle else bundle_files()
-    if COMPOSE_ENV in files:
-        raise SystemExit(f"{COMPOSE_ENV} is never a deployment file")
-    files[COMPOSE_ENV] = compose_env(image)
+    files = read_bundle(from_bundle, platform) if from_bundle else bundle_files(platform=platform)
+    for never in (COMPOSE_ENV, RELEASE_ENV):
+        if never in files:
+            raise SystemExit(f"{never} is never a deployment file")
     out.mkdir(parents=True, exist_ok=True)
+    if platform == "linux":
+        files[RELEASE_ENV] = f"ALERTBOT_IMAGE={image}\n".encode("utf-8")
+        return write_tar(out / f"BlueskyDiscordAlertBot-{_version_of(image)}-linux.tar.gz", files)
+    files[COMPOSE_ENV] = compose_env(image)
     return write_zip(out / f"BlueskyDiscordAlertBot-{_version_of(image)}.zip", files)
 
 
@@ -183,11 +283,12 @@ if __name__ == "__main__":
     parser.add_argument("--out", default="dist", help="output folder")
     parser.add_argument("--from-bundle", type=Path, help="deployment files copied out of the image (with bundle.json)")
     parser.add_argument("--export", type=Path, help="write the deployment files and bundle.json here, and stop")
+    parser.add_argument("--platform", choices=("windows", "linux"), default="windows")
     args = parser.parse_args()
     if args.export:
-        info = export(args.export)
-        print(f"{len(info['files'])} deployment files written to {args.export}")
+        info = export(args.export, platform=args.platform)
+        print(f"{len(info['files'])} {args.platform} deployment files written to {args.export}")
     elif args.image:
-        print(make(args.image, Path(args.out), from_bundle=args.from_bundle))
+        print(make(args.image, Path(args.out), from_bundle=args.from_bundle, platform=args.platform))
     else:
         parser.error("--image or --export is needed")
