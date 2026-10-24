@@ -115,6 +115,20 @@ class LinuxManifestTests(GenerateTestCase):
             with self.assertRaises(MetadataError, msg=name):
                 generate.read_tar(self.tar)
 
+    def test_corrupt_or_oversized_archives_are_refused_cleanly(self):
+        good = self.tar.read_bytes()
+        self.tar.write_bytes(good[:20] + b"\x00" * 50 + good[70:])  # a broken deflate stream
+        with self.assertRaises(MetadataError):
+            generate.read_tar(self.tar)
+        self.tar.write_bytes(good[: len(good) // 2])  # cut short
+        with self.assertRaises(MetadataError):
+            generate.read_tar(self.tar)
+        self.tar.write_bytes(good)
+        from unittest import mock
+        with mock.patch.object(generate, "MAX_TAR_BYTES", 1024), self.assertRaises(MetadataError) as ctx:
+            generate.read_tar(self.tar)
+        self.assertIn("larger than allowed", str(ctx.exception))
+
     def test_the_manifest_checks_a_linux_download_completely(self):
         data = self.gen(linux_bundle_path=self.tar)
         data["artifacts"]["linux-bundle"]["name"] = "BlueskyDiscordAlertBot-9.9.9-linux.tar.gz"

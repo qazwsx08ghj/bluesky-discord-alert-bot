@@ -71,7 +71,7 @@ V=1.0.0-rc.4 && U=https://github.com/qazwsx08ghj/bluesky-discord-alert-bot/relea
 | 指令 | 用途 |
 |---|---|
 | `./alertbot status` | 是否在執行、是否正常、哪個版本、面板網址 |
-| `./alertbot start` | 啟動機器人。只要 Docker 會自動啟動（`sudo systemctl enable docker`），重新開機後它也會自動啟動。 |
+| `./alertbot start` | 啟動機器人。只要 Docker 會自動啟動（`sudo systemctl enable docker`），而且使用區域網路或 VPN 的 Bind IP 時，Docker 啟動時那個位址已經存在，重新開機後它也會自動啟動（否則請執行 `./alertbot start`）。 |
 | `./alertbot stop` | 停止，直到執行 `./alertbot start` |
 | `./alertbot update` | 安裝新版本：先檢查、備份，失敗會自動退回。已經是最新版時什麼都不會改。 |
 | `./alertbot backup` | 備份到 `backups` 資料夾（備份含有密碼，請妥善保管） |

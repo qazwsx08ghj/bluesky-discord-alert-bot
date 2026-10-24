@@ -252,6 +252,8 @@ configure() {
         [ "$confirm" = "PUBLIC" ] && break
       else
         say " Only use this on a network where you trust every device. Safer: an SSH tunnel (docs/UBUNTU.md)."
+        say " This address must exist when Docker starts: if it comes later (a VPN that connects after"
+        say " a reboot, a changed DHCP address), the panel stays down until  ./alertbot start."
         ask confirm " Type yes to allow access from other devices (anything else: choose again): " ""
         [ "$confirm" = "yes" ] && break
       fi
@@ -501,7 +503,9 @@ cmd_setup() {
   do_up || return 1
   wait_ready || return 1
   say ""
-  say " Setup is complete. The bot runs in Docker and starts again by itself after a reboot."
+  say " Setup is complete. The bot runs in Docker and starts again by itself after a reboot"
+  [ "$CFG_BIND" = "127.0.0.1" ] || [ "$CFG_BIND" = "0.0.0.0" ] \
+    || say " (if $CFG_BIND exists by then; otherwise run ./alertbot start)"
   say " Open the control panel, enter your Bluesky login and your Discord channels (docs/UBUNTU.md)."
   say " Later: ./alertbot status | start | stop | update | backup | restore | config"
 }

@@ -71,7 +71,7 @@ Run them in the `bluesky-alert-bot` folder:
 | Command | What it does |
 |---|---|
 | `./alertbot status` | Is it running and healthy, which version, the panel's address |
-| `./alertbot start` | Starts the bot. It also starts by itself after a reboot, as long as Docker does (`sudo systemctl enable docker`). |
+| `./alertbot start` | Starts the bot. It also starts by itself after a reboot, as long as Docker does (`sudo systemctl enable docker`) and, with a LAN or VPN bind IP, that address exists when Docker starts (otherwise run `./alertbot start`). |
 | `./alertbot stop` | Stops it until `./alertbot start` |
 | `./alertbot update` | Installs a newer version: checks it first, backs up, and goes back by itself if it fails. If you're up to date, it changes nothing. |
 | `./alertbot backup` | Saves a backup in the `backups` folder (it contains passwords: keep it private) |

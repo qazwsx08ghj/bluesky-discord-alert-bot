@@ -30,6 +30,7 @@ import json
 import re
 import tarfile
 import zipfile
+import zlib
 from pathlib import Path
 
 from . import IMAGE, MANIFEST_ASSET, REPOSITORY, MetadataError, manifest, semver  # noqa: F401
@@ -113,31 +114,37 @@ def _safe_name(name: str) -> bool:
 def read_tar(path: Path) -> dict:
     """{name: bytes} of the Linux download, without its bluesky-alert-bot/ folder: only folders and
     ordinary files with safe paths (no links, devices or anything outside that folder)."""
+    unreadable = MetadataError(f"{Path(path).name} isn't a readable .tar.gz")
     try:
-        raw = gzip.decompress(Path(path).read_bytes())
+        with gzip.open(path, "rb") as gz:
+            raw = gz.read(MAX_TAR_BYTES + 1)  # never more than the limit in memory
         if len(raw) > MAX_TAR_BYTES:
             raise MetadataError(f"{Path(path).name} is larger than allowed")
-        tar = tarfile.open(fileobj=io.BytesIO(raw), mode="r:")
-    except (OSError, EOFError, tarfile.TarError):
-        raise MetadataError(f"{Path(path).name} isn't a readable .tar.gz") from None
+        with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as tar:
+            return _tar_files(tar)
+    except (OSError, EOFError, zlib.error, tarfile.TarError):
+        raise unreadable from None
+
+
+def _tar_files(tar) -> dict:
+    """The checked files of an open Linux download (see read_tar)."""
     files = {}
-    with tar:
-        entries = tar.getmembers()
-        if len(entries) > MAX_ZIP_ENTRIES:
-            raise MetadataError("the Linux download has too many files")
-        for e in entries:
-            if not _safe_name(e.name) or (e.name != LINUX_FOLDER and not e.name.startswith(LINUX_FOLDER + "/")):
-                raise MetadataError(f"the Linux download has an unsafe path {e.name[:80]!r}")
-            if e.isdir():
-                continue
-            if not e.isfile():
-                raise MetadataError(f"the Linux download has a link or special file: {e.name[:80]!r}")
-            name = e.name[len(LINUX_FOLDER) + 1:]
-            if name in files:
-                raise MetadataError(f"the Linux download has {name} twice")
-            if e.size > MAX_ENTRY_BYTES:
-                raise MetadataError(f"{name} in the Linux download is larger than allowed")
-            files[name] = tar.extractfile(e).read()
+    entries = tar.getmembers()
+    if len(entries) > MAX_ZIP_ENTRIES:
+        raise MetadataError("the Linux download has too many files")
+    for e in entries:
+        if not _safe_name(e.name) or (e.name != LINUX_FOLDER and not e.name.startswith(LINUX_FOLDER + "/")):
+            raise MetadataError(f"the Linux download has an unsafe path {e.name[:80]!r}")
+        if e.isdir():
+            continue
+        if not e.isfile():
+            raise MetadataError(f"the Linux download has a link or special file: {e.name[:80]!r}")
+        name = e.name[len(LINUX_FOLDER) + 1:]
+        if name in files:
+            raise MetadataError(f"the Linux download has {name} twice")
+        if e.size > MAX_ENTRY_BYTES:
+            raise MetadataError(f"{name} in the Linux download is larger than allowed")
+        files[name] = tar.extractfile(e).read()
     return files
 
 
