@@ -12,6 +12,27 @@
 
 ---
 
+## 選擇你的系統
+
+| | **Windows 10 / 11** | **Ubuntu Server**（24.04 或 22.04，x86-64 或 ARM64） |
+|---|---|---|
+| 需要 | Docker Desktop | Docker Engine 和 Compose 外掛 2.23 以上（[安裝說明](https://docs.docker.com/engine/install/ubuntu/)） |
+| 安裝 | 下載後點兩下 `setup.bat`：請照下面的[第 1 步](#第-1-步安裝-docker-desktop)開始 | 一個指令（見下方），從 **1.0.0-rc.4** 版開始 |
+| 管理 | 點兩下 `start.bat`、`update.bat`… | `./alertbot status`、`start`、`stop`、`update`、`backup`、`restore`、`config` |
+
+**Ubuntu Server**（從 **1.0.0-rc.4** 版開始提供；更早的版本只有 Windows 版）。在你的家目錄執行；它會先用發行版本的檢查碼檢查下載的檔案，通過後才解壓縮，然後詢問位址和連接埠（直接按 Enter 使用安全的預設值 `127.0.0.1` 和 `8000`）：
+
+```sh
+V=1.0.0-rc.4 && U=https://github.com/qazwsx08ghj/bluesky-discord-alert-bot/releases/download/v$V \
+  && curl -fLO "$U/BlueskyDiscordAlertBot-$V-linux.tar.gz" -fLO "$U/SHA256SUMS" \
+  && grep " BlueskyDiscordAlertBot-$V-linux.tar.gz\$" SHA256SUMS | sha256sum --check \
+  && tar -xzf "BlueskyDiscordAlertBot-$V-linux.tar.gz" && cd bluesky-alert-bot && ./alertbot setup
+```
+
+完整說明，包括遠端連線和安全（控制面板沒有登入功能，除非你另外選擇，否則只在伺服器上提供服務）：[docs/UBUNTU.zh-TW.md](docs/UBUNTU.zh-TW.md)。
+
+---
+
 ## 它可以做什麼
 
 機器人每隔幾分鐘會去看一次你挑選的 Bluesky 帳號。只要其中有人發了新貼文，你的 Discord 頻道就會出現像這樣的訊息：
@@ -43,8 +64,6 @@
 - 一個你能管理頻道的 **Discord 伺服器**。
 
 不需要 Python、Git 或其他任何工具，也完全不用打指令。
-
-**要裝在 Ubuntu 伺服器上？** 請看 [docs/UBUNTU.zh-TW.md](docs/UBUNTU.zh-TW.md)：一個指令就能安裝（從 1.0.0-rc.4 版開始）。
 
 ---
 

@@ -10,6 +10,27 @@ Get a Discord notification whenever **any public Bluesky account you choose** po
 
 ---
 
+## Choose your system
+
+| | **Windows 10 / 11** | **Ubuntu Server** (24.04 or 22.04, x86-64 or ARM64) |
+|---|---|---|
+| You need | Docker Desktop | Docker Engine with the Compose plugin 2.23+ ([install guide](https://docs.docker.com/engine/install/ubuntu/)) |
+| Install | Download, then double-click `setup.bat`: follow [Step 1](#step-1-install-docker-desktop) below | One command (below), from version **1.0.0-rc.4** |
+| Manage | Double-click `start.bat`, `update.bat`, … | `./alertbot status`, `start`, `stop`, `update`, `backup`, `restore`, `config` |
+
+**Ubuntu Server** (available from **1.0.0-rc.4**; earlier versions are Windows only). Run in your home folder; it checks the download against the release's checksums before unpacking anything, then asks for the address and port (press Enter for the safe defaults, `127.0.0.1` and `8000`):
+
+```sh
+V=1.0.0-rc.4 && U=https://github.com/qazwsx08ghj/bluesky-discord-alert-bot/releases/download/v$V \
+  && curl -fLO "$U/BlueskyDiscordAlertBot-$V-linux.tar.gz" -fLO "$U/SHA256SUMS" \
+  && grep " BlueskyDiscordAlertBot-$V-linux.tar.gz\$" SHA256SUMS | sha256sum --check \
+  && tar -xzf "BlueskyDiscordAlertBot-$V-linux.tar.gz" && cd bluesky-alert-bot && ./alertbot setup
+```
+
+The full guide, including remote access and security (the control panel has no login, so it stays on the server unless you choose otherwise): [docs/UBUNTU.md](docs/UBUNTU.md).
+
+---
+
 ## What it does
 
 Every few minutes the bot looks at the Bluesky accounts you picked. When one of them posts something new, a message like this appears in your Discord channel:
@@ -41,8 +62,6 @@ Clicking the title opens the post on Bluesky.
 - A **Discord server** where you can manage channels.
 
 You don't need Python, Git or any other tools, and you never type commands.
-
-**On an Ubuntu server instead?** See [docs/UBUNTU.md](docs/UBUNTU.md): one command installs it (from version 1.0.0-rc.4).
 
 ---
 
